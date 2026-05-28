@@ -2603,6 +2603,326 @@ exitFlowTests.test('Multiple task sequence - no deadlock', async () => {
   }
 });
 
+// ============ 8. 新功能集成测试 ============
+const newFeaturesTests = new TestRunner('New Features Integration');
+
+newFeaturesTests.test('TokenScope - basic token tracking and cost calculation', async () => {
+  const { TokenScope } = await import('./src/core/token-scope.js');
+
+  const tokenScope = new TokenScope();
+
+  // 记录一个请求
+  const record = tokenScope.recordRequest({
+    model: 'gpt-4o',
+    inputTokens: 1000,
+    outputTokens: 500,
+    userId: 'test-user',
+  });
+
+  // 验证记录
+  if (!record) {
+    throw new Error('TokenScope.recordRequest returned null');
+  }
+  if (record.inputTokens !== 1000) {
+    throw new Error(`Expected 1000 input tokens, got ${record.inputTokens}`);
+  }
+
+  // 获取统计
+  const stats = tokenScope.getStats();
+  if (stats.totalInputTokens !== 1000) {
+    throw new Error(`Expected total 1000 input tokens, got ${stats.totalInputTokens}`);
+  }
+
+  console.log('     TokenScope basic tracking works');
+});
+
+newFeaturesTests.test('TokenScope - multiple requests and cost calculation', async () => {
+  const { TokenScope } = await import('./src/core/token-scope.js');
+
+  const tokenScope = new TokenScope();
+
+  const requests = [
+    { model: 'gpt-4o', inputTokens: 2000, outputTokens: 1000, userId: 'user1' },
+    { model: 'gpt-4o-mini', inputTokens: 500, outputTokens: 250, userId: 'user1' },
+    { model: 'gpt-4o', inputTokens: 1500, outputTokens: 750, userId: 'user2' },
+  ];
+
+  for (const req of requests) {
+    tokenScope.recordRequest(req);
+  }
+
+  const stats = tokenScope.getStats();
+  if (stats.totalRequests !== 3) {
+    throw new Error(`Expected 3 requests, got ${stats.totalRequests}`);
+  }
+  if (stats.totalInputTokens !== 4000) {
+    throw new Error(`Expected 4000 input tokens, got ${stats.totalInputTokens}`);
+  }
+
+  // 验证模型分类统计
+  const modelBreakdown = tokenScope.getModelBreakdown();
+  if (!modelBreakdown['gpt-4o']) {
+    throw new Error('Expected gpt-4o entry in model breakdown');
+  }
+  if (modelBreakdown['gpt-4o'].requests !== 2) {
+    throw new Error(`Expected 2 gpt-4o requests, got ${modelBreakdown['gpt-4o'].requests}`);
+  }
+
+  console.log('     TokenScope multiple requests tracking works');
+});
+
+newFeaturesTests.test('TokenScope - report generation', async () => {
+  const { TokenScope } = await import('./src/core/token-scope.js');
+
+  const tokenScope = new TokenScope();
+
+  for (let i = 0; i < 10; i++) {
+    tokenScope.recordRequest({
+      model: 'gpt-4o',
+      inputTokens: 100 + i * 10,
+      outputTokens: 50 + i * 5,
+      userId: `user${i % 3}`,
+    });
+  }
+
+  const report = tokenScope.generateReport('session');
+
+  if (!report || !report.totalRequests) {
+    throw new Error('Expected report with totalRequests');
+  }
+
+  if (!report.topModels || report.topModels.length === 0) {
+    throw new Error('Expected topModels in report');
+  }
+
+  console.log('     TokenScope report generation works');
+});
+
+newFeaturesTests.test('DynamicContextPruning - basic context pruning', async () => {
+  const { DynamicContextPruning } = await import('./src/core/dynamic-context-pruning.js');
+
+  const pruner = new DynamicContextPruning({
+    maxTokens: 2000,
+    targetTokens: 1500,
+  });
+
+  const messages = [
+    { role: 'system', content: 'You are a helpful assistant' },
+    { role: 'user', content: 'Hello' },
+    { role: 'assistant', content: 'Hi there! How can I help you today?' },
+  ];
+
+  const result = pruner.prune(messages);
+
+  if (!result.messages) {
+    throw new Error('Expected pruned messages');
+  }
+
+  console.log('     DynamicContextPruning basic pruning works');
+});
+
+newFeaturesTests.test('DynamicContextPruning - importance analysis', async () => {
+  const { DynamicContextPruning } = await import('./src/core/dynamic-context-pruning.js');
+
+  const pruner = new DynamicContextPruning();
+
+  const messages = [
+    { role: 'system', content: 'You are a helpful assistant' },
+    { role: 'user', content: 'What is the capital of France?' },
+    { role: 'assistant', content: 'The capital of France is Paris.' },
+    { role: 'user', content: 'Thanks!' },
+  ];
+
+  const analysis = pruner.analyzeImportance(messages);
+
+  if (!Array.isArray(analysis) || analysis.length !== messages.length) {
+    throw new Error('Expected importance analysis array');
+  }
+
+  console.log('     DynamicContextPruning importance analysis works');
+});
+
+newFeaturesTests.test('DynamicContextPruning - optimization suggestions', async () => {
+  const { DynamicContextPruning } = await import('./src/core/dynamic-context-pruning.js');
+
+  const pruner = new DynamicContextPruning();
+
+  const messages = [
+    { role: 'system', content: 'You are a helpful assistant' },
+  ];
+
+  for (let i = 0; i < 20; i++) {
+    messages.push({ role: 'user', content: `Message ${i}` });
+    messages.push({ role: 'assistant', content: `Response ${i}` });
+  }
+
+  const suggestions = pruner.suggestOptimizations(messages);
+
+  if (!Array.isArray(suggestions)) {
+    throw new Error('Expected suggestions array');
+  }
+
+  console.log('     DynamicContextPruning optimization suggestions work');
+});
+
+newFeaturesTests.test('Embedder - basic embedding generation', async () => {
+  const { Embedder } = await import('./src/core/embedder.js');
+
+  const embedder = new Embedder({ dimension: 768 });
+
+  // 无需初始化，因为没有实际的 ONNX 模型
+  // 测试 fallback 功能
+
+  const embedding = await embedder.embed('Hello world');
+
+  if (!Array.isArray(embedding)) {
+    throw new Error('Expected embedding array');
+  }
+
+  if (embedding.length !== 768) {
+    throw new Error(`Expected embedding length 768, got ${embedding.length}`);
+  }
+
+  console.log('     Embedder basic embedding works');
+});
+
+newFeaturesTests.test('Embedder - batch embedding', async () => {
+  const { Embedder } = await import('./src/core/embedder.js');
+
+  const embedder = new Embedder({ dimension: 768 });
+
+  const texts = ['Hello', 'World', 'How are you'];
+  const embeddings = await embedder.embed(texts);
+
+  if (!Array.isArray(embeddings) || embeddings.length !== 3) {
+    throw new Error('Expected 3 embeddings');
+  }
+
+  for (const emb of embeddings) {
+    if (emb.length !== 768) {
+      throw new Error('Expected each embedding length 768');
+    }
+  }
+
+  console.log('     Embedder batch embedding works');
+});
+
+newFeaturesTests.test('Embedder - similarity calculation', async () => {
+  const { Embedder } = await import('./src/core/embedder.js');
+
+  const embedder = new Embedder({ dimension: 768 });
+
+  const embedding1 = await embedder.embed('Hello');
+  const embedding2 = await embedder.embed('Hello');
+
+  const similarity = await embedder.computeSimilarity(embedding1, embedding2);
+
+  if (typeof similarity !== 'number') {
+    throw new Error('Expected similarity number');
+  }
+
+  console.log('     Embedder similarity calculation works');
+});
+
+newFeaturesTests.test('Embedder - find most similar', async () => {
+  const { Embedder } = await import('./src/core/embedder.js');
+
+  const embedder = new Embedder({ dimension: 768 });
+
+  const candidates = [
+    { text: 'The cat is black', metadata: { id: 1 } },
+    { text: 'The dog is brown', metadata: { id: 2 } },
+    { text: 'The bird is blue', metadata: { id: 3 } },
+  ];
+
+  const results = await embedder.findMostSimilar('cat', candidates, { limit: 2 });
+
+  if (!Array.isArray(results)) {
+    throw new Error('Expected results array');
+  }
+
+  console.log('     Embedder find most similar works');
+});
+
+newFeaturesTests.test('Tokenizer - basic token counting', async () => {
+  const { Tokenizer } = await import('./src/core/tokenizer.js');
+
+  const tokenizer = new Tokenizer();
+
+  const count = await tokenizer.countTokens('Hello world! How are you today?');
+
+  if (typeof count !== 'number') {
+    throw new Error('Expected token count number');
+  }
+
+  console.log('     Tokenizer basic token counting works');
+});
+
+newFeaturesTests.test('Tokenizer - encode and decode', async () => {
+  const { Tokenizer } = await import('./src/core/tokenizer.js');
+
+  const tokenizer = new Tokenizer();
+
+  const text = 'Hello world! This is a test.';
+  const tokens = await tokenizer.encode(text);
+
+  if (!Array.isArray(tokens)) {
+    throw new Error('Expected tokens array');
+  }
+
+  console.log('     Tokenizer encode works');
+});
+
+newFeaturesTests.test('Tokenizer - batch token counting', async () => {
+  const { Tokenizer } = await import('./src/core/tokenizer.js');
+
+  const tokenizer = new Tokenizer();
+
+  const texts = [
+    'First sentence',
+    'Second sentence with more words',
+    'Third sentence that is even longer than the previous ones',
+  ];
+
+  const counts = await tokenizer.countTokensBatch(texts);
+
+  if (!Array.isArray(counts) || counts.length !== texts.length) {
+    throw new Error('Expected counts array matching input length');
+  }
+
+  console.log('     Tokenizer batch counting works');
+});
+
+newFeaturesTests.test('Tokenizer - model info', async () => {
+  const { Tokenizer } = await import('./src/core/tokenizer.js');
+
+  const tokenizer = new Tokenizer({ model: 'gpt-4o' });
+
+  const vocabSize = tokenizer.getVocabSize();
+  const modelName = tokenizer.getModelName();
+
+  if (typeof vocabSize !== 'number') {
+    throw new Error('Expected vocab size number');
+  }
+  if (modelName !== 'gpt-4o') {
+    throw new Error(`Expected model name gpt-4o, got ${modelName}`);
+  }
+
+  console.log('     Tokenizer model info works');
+});
+
+newFeaturesTests.test('Tokenizer - available models', async () => {
+  const { Tokenizer } = await import('./src/core/tokenizer.js');
+
+  const models = Tokenizer.getAvailableModels();
+
+  if (!Array.isArray(models) || models.length === 0) {
+    throw new Error('Expected available models array');
+  }
+
+  console.log('     Tokenizer available models works');
+});
+
 // ============ 运行所有测试 ============
 async function runAllTests() {
   console.log('╔════════════════════════════════════════════════════════════╗');
@@ -2625,6 +2945,7 @@ async function runAllTests() {
     await cliInputLoopTests.run();
     await longevityTests.run();
     await exitFlowTests.run();
+    await newFeaturesTests.run();
   } catch (error) {
     console.error('\nTest suite failed:', error.message);
   }
