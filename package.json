@@ -9,8 +9,11 @@
   },
   "scripts": {
     "start": "node src/index.js",
+    "start:debug": "node --inspect-brk src/index.js",
     "dev": "node --watch src/index.js",
+    "dev:debug": "node --watch --inspect-brk src/index.js",
     "test": "node test-integration.mjs",
+    "test:debug": "node --inspect-brk test-integration.mjs",
     "test:integration": "node test-integration.mjs",
     "test:watch": "node --watch test-integration.mjs",
     "lint": "eslint src/ --ext .js",
