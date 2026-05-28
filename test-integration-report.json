@@ -1,0 +1,325 @@
+{
+  "suite": "Integration Tests",
+  "startTime": "2026-05-28T13:20:30.772Z",
+  "passed": 45,
+  "failed": 0,
+  "skipped": 0,
+  "tests": [
+    {
+      "suite": "End-to-End Agent Execution",
+      "description": "Agent processes simple query without tools",
+      "status": "passed",
+      "duration": 7.751625000000004,
+      "error": null
+    },
+    {
+      "suite": "End-to-End Agent Execution",
+      "description": "Agent executes single tool call",
+      "status": "passed",
+      "duration": 0.9812500000000028,
+      "error": null
+    },
+    {
+      "suite": "End-to-End Agent Execution",
+      "description": "Agent handles tool execution error gracefully",
+      "status": "passed",
+      "duration": 1.078667000000003,
+      "error": null
+    },
+    {
+      "suite": "End-to-End Agent Execution",
+      "description": "Agent respects max iterations limit",
+      "status": "passed",
+      "duration": 0.9535410000000013,
+      "error": null
+    },
+    {
+      "suite": "Concurrency & Stress Tests",
+      "description": "Multiple tools execute concurrently",
+      "status": "passed",
+      "duration": 101.363291,
+      "error": null
+    },
+    {
+      "suite": "Concurrency & Stress Tests",
+      "description": "ProcessManager handles concurrent process execution",
+      "status": "passed",
+      "duration": 10.041334000000006,
+      "error": null
+    },
+    {
+      "suite": "Concurrency & Stress Tests",
+      "description": "Port allocation prevents conflicts",
+      "status": "passed",
+      "duration": 2.602291999999977,
+      "error": null
+    },
+    {
+      "suite": "Concurrency & Stress Tests",
+      "description": "Lock mechanism prevents race conditions",
+      "status": "passed",
+      "duration": 11.801249999999982,
+      "error": null
+    },
+    {
+      "suite": "Error Recovery & Resilience",
+      "description": "ProcessManager retries failed commands",
+      "status": "passed",
+      "duration": 0.16929200000001288,
+      "error": null
+    },
+    {
+      "suite": "Error Recovery & Resilience",
+      "description": "Agent recovers from LLM provider errors",
+      "status": "passed",
+      "duration": 1782.561291,
+      "error": null
+    },
+    {
+      "suite": "Error Recovery & Resilience",
+      "description": "Tool execution timeout configuration works",
+      "status": "passed",
+      "duration": 11.128125000000182,
+      "error": null
+    },
+    {
+      "suite": "Cross-Platform Compatibility",
+      "description": "ProcessManager detects platform correctly",
+      "status": "passed",
+      "duration": 0.3558330000000751,
+      "error": null
+    },
+    {
+      "suite": "Cross-Platform Compatibility",
+      "description": "Command adaptation works for current platform",
+      "status": "passed",
+      "duration": 8.372292000000016,
+      "error": null
+    },
+    {
+      "suite": "Cross-Platform Compatibility",
+      "description": "File operations work cross-platform",
+      "status": "passed",
+      "duration": 8.756750000000011,
+      "error": null
+    },
+    {
+      "suite": "Cross-Platform Compatibility",
+      "description": "Path handling is platform-aware",
+      "status": "passed",
+      "duration": 0.30237499999998363,
+      "error": null
+    },
+    {
+      "suite": "Timeout & Interaction Tests",
+      "description": "withTimeout function works correctly",
+      "status": "passed",
+      "duration": 101.74866700000007,
+      "error": null
+    },
+    {
+      "suite": "Timeout & Interaction Tests",
+      "description": "LLM call timeout is handled properly",
+      "status": "passed",
+      "duration": 0.7484169999997903,
+      "error": null
+    },
+    {
+      "suite": "Timeout & Interaction Tests",
+      "description": "Tool execution timeout is handled properly",
+      "status": "passed",
+      "duration": 5004.148292,
+      "error": null
+    },
+    {
+      "suite": "Timeout & Interaction Tests",
+      "description": "RetryStrategy works correctly",
+      "status": "passed",
+      "duration": 1301.1856670000006,
+      "error": null
+    },
+    {
+      "suite": "Timeout & Interaction Tests",
+      "description": "Complete interaction flow with tool calls",
+      "status": "passed",
+      "duration": 4.220874999999069,
+      "error": null
+    },
+    {
+      "suite": "Timeout & Interaction Tests",
+      "description": "Agent handles mixed tool calls and text responses",
+      "status": "passed",
+      "duration": 2.6457080000000133,
+      "error": null
+    },
+    {
+      "suite": "Timeout & Interaction Tests",
+      "description": "Simulate user submitting multiple tasks with response monitoring",
+      "status": "passed",
+      "duration": 161.76683400000002,
+      "error": null
+    },
+    {
+      "suite": "Timeout & Interaction Tests",
+      "description": "Concurrent interaction stress test",
+      "status": "passed",
+      "duration": 4.266333000001396,
+      "error": null
+    },
+    {
+      "suite": "Multiple Conversation Execution",
+      "description": "Agent handles multiple consecutive run() calls without getting stuck",
+      "status": "passed",
+      "duration": 1.0577080000002752,
+      "error": null
+    },
+    {
+      "suite": "Multiple Conversation Execution",
+      "description": "System prompt is not duplicated across multiple run() calls",
+      "status": "passed",
+      "duration": 0.9672499999996944,
+      "error": null
+    },
+    {
+      "suite": "Multiple Conversation Execution",
+      "description": "Agent preserves conversation context across multiple run() calls",
+      "status": "passed",
+      "duration": 0.6412920000002487,
+      "error": null
+    },
+    {
+      "suite": "Multiple Conversation Execution",
+      "description": "setModelProvider works correctly",
+      "status": "passed",
+      "duration": 0.739000000001397,
+      "error": null
+    },
+    {
+      "suite": "Multiple Conversation Execution",
+      "description": "Context window management works during long conversations",
+      "status": "passed",
+      "duration": 1.7499580000003334,
+      "error": null
+    },
+    {
+      "suite": "Conversation Protocol Regression",
+      "description": "Text CALL tool results do not leak as native tool messages on next run",
+      "status": "passed",
+      "duration": 1.2480419999992591,
+      "error": null
+    },
+    {
+      "suite": "Conversation Protocol Regression",
+      "description": "Native tool calls preserve assistant tool_calls and matching tool result ids",
+      "status": "passed",
+      "duration": 0.5864579999997659,
+      "error": null
+    },
+    {
+      "suite": "Conversation Protocol Regression",
+      "description": "Native tool call response with CALL-looking text executes only once",
+      "status": "passed",
+      "duration": 1.6179159999992407,
+      "error": null
+    },
+    {
+      "suite": "Conversation Protocol Regression",
+      "description": "Text CALL tool errors are observable and do not poison later requests",
+      "status": "passed",
+      "duration": 1.22479199999907,
+      "error": null
+    },
+    {
+      "suite": "Conversation Protocol Regression",
+      "description": "Context trimming preserves the active user request during continuation prompts",
+      "status": "passed",
+      "duration": 12.194166999999652,
+      "error": null
+    },
+    {
+      "suite": "Conversation Protocol Regression",
+      "description": "OpenAI-compatible provider recognizes qwen long-context models",
+      "status": "passed",
+      "duration": 54.45024999999987,
+      "error": null
+    },
+    {
+      "suite": "Conversation Protocol Regression",
+      "description": "Provider stop response without FINAL_ANSWER is surfaced without hidden continuation",
+      "status": "passed",
+      "duration": 0.3259589999997843,
+      "error": null
+    },
+    {
+      "suite": "Debug Logging Regression",
+      "description": "Debug mode records agent lifecycle, LLM request, tool purpose, and shell command details",
+      "status": "passed",
+      "duration": 6.739208999999391,
+      "error": null
+    },
+    {
+      "suite": "Debug Logging Regression",
+      "description": "Debug mode can be toggled off and back on without leaking debug events",
+      "status": "passed",
+      "duration": 0.2842079999991256,
+      "error": null
+    },
+    {
+      "suite": "Debug Logging Regression",
+      "description": "Debug logging captures blocked shell commands without executing them",
+      "status": "passed",
+      "duration": 0.404499999998734,
+      "error": null
+    },
+    {
+      "suite": "CLI Input Loop Regression",
+      "description": "CLI processes two consecutive stdin lines and preserves conversation context",
+      "status": "passed",
+      "duration": 409.1563750000005,
+      "error": null
+    },
+    {
+      "suite": "Long-Running Stability",
+      "description": "Memory usage remains stable during repeated operations",
+      "status": "passed",
+      "duration": 1.3250840000000608,
+      "error": null
+    },
+    {
+      "suite": "Long-Running Stability",
+      "description": "ProcessManager handles many sequential operations",
+      "status": "passed",
+      "duration": 96.765625,
+      "error": null
+    },
+    {
+      "suite": "Long-Running Stability",
+      "description": "Automation engine runs background tasks reliably",
+      "status": "passed",
+      "duration": 1002.4411249999994,
+      "error": null
+    },
+    {
+      "suite": "Exit Flow & Cleanup",
+      "description": "Agent can be properly reset after multiple tasks",
+      "status": "passed",
+      "duration": 1.5705829999988055,
+      "error": null
+    },
+    {
+      "suite": "Exit Flow & Cleanup",
+      "description": "Cleanup sequence works properly",
+      "status": "passed",
+      "duration": 0.5287920000009763,
+      "error": null
+    },
+    {
+      "suite": "Exit Flow & Cleanup",
+      "description": "Multiple task sequence - no deadlock",
+      "status": "passed",
+      "duration": 3.8208749999994325,
+      "error": null
+    }
+  ],
+  "duration": 10129.503541
+}
