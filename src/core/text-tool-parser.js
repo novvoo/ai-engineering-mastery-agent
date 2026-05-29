@@ -48,11 +48,11 @@ export class TextToolParser {
   #parseCALLFormat(text) {
     const toolCalls = [];
     // 支持多行和嵌套括号
-    const callRegex = /CALL\s+(\w+)\s*\((\{[\s\S]*?\})\)/g;
+    const callRegex = /CALL\s+\/?([A-Za-z_][\w-]*)\s*\((\{[\s\S]*?\})\)/g;
     let match;
 
     while ((match = callRegex.exec(text)) !== null) {
-      const name = match[1];
+      const name = this.#resolveToolName(match[1]);
       const argsStr = match[2];
       
       try {
@@ -127,11 +127,11 @@ export class TextToolParser {
    */
   #parseXMLFormat(text) {
     const toolCalls = [];
-    const toolRegex = /<tool>(\w+)<\/tool>/g;
+    const toolRegex = /<tool>\/?([A-Za-z_][\w-]*)<\/tool>/g;
     let match;
 
     while ((match = toolRegex.exec(text)) !== null) {
-      const name = match[1];
+      const name = this.#resolveToolName(match[1]);
       const args = {};
       
       // 提取参数
@@ -333,9 +333,13 @@ export class TextToolParser {
 
     const directName = json.name || json.tool;
     if (directName) {
+      const name = this.#resolveToolName(directName);
+      if (!this.#toolRegistry?.has?.(name)) {
+        return [];
+      }
       return [{
         id: `call_${Date.now()}_${startIndex}`,
-        name: directName,
+        name,
         arguments: json.arguments || json.args || json.params || {},
         source,
       }];
@@ -349,7 +353,8 @@ export class TextToolParser {
       return [];
     }
 
-    const [name, args] = entries[0];
+    const [rawName, args] = entries[0];
+    const name = this.#resolveToolName(rawName);
     if (!this.#toolRegistry?.has?.(name)) {
       return [];
     }
@@ -360,6 +365,20 @@ export class TextToolParser {
       arguments: args && typeof args === 'object' && !Array.isArray(args) ? args : {},
       source,
     }];
+  }
+
+  #resolveToolName(name) {
+    const rawName = String(name || '').replace(/^\//, '');
+    if (this.#toolRegistry?.has?.(rawName)) {
+      return rawName;
+    }
+
+    const underscored = rawName.replace(/-/g, '_');
+    if (this.#toolRegistry?.has?.(underscored)) {
+      return underscored;
+    }
+
+    return rawName;
   }
 
   /**

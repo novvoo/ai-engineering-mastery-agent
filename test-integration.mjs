@@ -1876,6 +1876,110 @@ conversationProtocolTests.test('Text parser accepts action tag and raw JSON acti
   }
 });
 
+conversationProtocolTests.test('Text parser maps upstream slash and hyphen skill names to runtime tool names', async () => {
+  const { TextToolParser } = await import('./src/core/text-tool-parser.js');
+  const { ToolRegistry } = await import('./src/core/tool-registry.js');
+
+  const registry = new ToolRegistry();
+  for (const name of ['zoom_out', 'to_prd', 'to_issues', 'setup']) {
+    registry.register({
+      name,
+      description: `${name} tool`,
+      parameters: {},
+      async handler() {},
+    });
+  }
+
+  const parser = new TextToolParser(registry);
+  const calls = [
+    ...parser.parse('Action: CALL /zoom-out({"proposed_change":"map context"})'),
+    ...parser.parse('<action>{"to-prd":{"title":"Plan","context":"details"}}</action>'),
+    ...parser.parse(JSON.stringify({ action: { 'to-issues': { plan: 'Ship it' } } })),
+    ...parser.parse('```tool\n{"name":"/setup","arguments":{"project_name":"Demo"}}\n```'),
+  ];
+  const names = calls.map(call => call.name);
+
+  for (const expectedName of ['zoom_out', 'to_prd', 'to_issues', 'setup']) {
+    if (!names.includes(expectedName)) {
+      throw new Error(`Expected ${expectedName} from upstream alias parsing, got ${JSON.stringify(calls)}`);
+    }
+  }
+});
+
+conversationProtocolTests.test('Agent executes upstream hyphenated slash skill names in the ReAct loop', async () => {
+  const { ReActAgent } = await import('./src/core/agent.js');
+  const { ToolRegistry } = await import('./src/core/tool-registry.js');
+  const { MemoryManager } = await import('./src/memory/memory-manager.js');
+
+  let chatCount = 0;
+  const executed = [];
+  const finalAnswers = [];
+  const recordingUI = {
+    iteration() {},
+    toolCall() {},
+    toolResult() {},
+    toolError() {},
+    warn() {},
+    error() {},
+    info() {},
+    debug() {},
+    debugEvent() {},
+    finalAnswer(text) {
+      finalAnswers.push(text);
+    },
+  };
+
+  const mockProvider = {
+    async chat() {
+      chatCount++;
+      if (chatCount === 1) {
+        return {
+          text: 'Thought: I should map system context.\nAction: CALL /zoom-out({"proposed_change":"align upstream skills"})',
+          toolCalls: [],
+          finishReason: 'tool_calls',
+        };
+      }
+      return {
+        text: 'FINAL_ANSWER: Upstream slash command executed.',
+        toolCalls: [],
+        finishReason: 'stop',
+      };
+    },
+    getMaxContextTokens() {
+      return 4000;
+    },
+    dispose() {},
+  };
+
+  const registry = new ToolRegistry();
+  registry.register({
+    name: 'zoom_out',
+    description: 'System context mapping tool',
+    parameters: { proposed_change: { type: 'string' } },
+    async handler(args) {
+      executed.push({ name: 'zoom_out', args });
+      return { mapped: true, proposedChange: args.proposed_change };
+    },
+  });
+
+  const agent = new ReActAgent(mockProvider, registry, new MemoryManager(TEST_CONFIG.testDir), {
+    maxIterations: 4,
+    workingDirectory: TEST_CONFIG.testDir,
+  }, recordingUI);
+
+  await agent.run('Use upstream /zoom-out for context');
+
+  if (executed.length !== 1 || executed[0].name !== 'zoom_out') {
+    throw new Error(`Expected zoom_out to execute once, got ${JSON.stringify(executed)}`);
+  }
+  if (executed[0].args.proposed_change !== 'align upstream skills') {
+    throw new Error(`Expected proposed_change args to survive alias mapping, got ${JSON.stringify(executed[0])}`);
+  }
+  if (finalAnswers[0] !== 'Upstream slash command executed.') {
+    throw new Error(`Expected final answer after alias tool execution, got ${JSON.stringify(finalAnswers)}`);
+  }
+});
+
 conversationProtocolTests.test('Local task refusal is corrected into a tool-using turn', async () => {
   const { ReActAgent } = await import('./src/core/agent.js');
   const { ToolRegistry } = await import('./src/core/tool-registry.js');
@@ -1976,6 +2080,147 @@ conversationProtocolTests.test('Local task refusal is corrected into a tool-usin
   }
   if (finalAnswers[0] !== '当前目录有 0 个 js 文件。') {
     throw new Error(`Expected corrected final answer, got ${JSON.stringify(finalAnswers)}`);
+  }
+});
+
+conversationProtocolTests.test('Coding tasks are gated until methodology, change, and verification evidence exist', async () => {
+  const { ReActAgent } = await import('./src/core/agent.js');
+  const { ToolRegistry } = await import('./src/core/tool-registry.js');
+  const { MemoryManager } = await import('./src/memory/memory-manager.js');
+
+  let chatCount = 0;
+  const toolExecutions = [];
+  const finalAnswers = [];
+  const debugEvents = [];
+  const requestMessages = [];
+  const recordingUI = {
+    iteration() {},
+    toolCall() {},
+    toolResult() {},
+    toolError() {},
+    warn() {},
+    error() {},
+    info() {},
+    debug() {},
+    debugEvent(label, details) {
+      debugEvents.push({ label, details });
+    },
+    finalAnswer(text) {
+      finalAnswers.push(text);
+    },
+  };
+
+  const mockProvider = {
+    async chat(messages) {
+      chatCount++;
+      requestMessages.push(messages.map(message => ({
+        role: message.role,
+        content: message.content,
+      })));
+
+      if (chatCount === 1) {
+        return {
+          text: 'FINAL_ANSWER: Created coding-tool-test.html.',
+          toolCalls: [],
+          finishReason: 'stop',
+        };
+      }
+
+      if (chatCount === 2) {
+        return {
+          text: 'Thought: I should outline the minimal implementation.\nAction: CALL brainstorm({"topic":"Create a simple HTML file","constraints":["smallest useful file"]})',
+          toolCalls: [],
+          finishReason: 'tool_calls',
+        };
+      }
+
+      if (chatCount === 3) {
+        return {
+          text: 'Thought: I can now write the file.\nAction: CALL write_file({"path":"coding-tool-test.html","content":"<!doctype html><title>Test</title><h1>Test</h1><p>Hello</p>"})',
+          toolCalls: [],
+          finishReason: 'tool_calls',
+        };
+      }
+
+      if (chatCount === 4) {
+        return {
+          text: 'FINAL_ANSWER: Successfully created coding-tool-test.html.',
+          toolCalls: [],
+          finishReason: 'stop',
+        };
+      }
+
+      if (chatCount === 5) {
+        return {
+          text: 'Thought: I need fresh verification evidence.\nAction: CALL read_file({"path":"coding-tool-test.html"})',
+          toolCalls: [],
+          finishReason: 'tool_calls',
+        };
+      }
+
+      return {
+        text: 'FINAL_ANSWER: Created coding-tool-test.html and verified it by reading the file back.',
+        toolCalls: [],
+        finishReason: 'stop',
+      };
+    },
+    getMaxContextTokens() {
+      return 8000;
+    },
+    dispose() {},
+  };
+
+  const registry = new ToolRegistry();
+  for (const name of ['brainstorm', 'write_file', 'read_file']) {
+    registry.register({
+      name,
+      description: `${name} test tool`,
+      parameters: {
+        path: { type: 'string' },
+        content: { type: 'string' },
+        topic: { type: 'string' },
+        constraints: { type: 'array' },
+      },
+      async handler(args) {
+        toolExecutions.push({ name, args });
+        if (name === 'read_file') {
+          return '<!doctype html><title>Test</title><h1>Test</h1><p>Hello</p>';
+        }
+        return { ok: true };
+      },
+    });
+  }
+
+  const agent = new ReActAgent(mockProvider, registry, new MemoryManager(TEST_CONFIG.testDir), {
+    maxIterations: 8,
+    workingDirectory: TEST_CONFIG.testDir,
+  }, recordingUI);
+
+  await agent.run('Create a simple HTML file named coding-tool-test.html');
+
+  if (chatCount !== 6) {
+    throw new Error(`Expected coding gate to force methodology and verification, got ${chatCount} LLM calls`);
+  }
+  const executedNames = toolExecutions.map(call => call.name);
+  for (const expectedName of ['brainstorm', 'write_file', 'read_file']) {
+    if (!executedNames.includes(expectedName)) {
+      throw new Error(`Expected ${expectedName} call, got ${JSON.stringify(toolExecutions)}`);
+    }
+  }
+  const gateReasons = debugEvents
+    .filter(event => event.label === 'Coding completion gate requested')
+    .map(event => event.details.reason);
+  if (gateReasons.join(',') !== 'no_tool_evidence,missing_verification') {
+    throw new Error(`Expected coding gate reasons, got ${JSON.stringify(gateReasons)}`);
+  }
+  const codingModePrompt = requestMessages[0].find(message =>
+    message.role === 'user' && message.content.includes('Coding task mode is active')
+  );
+  if (!codingModePrompt) {
+    throw new Error(`Expected coding task operating prompt, got ${JSON.stringify(requestMessages[0], null, 2)}`);
+  }
+  if (finalAnswers[0] !== 'Created coding-tool-test.html and verified it by reading the file back.') {
+    throw new Error(`Expected verified final answer, got ${JSON.stringify(finalAnswers)}`);
   }
 });
 
@@ -2472,6 +2717,81 @@ cliInputLoopTests.test('CLI processes two consecutive stdin lines and preserves 
   }
 });
 
+cliInputLoopTests.test('CLI slash skill command executes local tool without LLM request', async () => {
+  const requests = [];
+  const { server, baseURL } = await startMockOpenAIServer((requestBody) => {
+    requests.push(requestBody);
+    return {
+      id: `mock-${requests.length}`,
+      object: 'chat.completion',
+      created: Math.floor(Date.now() / 1000),
+      model: requestBody.model,
+      choices: [{
+        index: 0,
+        message: {
+          role: 'assistant',
+          content: 'unexpected',
+        },
+        finish_reason: 'stop',
+      }],
+    };
+  });
+
+  const cliTestDir = join(TEST_CONFIG.testDir, 'cli-slash-skill');
+  mkdirSync(cliTestDir, { recursive: true });
+
+  let output = '';
+  const child = spawn(process.execPath, ['src/index.js'], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      DEBUG: 'false',
+      MODEL_PROVIDER: 'openai',
+      OPENAI_API_KEY: 'test-key',
+      OPENAI_BASE_URL: baseURL,
+      OPENAI_MODEL: 'qwen3.5-plus',
+      WORKING_DIRECTORY: cliTestDir,
+      MCP_BROWSER_ENABLED: 'false',
+    },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  child.stdout.on('data', chunk => {
+    output += chunk.toString();
+  });
+  child.stderr.on('data', chunk => {
+    output += chunk.toString();
+  });
+
+  try {
+    await waitForOutput(
+      () => output,
+      text => text.includes('[You]') || text.includes('❯'),
+      10000,
+      'initial CLI prompt'
+    );
+
+    child.stdin.write('/tdd phase=red component=SlashCommand spec="direct slash input executes a local skill tool"\n');
+    await waitForOutput(
+      () => output,
+      text => text.includes('TDD: RED Phase') && text.includes('SlashCommand'),
+      15000,
+      'slash skill command output'
+    );
+
+    if (requests.length !== 0) {
+      throw new Error(`Expected slash skill command to avoid LLM requests, got ${requests.length}`);
+    }
+
+    child.stdin.write('exit\n');
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    if (!child.killed) {
+      child.kill('SIGTERM');
+    }
+  }
+});
+
 // ============ 8. 长时间运行测试 ============
 const longevityTests = new TestRunner('Long-Running Stability');
 
@@ -2810,6 +3130,165 @@ newFeaturesTests.test('Autonomous tools - prompt advertises PTY and semantic sea
   }
 
   console.log('     PTY and semantic search are exposed in the agent prompt');
+});
+
+newFeaturesTests.test('System prompt advertises the aligned AI Engineering Mastery skill set', async () => {
+  const { ToolRegistry } = await import('./src/core/tool-registry.js');
+  const { MemoryManager } = await import('./src/memory/memory-manager.js');
+  const { buildSystemPrompt } = await import('./src/prompts/system-prompt.js');
+
+  const skillFactories = [
+    './src/tools/skills/architect.js',
+    './src/tools/skills/brainstorm.js',
+    './src/tools/skills/caveman.js',
+    './src/tools/skills/diagnose.js',
+    './src/tools/skills/grill.js',
+    './src/tools/skills/handoff.js',
+    './src/tools/skills/review.js',
+    './src/tools/skills/tdd.js',
+    './src/tools/skills/to_issues.js',
+    './src/tools/skills/to_prd.js',
+    './src/tools/skills/verify.js',
+    './src/tools/skills/zoom_out.js',
+    './src/tools/skills/setup.js',
+  ];
+
+  const registry = new ToolRegistry();
+  for (const modulePath of skillFactories) {
+    const factory = (await import(modulePath)).default;
+    registry.register(factory());
+  }
+
+  const prompt = buildSystemPrompt(
+    new MemoryManager(TEST_CONFIG.testDir),
+    registry,
+    TEST_CONFIG.testDir
+  );
+
+  for (const expected of [
+    'brainstorm',
+    'grill',
+    'tdd',
+    'diagnose',
+    'architect',
+    'zoom_out',
+    'to_prd',
+    'to_issues',
+    'verify',
+    'review',
+    'caveman',
+    'handoff',
+    'setup',
+  ]) {
+    if (!prompt.includes(expected)) {
+      throw new Error(`Expected system prompt to include aligned skill ${expected}`);
+    }
+  }
+
+  for (const expectedMapping of [
+    '/zoom-out -> zoom_out',
+    '/to-prd -> to_prd',
+    '/to-issues -> to_issues',
+    '/setup -> setup',
+  ]) {
+    if (!prompt.includes(expectedMapping)) {
+      throw new Error(`Expected system prompt to include upstream mapping ${expectedMapping}`);
+    }
+  }
+
+  console.log('     System prompt advertises aligned methodology skills and name mappings');
+});
+
+newFeaturesTests.test('Slash command suggestions include skill commands while typing prefixes', async () => {
+  const {
+    buildSlashCommandSuggestions,
+    filterSlashCommandSuggestions,
+  } = await import('./src/cli/slash-command-suggestions.js');
+  const createTddTool = (await import('./src/tools/skills/tdd.js')).default;
+  const createToPrdTool = (await import('./src/tools/skills/to_prd.js')).default;
+  const createToIssuesTool = (await import('./src/tools/skills/to_issues.js')).default;
+
+  const commands = buildSlashCommandSuggestions([
+    createTddTool(),
+    createToPrdTool(),
+    createToIssuesTool(),
+  ]);
+
+  const tSuggestions = filterSlashCommandSuggestions(commands, '/t').map(command => command.name);
+  const toSuggestions = filterSlashCommandSuggestions(commands, '/to').map(command => command.name);
+  const afterSpaceSuggestions = filterSlashCommandSuggestions(commands, '/tdd ');
+
+  if (!tSuggestions.includes('/tdd')) {
+    throw new Error(`Expected /t to suggest /tdd, got ${JSON.stringify(tSuggestions)}`);
+  }
+  if (!toSuggestions.includes('/to-prd') || !toSuggestions.includes('/to-issues')) {
+    throw new Error(`Expected /to to suggest upstream hyphen skill names, got ${JSON.stringify(toSuggestions)}`);
+  }
+  if (afterSpaceSuggestions.length !== 0) {
+    throw new Error(`Expected suggestions to stop after arguments begin, got ${JSON.stringify(afterSpaceSuggestions)}`);
+  }
+
+  console.log('     Slash command suggestions expose skill prefixes');
+});
+
+newFeaturesTests.test('AI Engineering Mastery setup skill creates project context files', async () => {
+  const createSetupTool = (await import('./src/tools/skills/setup.js')).default;
+  const setupTool = createSetupTool();
+  const setupDir = join(TEST_CONFIG.testDir, 'setup-skill-project');
+
+  const result = await setupTool.handler({
+    project_path: setupDir,
+    project_name: 'Setup Skill Project',
+    test_framework: 'npm test',
+    code_style: 'Use existing style, Keep changes surgical',
+  }, {
+    workingDirectory: setupDir,
+  });
+
+  const contextPath = join(setupDir, 'CONTEXT.md');
+  const adrPath = join(setupDir, 'docs', 'adr', '0001-initial-setup.md');
+  const context = readFileSync(contextPath, 'utf-8');
+  const adr = readFileSync(adrPath, 'utf-8');
+
+  if (!context.includes('Setup Skill Project') || !context.includes('Default command: `npm test`')) {
+    throw new Error(`CONTEXT.md missing expected setup content: ${context}`);
+  }
+  if (!adr.includes('Initial Project Setup') || !adr.includes('AI Engineering Mastery methodology')) {
+    throw new Error(`Initial ADR missing expected setup content: ${adr}`);
+  }
+  if (!result.includes(contextPath) || !result.includes(adrPath)) {
+    throw new Error(`Setup result should list created files, got: ${result}`);
+  }
+
+  console.log('     Setup skill creates CONTEXT.md and initial ADR');
+});
+
+newFeaturesTests.test('Handoff skill saves session documents outside the workspace', async () => {
+  const createHandoffTool = (await import('./src/tools/skills/handoff.js')).default;
+  const handoffTool = createHandoffTool();
+
+  const result = await handoffTool.handler({
+    session_summary: 'Implemented methodology alignment.',
+    next_steps: 'Run tests',
+    open_questions: '',
+  }, {
+    workingDirectory: TEST_CONFIG.testDir,
+    sessionManager: { currentSessionId: 'test-session' },
+  });
+
+  const savedPath = result.match(/Saved handoff file: (.+)$/m)?.[1];
+  if (!savedPath) {
+    throw new Error(`Expected saved handoff file path, got: ${result}`);
+  }
+  if (savedPath.startsWith(TEST_CONFIG.testDir)) {
+    throw new Error(`Handoff should be saved outside workspace, got: ${savedPath}`);
+  }
+  const savedContent = readFileSync(savedPath, 'utf-8');
+  if (!savedContent.includes('Implemented methodology alignment.')) {
+    throw new Error(`Saved handoff content missing summary: ${savedContent}`);
+  }
+
+  console.log('     Handoff skill writes to OS temp directory');
 });
 
 newFeaturesTests.test('PTY tools - interactive stdin/stdout round trip', async () => {

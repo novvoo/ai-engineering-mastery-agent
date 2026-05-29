@@ -1,12 +1,13 @@
 import { writeFile, mkdir } from 'fs/promises';
 import { join, resolve } from 'path';
+import { tmpdir } from 'os';
 import { ToolCategory } from '../../core/types.js';
 
 export default function handoff() {
   return {
     name: 'handoff',
     description:
-      'Session continuity document generator. Creates a structured handoff document capturing session progress, decisions, open questions, and next steps. Updates memory manager with session history and saves HANDOFF.md to the working directory.',
+      'Session continuity document generator. Creates a structured handoff document capturing session progress, decisions, open questions, and next steps. Updates memory manager with session history and saves HANDOFF.md to the OS temp directory, not the workspace.',
     category: ToolCategory.skill_productivity,
     params: {
       session_summary: {
@@ -103,9 +104,10 @@ export default function handoff() {
         .filter(Boolean)
         .join('\n');
 
-      // Save HANDOFF.md to working directory
-      const handoffPath = resolve(workingDirectory, 'HANDOFF.md');
-      await mkdir(workingDirectory, { recursive: true });
+      // Save HANDOFF.md to OS temp directory so session artifacts do not pollute the repo.
+      const handoffDir = resolve(tmpdir(), 'ai-engineering-mastery-agent', 'handoffs');
+      const handoffPath = join(handoffDir, `HANDOFF-${sessionId}-${timestamp.replace(/[:.]/g, '-')}.md`);
+      await mkdir(handoffDir, { recursive: true });
       await writeFile(handoffPath, doc, 'utf-8');
 
       // Update memory manager with session history
@@ -127,7 +129,7 @@ export default function handoff() {
         }
       }
 
-      return doc;
+      return `${doc}\n\n---\n\nSaved handoff file: ${handoffPath}`;
     },
   };
 }

@@ -13,6 +13,41 @@ import { TextToolParser } from './text-tool-parser.js';
 
 const TERMINATION_KEYWORDS = ['FINAL_ANSWER:', 'Answer:', 'TASK_COMPLETE'];
 const MAX_ITERATIONS_DEFAULT = 30;
+const METHODOLOGY_TOOLS = new Set([
+  'brainstorm',
+  'grill',
+  'zoom_out',
+  'tdd',
+  'review',
+  'verify',
+  'diagnose',
+  'architect',
+  'to_prd',
+  'to_issues',
+  'setup',
+]);
+const MUTATION_TOOLS = new Set([
+  'write_file',
+  'edit_file',
+  'shell',
+  'pty_start',
+  'pty_write',
+  'git_apply_patch',
+  'git_commit',
+  'git_push',
+]);
+const VERIFICATION_TOOLS = new Set([
+  'verify',
+  'review',
+  'read_file',
+  'list_dir',
+  'glob',
+  'search',
+  'shell',
+  'pty_start',
+  'pty_read',
+  'semantic_search',
+]);
 
 export class ReActAgent {
   /** @type {import('./tool-registry.js').ToolRegistry} */
@@ -39,6 +74,10 @@ export class ReActAgent {
   #toolResultCache = new Map();
   /** @type {TextToolParser} */
   #textToolParser;
+  /** @type {Array<{name: string, success: boolean, args: object, resultPreview: string}>} */
+  #runToolEvents = [];
+  /** @type {object} */
+  #activeTaskProfile = null;
 
   constructor(modelProvider, toolRegistry, memoryManager, config = {}, customUI = ui) {
     this.#modelProvider = modelProvider;
@@ -94,10 +133,18 @@ export class ReActAgent {
     this.#lastResponse = '';
     this.#repeatCount = 0;
     this.#toolCallHistory = [];
+    this.#runToolEvents = [];
+    this.#activeTaskProfile = this.#classifyTask(userInput);
 
     let iteration = 0;
     const maxIterations = this.#config.maxIterations || MAX_ITERATIONS_DEFAULT;
     let toolUseCorrections = 0;
+    let codingGateCorrections = 0;
+
+    if (this.#activeTaskProfile.isCodingTask) {
+      this.#debugEvent('Coding task mode enabled', this.#activeTaskProfile);
+      this.#sessionManager.addUserMessage(this.#buildCodingTaskOperatingPrompt(userInput));
+    }
 
     while (iteration < maxIterations) {
       iteration++;
@@ -179,6 +226,26 @@ export class ReActAgent {
           });
           this.#sessionManager.addAssistantMessage(response.text);
           this.#sessionManager.addUserMessage(this.#buildToolUseCorrectionPrompt(userInput));
+          continue;
+        }
+
+        const shouldBlockFinal = allToolCalls.length === 0 &&
+          codingGateCorrections < 3 &&
+          this.#shouldBlockCodingFinal(userInput, response.text);
+
+        if (shouldBlockFinal.block) {
+          codingGateCorrections++;
+          this.#debugEvent('Coding completion gate requested', {
+            iteration,
+            correction: codingGateCorrections,
+            reason: shouldBlockFinal.reason,
+            evidence: shouldBlockFinal.evidence,
+            responsePreview: this.#preview(response.text, 300),
+          });
+          this.#sessionManager.addAssistantMessage(response.text);
+          this.#sessionManager.addUserMessage(
+            this.#buildCodingCompletionGatePrompt(userInput, shouldBlockFinal)
+          );
           continue;
         }
 
@@ -360,6 +427,7 @@ export class ReActAgent {
         resultPreview: this.#preview(typeof result === 'string' ? result : JSON.stringify(result), 300),
       });
       this.#ui.toolResult(name, result);
+      this.#recordToolEvent(name, args, true, result);
       this.#toolResultCache.set(callSignature, typeof result === 'string' ? result : JSON.stringify(result));
       this.#addToolObservation(id, name, result, resultMode);
 
@@ -371,9 +439,19 @@ export class ReActAgent {
         error: errorMsg,
       });
       this.#ui.toolError(name, errorMsg);
+      this.#recordToolEvent(name, args, false, `Error: ${errorMsg}`);
       this.#toolResultCache.set(callSignature, `Error: ${errorMsg}`);
       this.#addToolObservation(id, name, `Error: ${errorMsg}`, resultMode);
     }
+  }
+
+  #recordToolEvent(name, args, success, result) {
+    this.#runToolEvents.push({
+      name,
+      args,
+      success,
+      resultPreview: this.#preview(typeof result === 'string' ? result : JSON.stringify(result), 300),
+    });
   }
 
   /**
@@ -564,6 +642,147 @@ export class ReActAgent {
       `Use an appropriate tool now instead of answering from assumptions. Available tools include: ${toolNames}. ` +
       `For filesystem, terminal, PTY, embedding, memory, or browser tasks, choose the matching tool and continue from the observation.`
     );
+  }
+
+  #classifyTask(userInput) {
+    const input = String(userInput || '').toLowerCase();
+    const isCodingTask = [
+      /写.*代码|写.*html|写.*js|写.*css|创建.*文件|新建.*文件|修改.*代码|改.*代码|修复|实现|重构|跑.*测试|运行.*测试|集成测试|单元测试|提交|push/,
+      /\b(code|coding|implement|fix|bug|refactor|unit test|integration test|test suite|npm test|run tests?|write tests?|add tests?|html|css|javascript|typescript|commit|push)\b/,
+      /\b(create|write|edit|modify|update|change)\b.*\b(file|code|html|css|js|javascript|ts|typescript|component|function|class|module|test)\b/,
+    ].some(pattern => pattern.test(input));
+
+    const isModificationTask = [
+      /写.*代码|写.*html|写.*js|写.*css|创建.*文件|新建.*文件|修改.*代码|改.*代码|修复|实现|重构|提交|push/,
+      /\b(implement|fix|refactor|commit|push)\b/,
+      /\b(create|write|edit|modify|update|change)\b.*\b(file|code|html|css|js|javascript|ts|typescript|component|function|class|module|test)\b/,
+    ].some(pattern => pattern.test(input));
+
+    const isBugTask = [
+      /bug|error|exception|failed|failing|broken|hang|stuck|报错|错误|失败|崩溃|卡住|没响应|没有响应|修复/,
+    ].some(pattern => pattern.test(input));
+
+    const isLikelyTrivial = [
+      /typo|拼写|文案|注释|comment|rename only|只改名/,
+    ].some(pattern => pattern.test(input));
+
+    return { isCodingTask, isModificationTask, isBugTask, isLikelyTrivial };
+  }
+
+  #buildCodingTaskOperatingPrompt(userInput) {
+    const hasMethodologyTools = this.#hasAnyTool(METHODOLOGY_TOOLS);
+    const methodologyLine = hasMethodologyTools
+      ? 'Use the built-in methodology tools proactively: setup for missing project context, diagnose for bugs, grill/zoom_out for unclear or shared changes, brainstorm/tdd before implementation when non-trivial, to_prd/to_issues for formal planning, review after editing, and verify before completion.'
+      : 'Use the same methodology directly in your reasoning because methodology tools are not registered in this runtime.';
+
+    return (
+      `Coding task mode is active for the previous user request:\n${userInput}\n\n` +
+      `Act like a responsible coding agent. First understand the repo with tools, then make the smallest necessary change, then verify with fresh evidence.\n` +
+      `${methodologyLine}\n` +
+      `If you write or edit files, you must inspect the result and run an appropriate verification command or verify tool before FINAL_ANSWER. ` +
+      `Final answers must mention what changed and what verification passed.`
+    );
+  }
+
+  #shouldBlockCodingFinal(userInput, responseText) {
+    if (!this.#activeTaskProfile?.isCodingTask) {
+      return { block: false };
+    }
+
+    const text = String(responseText || '').trim();
+    if (!text) {
+      return { block: false };
+    }
+
+    const successfulEvents = this.#runToolEvents.filter(event => event.success);
+    const methodologyEvents = successfulEvents.filter(event => METHODOLOGY_TOOLS.has(event.name));
+    const mutationEvents = successfulEvents.filter(event => this.#isMutationEvent(event));
+    const verificationEvents = successfulEvents.filter(event => this.#isVerificationEvent(event));
+    const hasMethodologyTools = this.#hasAnyTool(METHODOLOGY_TOOLS);
+    const hasFileWriteTool = this.#toolRegistry.has('write_file') || this.#toolRegistry.has('edit_file');
+
+    const evidence = {
+      methodologyTools: methodologyEvents.map(event => event.name),
+      mutationTools: mutationEvents.map(event => event.name),
+      verificationTools: verificationEvents.map(event => event.name),
+    };
+
+    if (successfulEvents.length === 0) {
+      return { block: true, reason: 'no_tool_evidence', evidence };
+    }
+
+    if (hasMethodologyTools && !this.#activeTaskProfile.isLikelyTrivial && methodologyEvents.length === 0) {
+      return { block: true, reason: 'missing_methodology_step', evidence };
+    }
+
+    if (hasFileWriteTool && this.#activeTaskProfile.isModificationTask && mutationEvents.length === 0) {
+      return { block: true, reason: 'missing_code_change', evidence };
+    }
+
+    if (mutationEvents.length > 0 && verificationEvents.length === 0) {
+      return { block: true, reason: 'missing_verification', evidence };
+    }
+
+    const claimsDone = /done|completed|successfully|created|updated|fixed|implemented|完成|已完成|成功|创建|修改|修复|实现/.test(text.toLowerCase());
+    const mentionsVerification = /test|verify|verified|check|passed|validation|验证|测试|检查|通过/.test(text.toLowerCase());
+    if (mutationEvents.length > 0 && claimsDone && !mentionsVerification) {
+      return { block: true, reason: 'final_answer_missing_verification_summary', evidence };
+    }
+
+    return { block: false, evidence };
+  }
+
+  #buildCodingCompletionGatePrompt(userInput, gate) {
+    const reasonText = {
+      no_tool_evidence: 'You are trying to finish a coding task without any successful tool evidence.',
+      missing_methodology_step: 'You have not used the built-in coding methodology yet.',
+      missing_code_change: 'You have not produced a successful code/file change yet.',
+      missing_verification: 'You changed code/files but have not verified the result with fresh evidence.',
+      final_answer_missing_verification_summary: 'Your final answer claims completion but does not summarize verification.',
+    }[gate.reason] || gate.reason;
+
+    return (
+      `Coding completion gate blocked the final answer.\n` +
+      `Original user request: ${userInput}\n` +
+      `Reason: ${reasonText}\n` +
+      `Evidence so far: ${JSON.stringify(gate.evidence)}\n\n` +
+      `Continue working now. Use the appropriate methodology/tooling path, inspect your own changes, run a relevant verification command or verify tool, and only then answer with FINAL_ANSWER including what changed and what passed.`
+    );
+  }
+
+  #hasAnyTool(toolNames) {
+    for (const name of toolNames) {
+      if (this.#toolRegistry.has(name)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  #isMutationEvent(event) {
+    if (!MUTATION_TOOLS.has(event.name)) {
+      return false;
+    }
+
+    if (event.name === 'shell' || event.name === 'pty_start' || event.name === 'pty_write') {
+      const command = String(event.args?.command || event.args?.input || event.args?.text || '').toLowerCase();
+      return /(^|\s)(npm|pnpm|yarn|npx|node|python|pytest|vitest|jest|eslint|tsc|git|mkdir|touch|cp|mv|rm|sed|perl)\b|>|>>|apply_patch/.test(command);
+    }
+
+    return true;
+  }
+
+  #isVerificationEvent(event) {
+    if (!VERIFICATION_TOOLS.has(event.name)) {
+      return false;
+    }
+
+    if (event.name === 'shell' || event.name === 'pty_start' || event.name === 'pty_read') {
+      const command = String(event.args?.command || event.args?.input || event.args?.text || '').toLowerCase();
+      return /\b(test|lint|check|verify|build|typecheck|tsc|jest|vitest|pytest|node|npm|pnpm|yarn|cat|sed|ls|find|rg)\b/.test(command);
+    }
+
+    return true;
   }
 
   /**

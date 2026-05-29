@@ -5,7 +5,7 @@
  */
 
 import { config } from 'dotenv';
-import { createInterface } from 'readline';
+import { clearLine, createInterface, cursorTo, emitKeypressEvents } from 'readline';
 import { resolve } from 'path';
 import { existsSync, mkdirSync } from 'fs';
 import { input, select } from '@inquirer/prompts';
@@ -58,10 +58,15 @@ import createCavemanTool from './tools/skills/caveman.js';
 import createHandoffTool from './tools/skills/handoff.js';
 import createToPrdTool from './tools/skills/to_prd.js';
 import createToIssuesTool from './tools/skills/to_issues.js';
+import createSetupTool from './tools/skills/setup.js';
 
 // UI imports
 import { enhancedUI } from './cli/enhanced-ui.js';
 import { createEnhancedCommands } from './cli/enhanced-commands.js';
+import {
+  buildSlashCommandSuggestions,
+  filterSlashCommandSuggestions,
+} from './cli/slash-command-suggestions.js';
 
 // Load environment variables
 config();
@@ -90,6 +95,8 @@ class AIEngineeringAgent {
     this.inputQueue = [];
     this.isProcessingInput = false;
     this.shutdownStarted = false;
+    this.slashCommandSuggestions = [];
+    this.lastSlashSuggestionKey = '';
   }
 
   /**
@@ -242,10 +249,12 @@ class AIEngineeringAgent {
       createHandoffTool(),
       createToPrdTool(),
       createToIssuesTool(),
+      createSetupTool(),
     ];
     for (const tool of skillTools) {
       toolRegistry.register(tool);
     }
+    this.slashCommandSuggestions = buildSlashCommandSuggestions(skillTools);
 
     // Create model provider
     let modelProvider;
@@ -405,8 +414,54 @@ class AIEngineeringAgent {
       this.rlClosed = true;
       this.isRunning = false;
     });
+    this.#installSlashCommandSuggestions();
 
     this.isRunning = true;
+  }
+
+  #installSlashCommandSuggestions() {
+    if (!process.stdin.isTTY || !process.stdout.isTTY || process.env.SLASH_SUGGESTIONS === 'false') {
+      return;
+    }
+
+    emitKeypressEvents(process.stdin, this.rl);
+    process.stdin.on('keypress', (_str, key = {}) => {
+      if (this.rlClosed || this.isProcessingInput || key.name === 'return' || key.name === 'enter') {
+        return;
+      }
+
+      setImmediate(() => this.#renderSlashCommandSuggestions());
+    });
+  }
+
+  #renderSlashCommandSuggestions() {
+    if (!this.rl || this.rlClosed || this.isProcessingInput) {
+      return;
+    }
+
+    const line = this.rl.line || '';
+    const suggestions = filterSlashCommandSuggestions(this.slashCommandSuggestions, line, 6);
+    const suggestionKey = suggestions.map(command => command.name).join('|');
+
+    if (!suggestions.length) {
+      this.lastSlashSuggestionKey = '';
+      return;
+    }
+
+    if (suggestionKey === this.lastSlashSuggestionKey) {
+      return;
+    }
+
+    this.lastSlashSuggestionKey = suggestionKey;
+    const rendered = suggestions
+      .map(command => `${enhancedUI.theme.primary(command.name)} ${enhancedUI.theme.dim(command.description)}`)
+      .join(enhancedUI.theme.dim('  |  '));
+
+    process.stdout.write('\n');
+    clearLine(process.stdout, 0);
+    cursorTo(process.stdout, 0);
+    process.stdout.write(`${enhancedUI.theme.dim('Commands:')} ${rendered}\n`);
+    this.rl.prompt(true);
   }
 
   /**
@@ -641,9 +696,172 @@ class AIEngineeringAgent {
       return true;
     }
 
+    if (await this.#processSlashToolCommand(input)) {
+      return true;
+    }
+
     // Regular input - process through agent
     await this.processAgentInput(input);
     return true;
+  }
+
+  async #processSlashToolCommand(input) {
+    const match = input.match(/^\/([A-Za-z_][\w-]*)(?:\s+([\s\S]*))?$/);
+    if (!match || !this.agent) {
+      return false;
+    }
+
+    const rawName = match[1];
+    const toolName = rawName.toLowerCase().replace(/-/g, '_');
+    const toolRegistry = this.agent.getTools();
+    const tool = toolRegistry.get(toolName);
+
+    if (!tool) {
+      return false;
+    }
+
+    const argsText = (match[2] || '').trim();
+    const parsed = this.#parseSlashToolArgs(tool, argsText);
+    if (parsed.error) {
+      enhancedUI.error(parsed.error);
+      this.#showSlashToolUsage(rawName, tool);
+      return true;
+    }
+
+    const missing = this.#getToolRequiredParams(tool)
+      .filter(paramName => parsed.args[paramName] === undefined || parsed.args[paramName] === '');
+    if (missing.length > 0) {
+      enhancedUI.warning(`Missing required argument(s): ${missing.join(', ')}`);
+      this.#showSlashToolUsage(rawName, tool);
+      return true;
+    }
+
+    try {
+      enhancedUI.toolCall(toolName, parsed.args);
+      const result = await toolRegistry.execute(toolName, parsed.args, {
+        workingDirectory: this.workingDir,
+      });
+      enhancedUI.toolResult(toolName, result);
+      if (typeof result === 'string') {
+        enhancedUI.finalAnswer(result);
+      } else {
+        console.log(enhancedUI.formatJSON(result));
+      }
+    } catch (error) {
+      enhancedUI.toolError(toolName, error.message);
+    }
+
+    return true;
+  }
+
+  #parseSlashToolArgs(tool, argsText) {
+    if (!argsText) {
+      return { args: {} };
+    }
+
+    const trimmed = argsText.trim();
+    if (trimmed.startsWith('{')) {
+      try {
+        const args = JSON.parse(trimmed);
+        if (!args || typeof args !== 'object' || Array.isArray(args)) {
+          return { error: 'Slash tool JSON arguments must be an object.' };
+        }
+        return { args };
+      } catch (error) {
+        return { error: `Invalid JSON arguments: ${error.message}` };
+      }
+    }
+
+    const keyValueArgs = this.#parseKeyValueArgs(trimmed);
+    if (keyValueArgs) {
+      return { args: keyValueArgs };
+    }
+
+    if (tool.name === 'tdd') {
+      const shorthand = this.#parseTddShorthand(trimmed);
+      if (shorthand) {
+        return { args: shorthand };
+      }
+    }
+
+    const required = this.#getToolRequiredParams(tool);
+    if (required.length === 1) {
+      return { args: { [required[0]]: trimmed } };
+    }
+
+    return {
+      error: 'Could not parse slash tool arguments. Use JSON or key=value arguments.',
+    };
+  }
+
+  #parseKeyValueArgs(text) {
+    const args = {};
+    const regex = /([A-Za-z_][\w-]*)=(?:"([^"]*)"|'([^']*)'|`([^`]*)`|([^\s]+))/g;
+    let match;
+    let consumed = '';
+
+    while ((match = regex.exec(text)) !== null) {
+      consumed += match[0];
+      args[match[1]] = this.#coerceSlashValue(match[2] ?? match[3] ?? match[4] ?? match[5] ?? '');
+    }
+
+    if (Object.keys(args).length === 0) {
+      return null;
+    }
+
+    const remainder = text.replace(regex, '').trim();
+    return remainder ? null : args;
+  }
+
+  #parseTddShorthand(text) {
+    const match = text.match(/^(red|green|refactor)\s+(\S+)(?:\s+([\s\S]+))?$/i);
+    if (!match || !match[3]) {
+      return null;
+    }
+
+    return {
+      phase: match[1].toLowerCase(),
+      component: match[2],
+      spec: match[3].trim(),
+    };
+  }
+
+  #coerceSlashValue(value) {
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    if (value === 'null') return null;
+    if (/^-?\d+(?:\.\d+)?$/.test(value)) return Number(value);
+    return value;
+  }
+
+  #getToolRequiredParams(tool) {
+    return tool.required || (tool.parameters && tool.parameters.required ? tool.parameters.required : []);
+  }
+
+  #showSlashToolUsage(rawName, tool) {
+    const required = this.#getToolRequiredParams(tool);
+    const optional = Object.keys(tool.params || tool.parameters?.properties || {})
+      .filter(paramName => !required.includes(paramName));
+
+    console.log(enhancedUI.createHeader(`/${rawName} Usage`));
+    console.log(tool.description || `Run the ${tool.name} tool.`);
+    console.log('');
+    console.log('JSON:');
+    console.log(`  /${rawName} {"${required[0] || 'arg'}":"value"}`);
+    console.log('');
+    console.log('key=value:');
+    const requiredExample = required.map(paramName => `${paramName}="value"`).join(' ');
+    console.log(`  /${rawName}${requiredExample ? ` ${requiredExample}` : ''}`);
+    if (tool.name === 'tdd') {
+      console.log('');
+      console.log('TDD shorthand:');
+      console.log(`  /${rawName} red ComponentName expected behavior`);
+    }
+    if (optional.length > 0) {
+      console.log('');
+      console.log(`Optional: ${optional.join(', ')}`);
+    }
+    console.log('');
   }
 
   /**
