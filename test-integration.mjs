@@ -1853,9 +1853,28 @@ conversationProtocolTests.test('Text parser accepts action tag and raw JSON acti
     parameters: { path: { type: 'string' } },
     async handler() {},
   });
+  registry.register({
+    name: 'shell',
+    description: 'Run shell command',
+    parameters: { command: { type: 'string' } },
+    async handler() {},
+  });
+  registry.register({
+    name: 'write_file',
+    description: 'Write file',
+    parameters: { path: { type: 'string' }, content: { type: 'string' } },
+    async handler() {},
+  });
 
   const parser = new TextToolParser(registry);
   const actionTagCalls = parser.parse('<action>\n{"glob": {"pattern": "*.js"}}\n</action>');
+  const aliasedActionCalls = parser.parse('<action>\n{"list_directory": {"path": "real-2048-test"}}\n</action>');
+  const mkdirActionCalls = parser.parse('<action>\n{"create_directory": {"path": "real-2048-test"}}\n</action>');
+  const toolCallTagCalls = parser.parse('<tool_call>\n<name>list_dir</name>\n<parameter>path</parameter>\n<parameter>.</parameter>\n</tool_call>');
+  const toolCallArgumentsTagCalls = parser.parse('<tool_call>\n<name>list_dir</name>\n<arguments>{"path": "."}</arguments>\n</tool_call>');
+  const toolCallFunctionTagCalls = parser.parse('<tool_call>\n<function>list_dir</function>\n<parameter>path</parameter>\n<parameter>.</parameter>\n</function>\n</tool_call>');
+  const filePathAliasCalls = parser.parse('<action>\n{"write_file": {"file_path": "real-2048-test/index.html", "content": "<script src=\\"game.js\\"></script>"}}\n</action>');
+  const namedXmlCalls = parser.parse('<list_dir>\n<path>.</path>\n</list_dir>');
   const rawJSONCalls = parser.parse(JSON.stringify({
     memory: 'User wants files',
     next_goal: 'List directory',
@@ -1868,11 +1887,86 @@ conversationProtocolTests.test('Text parser accepts action tag and raw JSON acti
   if (actionTagCalls.length !== 1 || actionTagCalls[0].name !== 'glob' || actionTagCalls[0].arguments.pattern !== '*.js') {
     throw new Error(`Expected action tag glob call, got ${JSON.stringify(actionTagCalls)}`);
   }
+  if (aliasedActionCalls.length !== 1 || aliasedActionCalls[0].name !== 'list_dir' || aliasedActionCalls[0].arguments.path !== 'real-2048-test') {
+    throw new Error(`Expected list_directory alias to map to list_dir, got ${JSON.stringify(aliasedActionCalls)}`);
+  }
+  if (mkdirActionCalls.length !== 1 || mkdirActionCalls[0].name !== 'shell' || mkdirActionCalls[0].arguments.command !== "mkdir -p 'real-2048-test'") {
+    throw new Error(`Expected create_directory alias to map to shell mkdir, got ${JSON.stringify(mkdirActionCalls)}`);
+  }
+  if (toolCallTagCalls.length !== 1 || toolCallTagCalls[0].name !== 'list_dir' || toolCallTagCalls[0].arguments.path !== '.') {
+    throw new Error(`Expected tool_call tag to map parameter pair to list_dir, got ${JSON.stringify(toolCallTagCalls)}`);
+  }
+  if (toolCallArgumentsTagCalls.length !== 1 || toolCallArgumentsTagCalls[0].name !== 'list_dir' || toolCallArgumentsTagCalls[0].arguments.path !== '.') {
+    throw new Error(`Expected tool_call arguments tag to map JSON args to list_dir, got ${JSON.stringify(toolCallArgumentsTagCalls)}`);
+  }
+  if (toolCallFunctionTagCalls.length !== 1 || toolCallFunctionTagCalls[0].name !== 'list_dir' || toolCallFunctionTagCalls[0].arguments.path !== '.') {
+    throw new Error(`Expected tool_call function tag to map parameter pair to list_dir, got ${JSON.stringify(toolCallFunctionTagCalls)}`);
+  }
+  if (filePathAliasCalls.length !== 1 || filePathAliasCalls[0].name !== 'write_file' || filePathAliasCalls[0].arguments.path !== 'real-2048-test/index.html') {
+    throw new Error(`Expected file_path alias to map to path for write_file, got ${JSON.stringify(filePathAliasCalls)}`);
+  }
+  if (namedXmlCalls.length !== 1 || namedXmlCalls[0].name !== 'list_dir' || namedXmlCalls[0].arguments.path !== '.') {
+    throw new Error(`Expected named XML tool tag to parse list_dir path, got ${JSON.stringify(namedXmlCalls)}`);
+  }
   if (rawJSONCalls.length !== 1 || rawJSONCalls[0].name !== 'list_dir' || rawJSONCalls[0].arguments.path !== '.') {
     throw new Error(`Expected raw JSON list_dir call, got ${JSON.stringify(rawJSONCalls)}`);
   }
   if (!naturalLanguageCalls.some(call => call.name === 'glob' && call.arguments.pattern === '*.js')) {
     throw new Error(`Expected natural language JavaScript request to produce glob *.js, got ${JSON.stringify(naturalLanguageCalls)}`);
+  }
+});
+
+conversationProtocolTests.test('Text parser translates upstream tool_code helper calls', async () => {
+  const { TextToolParser } = await import('./src/core/text-tool-parser.js');
+  const { ToolRegistry } = await import('./src/core/tool-registry.js');
+
+  const registry = new ToolRegistry();
+  for (const name of ['list_dir', 'read_file', 'write_file', 'shell', 'brainstorm']) {
+    registry.register({
+      name,
+      description: `${name} tool`,
+      parameters: {
+        path: { type: 'string' },
+        content: { type: 'string' },
+        command: { type: 'string' },
+      },
+      async handler() {},
+    });
+  }
+
+  const parser = new TextToolParser(registry);
+  const calls = [
+    ...parser.parse('<tool_code>\nprint(ls("real-2048-test"))\n</tool_code>'),
+    ...parser.parse('<tool_code>\nprint(read_file(path="real-2048-test/game.js"))\n</tool_code>'),
+    ...parser.parse('<tool_code>\nprint(shell("node --check real-2048-test/game.js"))\n</tool_code>'),
+    ...parser.parse('<tool_code>\nwrite_file(path="real-2048-test/index.html", content="""<script src="game.js"></script>""")\n</tool_code>'),
+    ...parser.parse('<tool_code>\ninspect_workspace()\n</tool_code>'),
+    ...parser.parse('<tool_code>\nplan_solution()\n</tool_code>'),
+  ];
+
+  const listCall = calls.find(call => call.name === 'list_dir');
+  const readCall = calls.find(call => call.name === 'read_file');
+  const shellCall = calls.find(call => call.name === 'shell');
+  const writeCall = calls.find(call => call.name === 'write_file');
+  const inspectCall = calls.find(call => call.name === 'list_dir' && call.source === 'tool_code' && call.arguments.path === '.');
+  const planCall = calls.find(call => call.name === 'brainstorm');
+  if (listCall?.arguments.path !== 'real-2048-test') {
+    throw new Error(`Expected ls helper to map to list_dir path, got ${JSON.stringify(calls)}`);
+  }
+  if (readCall?.arguments.path !== 'real-2048-test/game.js') {
+    throw new Error(`Expected read_file helper path, got ${JSON.stringify(calls)}`);
+  }
+  if (shellCall?.arguments.command !== 'node --check real-2048-test/game.js') {
+    throw new Error(`Expected shell helper command, got ${JSON.stringify(calls)}`);
+  }
+  if (writeCall?.arguments.path !== 'real-2048-test/index.html' || !writeCall.arguments.content.includes('game.js')) {
+    throw new Error(`Expected write_file helper path and content, got ${JSON.stringify(calls)}`);
+  }
+  if (!inspectCall) {
+    throw new Error(`Expected inspect_workspace helper to map to list_dir '.', got ${JSON.stringify(calls)}`);
+  }
+  if (planCall?.arguments.problem !== 'Plan the requested implementation before editing files.') {
+    throw new Error(`Expected plan_solution helper to map to brainstorm, got ${JSON.stringify(calls)}`);
   }
 });
 
@@ -2128,7 +2222,7 @@ conversationProtocolTests.test('Coding tasks are gated until methodology, change
 
       if (chatCount === 2) {
         return {
-          text: 'Thought: I should outline the minimal implementation.\nAction: CALL brainstorm({"topic":"Create a simple HTML file","constraints":["smallest useful file"]})',
+          text: 'Thought: I need to inspect the workspace before planning.\nAction: CALL list_dir({"path":"."})',
           toolCalls: [],
           finishReason: 'tool_calls',
         };
@@ -2136,7 +2230,7 @@ conversationProtocolTests.test('Coding tasks are gated until methodology, change
 
       if (chatCount === 3) {
         return {
-          text: 'Thought: I can now write the file.\nAction: CALL write_file({"path":"coding-tool-test.html","content":"<!doctype html><title>Test</title><h1>Test</h1><p>Hello</p>"})',
+          text: 'Thought: I should outline the minimal implementation.\nAction: CALL brainstorm({"topic":"Create a simple HTML file","constraints":["smallest useful file"]})',
           toolCalls: [],
           finishReason: 'tool_calls',
         };
@@ -2144,15 +2238,31 @@ conversationProtocolTests.test('Coding tasks are gated until methodology, change
 
       if (chatCount === 4) {
         return {
+          text: 'Thought: I can now write the file.\nAction: CALL write_file({"path":"coding-tool-test.html","content":"<!doctype html><title>Test</title><h1>Test</h1><p>Hello</p>"})',
+          toolCalls: [],
+          finishReason: 'tool_calls',
+        };
+      }
+
+      if (chatCount === 5) {
+        return {
           text: 'FINAL_ANSWER: Successfully created coding-tool-test.html.',
           toolCalls: [],
           finishReason: 'stop',
         };
       }
 
-      if (chatCount === 5) {
+      if (chatCount === 6) {
         return {
           text: 'Thought: I need fresh verification evidence.\nAction: CALL read_file({"path":"coding-tool-test.html"})',
+          toolCalls: [],
+          finishReason: 'tool_calls',
+        };
+      }
+
+      if (chatCount === 7) {
+        return {
+          text: 'Thought: I should close the verification step.\nAction: CALL verify({"claim":"coding-tool-test.html was created","criteria":"file was inspected"})',
           toolCalls: [],
           finishReason: 'tool_calls',
         };
@@ -2171,7 +2281,7 @@ conversationProtocolTests.test('Coding tasks are gated until methodology, change
   };
 
   const registry = new ToolRegistry();
-  for (const name of ['brainstorm', 'write_file', 'read_file']) {
+  for (const name of ['list_dir', 'brainstorm', 'write_file', 'read_file', 'verify']) {
     registry.register({
       name,
       description: `${name} test tool`,
@@ -2183,6 +2293,9 @@ conversationProtocolTests.test('Coding tasks are gated until methodology, change
       },
       async handler(args) {
         toolExecutions.push({ name, args });
+        if (name === 'list_dir') {
+          return 'F existing.txt';
+        }
         if (name === 'read_file') {
           return '<!doctype html><title>Test</title><h1>Test</h1><p>Hello</p>';
         }
@@ -2192,17 +2305,17 @@ conversationProtocolTests.test('Coding tasks are gated until methodology, change
   }
 
   const agent = new ReActAgent(mockProvider, registry, new MemoryManager(TEST_CONFIG.testDir), {
-    maxIterations: 8,
+    maxIterations: 10,
     workingDirectory: TEST_CONFIG.testDir,
   }, recordingUI);
 
   await agent.run('Create a simple HTML file named coding-tool-test.html');
 
-  if (chatCount !== 6) {
-    throw new Error(`Expected coding gate to force methodology and verification, got ${chatCount} LLM calls`);
+  if (chatCount !== 8) {
+    throw new Error(`Expected automatic orchestration to force planning, inspection, change, and verification, got ${chatCount} LLM calls`);
   }
   const executedNames = toolExecutions.map(call => call.name);
-  for (const expectedName of ['brainstorm', 'write_file', 'read_file']) {
+  for (const expectedName of ['list_dir', 'brainstorm', 'write_file', 'read_file', 'verify']) {
     if (!executedNames.includes(expectedName)) {
       throw new Error(`Expected ${expectedName} call, got ${JSON.stringify(toolExecutions)}`);
     }
@@ -2210,7 +2323,7 @@ conversationProtocolTests.test('Coding tasks are gated until methodology, change
   const gateReasons = debugEvents
     .filter(event => event.label === 'Coding completion gate requested')
     .map(event => event.details.reason);
-  if (gateReasons.join(',') !== 'no_tool_evidence,missing_verification') {
+  if (gateReasons.join(',') !== 'automatic_plan_incomplete,automatic_plan_incomplete') {
     throw new Error(`Expected coding gate reasons, got ${JSON.stringify(gateReasons)}`);
   }
   const codingModePrompt = requestMessages[0].find(message =>
@@ -2219,8 +2332,208 @@ conversationProtocolTests.test('Coding tasks are gated until methodology, change
   if (!codingModePrompt) {
     throw new Error(`Expected coding task operating prompt, got ${JSON.stringify(requestMessages[0], null, 2)}`);
   }
+  const orchestrationPrompt = requestMessages[0].find(message =>
+    message.role === 'user' && message.content.includes('Automatic task orchestration is active')
+  );
+  if (!orchestrationPrompt) {
+    throw new Error(`Expected automatic orchestration prompt, got ${JSON.stringify(requestMessages[0], null, 2)}`);
+  }
   if (finalAnswers[0] !== 'Created coding-tool-test.html and verified it by reading the file back.') {
     throw new Error(`Expected verified final answer, got ${JSON.stringify(finalAnswers)}`);
+  }
+});
+
+conversationProtocolTests.test('Automatic orchestration drives a realistic 2048 multi-file task end to end', async () => {
+  const { ReActAgent } = await import('./src/core/agent.js');
+  const { ToolRegistry } = await import('./src/core/tool-registry.js');
+  const { MemoryManager } = await import('./src/memory/memory-manager.js');
+
+  let chatCount = 0;
+  const toolExecutions = [];
+  const finalAnswers = [];
+  const debugEvents = [];
+  const requestMessages = [];
+  const files = new Map();
+  const recordingUI = {
+    iteration() {},
+    toolCall() {},
+    toolResult() {},
+    toolError() {},
+    warn() {},
+    error() {},
+    info() {},
+    debug() {},
+    debugEvent(label, details) {
+      debugEvents.push({ label, details });
+    },
+    finalAnswer(text) {
+      finalAnswers.push(text);
+    },
+  };
+
+  const mockProvider = {
+    async chat(messages) {
+      chatCount++;
+      requestMessages.push(messages.map(message => ({
+        role: message.role,
+        content: message.content,
+      })));
+
+      const responses = {
+        1: 'FINAL_ANSWER: 2048 game is done.',
+        2: 'Thought: I need to inspect the workspace first.\nAction: CALL list_dir({"path":"."})',
+        3: 'Thought: I should plan the separated files.\nAction: CALL brainstorm({"topic":"2048 browser game","constraints":["separate HTML and JS","single playable screen"]})',
+        4: 'Thought: I will create the HTML shell.\nAction: CALL write_file({"path":"index.html","content":"<!doctype html><html><body><main id=\\"app\\"></main><script src=\\"game.js\\"></script></body></html>"})',
+        5: 'Thought: I will create the game logic separately.\nAction: CALL write_file({"path":"game.js","content":"const board = Array.from({ length: 4 }, () => Array(4).fill(0));\\nfunction spawn(){ board[0][0] = 2; }\\nspawn();\\nconsole.log(board.flat().join(\\",\\"));"})',
+        6: 'FINAL_ANSWER: Created index.html and game.js.',
+        7: 'Thought: I need to inspect the generated HTML.\nAction: CALL read_file({"path":"index.html"})',
+        8: 'Thought: I should inspect the generated JavaScript too.\nAction: CALL read_file({"path":"game.js"})',
+        9: 'Thought: I need fresh verification from the JS runtime.\nAction: CALL shell({"command":"node --check game.js"})',
+      };
+
+      return {
+        text: responses[chatCount] || 'FINAL_ANSWER: Created a separated 2048 implementation and verified game.js with node --check.',
+        toolCalls: [],
+        finishReason: responses[chatCount]?.startsWith('FINAL_ANSWER') ? 'stop' : 'tool_calls',
+      };
+    },
+    getMaxContextTokens() {
+      return 12000;
+    },
+    dispose() {},
+  };
+
+  const registry = new ToolRegistry();
+  for (const name of ['list_dir', 'brainstorm', 'write_file', 'read_file', 'shell']) {
+    registry.register({
+      name,
+      description: `${name} test tool`,
+      parameters: {
+        path: { type: 'string' },
+        content: { type: 'string' },
+        topic: { type: 'string' },
+        constraints: { type: 'array' },
+        command: { type: 'string' },
+      },
+      async handler(args) {
+        toolExecutions.push({ name, args });
+        if (name === 'list_dir') {
+          return '(empty directory)';
+        }
+        if (name === 'write_file') {
+          files.set(args.path, args.content);
+          return `File written successfully: ${args.path}`;
+        }
+        if (name === 'read_file') {
+          return files.get(args.path) || `Error: File not found: ${args.path}`;
+        }
+        if (name === 'shell') {
+          return { exitCode: 0, stdout: '', stderr: '' };
+        }
+        return { ok: true };
+      },
+    });
+  }
+
+  const agent = new ReActAgent(mockProvider, registry, new MemoryManager(TEST_CONFIG.testDir), {
+    maxIterations: 12,
+    workingDirectory: TEST_CONFIG.testDir,
+  }, recordingUI);
+
+  const realisticChinesePrompt = '不需要再澄清。请立即实现一个可玩的浏览器 2048：在 real-2048-test/index.html 和 real-2048-test/game.js 中创建，HTML 只负责结构并引用 game.js，JS 负责棋盘、移动、合并、随机生成 2/4、分数、胜负状态和键盘方向键控制。完成后必须读取生成文件并运行 node --check real-2048-test/game.js 验证。';
+  await agent.run(realisticChinesePrompt);
+
+  if (chatCount !== 10) {
+    throw new Error(`Expected 2048 orchestration to finish after all milestones, got ${chatCount} LLM calls`);
+  }
+  if (!files.get('index.html')?.includes('game.js')) {
+    throw new Error(`Expected index.html to reference game.js, got ${files.get('index.html')}`);
+  }
+  if (!files.get('game.js')?.includes('spawn')) {
+    throw new Error(`Expected game.js to contain game logic, got ${files.get('game.js')}`);
+  }
+
+  const executedNames = toolExecutions.map(call => call.name);
+  const expectedOrder = ['list_dir', 'brainstorm', 'write_file', 'write_file', 'read_file', 'read_file', 'shell'];
+  if (executedNames.join(',') !== expectedOrder.join(',')) {
+    throw new Error(`Expected orchestrated tool order ${expectedOrder.join(',')}, got ${executedNames.join(',')}`);
+  }
+  const shellCall = toolExecutions.find(call => call.name === 'shell');
+  if (shellCall?.args.command !== 'node --check game.js') {
+    throw new Error(`Expected node syntax verification, got ${JSON.stringify(shellCall)}`);
+  }
+
+  const gateReasons = debugEvents
+    .filter(event => event.label === 'Coding completion gate requested')
+    .map(event => event.details.reason);
+  if (gateReasons.join(',') !== 'automatic_plan_incomplete,automatic_plan_incomplete') {
+    throw new Error(`Expected premature final answers to be blocked by orchestration, got ${JSON.stringify(gateReasons)}`);
+  }
+  const progressMessages = requestMessages
+    .flat()
+    .filter(message => message.role === 'user' && message.content.includes('Automatic task orchestration update'));
+  const orchestrationPrompt = requestMessages[0].find(message =>
+    message.role === 'user' && message.content.includes('Automatic task orchestration is active')
+  );
+  if (!orchestrationPrompt) {
+    throw new Error(`Expected realistic Chinese 2048 task to enable automatic orchestration, got ${JSON.stringify(requestMessages[0], null, 2)}`);
+  }
+  if (!progressMessages.some(message => message.content.includes('verify_result: completed'))) {
+    throw new Error(`Expected orchestration progress to reach verification completion, got ${JSON.stringify(progressMessages)}`);
+  }
+  if (finalAnswers[0] !== 'Created a separated 2048 implementation and verified game.js with node --check.') {
+    throw new Error(`Expected verified 2048 final answer, got ${JSON.stringify(finalAnswers)}`);
+  }
+});
+
+conversationProtocolTests.test('Automatic orchestration recognizes terminal-compressed 2048 file tasks', async () => {
+  const { ReActAgent } = await import('./src/core/agent.js');
+  const { ToolRegistry } = await import('./src/core/tool-registry.js');
+  const { MemoryManager } = await import('./src/memory/memory-manager.js');
+
+  const requestMessages = [];
+  const mockProvider = {
+    async chat(messages) {
+      requestMessages.push(messages.map(message => ({
+        role: message.role,
+        content: message.content,
+      })));
+      return {
+        text: 'FINAL_ANSWER: done',
+        toolCalls: [],
+        finishReason: 'stop',
+      };
+    },
+    getMaxContextTokens() {
+      return 12000;
+    },
+    dispose() {},
+  };
+
+  const recordingUI = {
+    iteration() {},
+    toolCall() {},
+    toolResult() {},
+    toolError() {},
+    warn() {},
+    error() {},
+    info() {},
+    debug() {},
+    debugEvent() {},
+    finalAnswer() {},
+  };
+  const agent = new ReActAgent(mockProvider, new ToolRegistry(), new MemoryManager(TEST_CONFIG.testDir), {
+    maxIterations: 1,
+    workingDirectory: TEST_CONFIG.testDir,
+  }, recordingUI);
+
+  await agent.run('2048: real-2048-test/index.html real-2048-test/game.js; HTML references game.js; JS owns gameplay; node --check real-2048-test/game.js');
+
+  const orchestrationPrompt = requestMessages[0].find(message =>
+    message.role === 'user' && message.content.includes('Automatic task orchestration is active')
+  );
+  if (!orchestrationPrompt) {
+    throw new Error(`Expected compressed 2048 file task to enable automatic orchestration, got ${JSON.stringify(requestMessages[0], null, 2)}`);
   }
 });
 
