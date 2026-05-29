@@ -3202,6 +3202,7 @@ newFeaturesTests.test('System prompt advertises the aligned AI Engineering Maste
 newFeaturesTests.test('Slash command suggestions include skill commands while typing prefixes', async () => {
   const {
     buildSlashCommandSuggestions,
+    formatSlashCommandSuggestions,
     filterSlashCommandSuggestions,
   } = await import('./src/cli/slash-command-suggestions.js');
   const createTddTool = (await import('./src/tools/skills/tdd.js')).default;
@@ -3217,15 +3218,22 @@ newFeaturesTests.test('Slash command suggestions include skill commands while ty
   const tSuggestions = filterSlashCommandSuggestions(commands, '/t').map(command => command.name);
   const toSuggestions = filterSlashCommandSuggestions(commands, '/to').map(command => command.name);
   const afterSpaceSuggestions = filterSlashCommandSuggestions(commands, '/tdd ');
+  const rendered = formatSlashCommandSuggestions(filterSlashCommandSuggestions(commands, '/t'));
 
   if (!tSuggestions.includes('/tdd')) {
     throw new Error(`Expected /t to suggest /tdd, got ${JSON.stringify(tSuggestions)}`);
+  }
+  if (tSuggestions[0] !== '/tdd') {
+    throw new Error(`Expected skill slash command /tdd to be prioritized, got ${JSON.stringify(tSuggestions)}`);
   }
   if (!toSuggestions.includes('/to-prd') || !toSuggestions.includes('/to-issues')) {
     throw new Error(`Expected /to to suggest upstream hyphen skill names, got ${JSON.stringify(toSuggestions)}`);
   }
   if (afterSpaceSuggestions.length !== 0) {
     throw new Error(`Expected suggestions to stop after arguments begin, got ${JSON.stringify(afterSpaceSuggestions)}`);
+  }
+  if (rendered.includes('Test-driven development workflow tool')) {
+    throw new Error(`Expected compact command-only suggestions, got ${rendered}`);
   }
 
   console.log('     Slash command suggestions expose skill prefixes');

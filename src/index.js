@@ -65,6 +65,7 @@ import { enhancedUI } from './cli/enhanced-ui.js';
 import { createEnhancedCommands } from './cli/enhanced-commands.js';
 import {
   buildSlashCommandSuggestions,
+  formatSlashCommandSuggestions,
   filterSlashCommandSuggestions,
 } from './cli/slash-command-suggestions.js';
 
@@ -453,14 +454,10 @@ class AIEngineeringAgent {
     }
 
     this.lastSlashSuggestionKey = suggestionKey;
-    const rendered = suggestions
-      .map(command => `${enhancedUI.theme.primary(command.name)} ${enhancedUI.theme.dim(command.description)}`)
-      .join(enhancedUI.theme.dim('  |  '));
-
     process.stdout.write('\n');
     clearLine(process.stdout, 0);
     cursorTo(process.stdout, 0);
-    process.stdout.write(`${enhancedUI.theme.dim('Commands:')} ${rendered}\n`);
+    process.stdout.write(`${formatSlashCommandSuggestions(suggestions, enhancedUI.theme)}\n`);
     this.rl.prompt(true);
   }
 
