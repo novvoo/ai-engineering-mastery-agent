@@ -7,8 +7,10 @@
  * 2. ```tool\n{"name": "tool_name", "arguments": {...}}\n```
  * 3. <action>{"tool_name": {"param": "value"}}</action>
  * 4. {"action": {"tool_name": {"param": "value"}}}
- * 5. <tool>tool_name</tool><arg>value</arg>
- * 6. 自然语言描述（通过关键词匹配）
+ * 5. Mixed text containing {"action": {"tool_name": {"param": "value"}}}
+ * 6. <tool>tool_name</tool><arg>value</arg>
+ * 7. <function_call><function_name>tool</function_name>...</function_call>
+ * 8. 自然语言描述（通过关键词匹配）
  */
 
 export class TextToolParser {
@@ -35,7 +37,9 @@ export class TextToolParser {
     toolCalls.push(...this.#parseJSONBlockFormat(text));
     toolCalls.push(...this.#parseActionTagFormat(text));
     toolCalls.push(...this.#parseRawJSONActionFormat(text));
+    toolCalls.push(...this.#parseEmbeddedJSONActionFormat(text));
     toolCalls.push(...this.#parseXMLFormat(text));
+    toolCalls.push(...this.#parseFunctionCallTagFormat(text));
     toolCalls.push(...this.#parseNaturalLanguage(text));
 
     // 去重
@@ -123,7 +127,61 @@ export class TextToolParser {
   }
 
   /**
-   * 格式 5: <tool>tool_name</tool><arg>value</arg>
+   * 格式 5: mixed prose/final text with an embedded JSON action object.
+   */
+  #parseEmbeddedJSONActionFormat(text) {
+    if (!text.includes('"action"') && !text.includes("'action'")) {
+      return [];
+    }
+
+    const toolCalls = [];
+    for (const candidate of this.#extractJSONObjectCandidates(text)) {
+      const json = this.#safeJSONParse(candidate);
+      toolCalls.push(...this.#toolCallsFromJSON(json, 'embedded_JSON_action', toolCalls.length));
+    }
+    return toolCalls;
+  }
+
+  #extractJSONObjectCandidates(text) {
+    const candidates = [];
+    for (let start = text.indexOf('{'); start !== -1; start = text.indexOf('{', start + 1)) {
+      let depth = 0;
+      let inString = false;
+      let quote = '';
+      let escaped = false;
+
+      for (let index = start; index < text.length; index++) {
+        const char = text[index];
+        if (inString) {
+          if (escaped) {
+            escaped = false;
+          } else if (char === '\\') {
+            escaped = true;
+          } else if (char === quote) {
+            inString = false;
+            quote = '';
+          }
+          continue;
+        }
+
+        if (char === '"' || char === "'") {
+          inString = true;
+          quote = char;
+          continue;
+        }
+        if (char === '{') depth++;
+        if (char === '}') depth--;
+        if (depth === 0) {
+          candidates.push(text.slice(start, index + 1));
+          break;
+        }
+      }
+    }
+    return candidates;
+  }
+
+  /**
+   * 格式 6: <tool>tool_name</tool><arg>value</arg>
    */
   #parseXMLFormat(text) {
     const toolCalls = [];
@@ -156,7 +214,86 @@ export class TextToolParser {
   }
 
   /**
-   * 格式 6: 自然语言关键词匹配（fallback）
+   * 格式 7: <function_call><function_name>tool</function_name><parameters>...</parameters></function_call>
+   * Some OpenAI-compatible models emit this XML-ish shape for tool calls.
+   */
+  #parseFunctionCallTagFormat(text) {
+    const toolCalls = [];
+    const callRegex = /<function_call>\s*([\s\S]*?)\s*<\/function_call>/gi;
+    let match;
+
+    while ((match = callRegex.exec(text)) !== null) {
+      const body = match[1];
+      const nameMatch = body.match(/<function_name>\s*([^<]+?)\s*<\/function_name>/i)
+        || body.match(/<name>\s*([^<]+?)\s*<\/name>/i);
+      if (!nameMatch) continue;
+
+      const rawName = nameMatch[1].trim();
+      const resolved = this.#resolveFunctionTagToolName(rawName);
+      if (!this.#toolRegistry?.has?.(resolved)) {
+        continue;
+      }
+
+      const args = this.#extractFunctionTagArgs(body, resolved);
+      toolCalls.push({
+        id: `call_${Date.now()}_${toolCalls.length}`,
+        name: resolved,
+        arguments: args,
+        source: 'function_call_tag',
+      });
+    }
+
+    return toolCalls;
+  }
+
+  #resolveFunctionTagToolName(name) {
+    const normalized = String(name || '').trim().replace(/^\//, '').toLowerCase();
+    if (['bash', 'terminal', 'exec', 'execute_command', 'run_command', 'run_in_terminal'].includes(normalized)) {
+      return 'shell';
+    }
+    return this.#resolveToolName(normalized);
+  }
+
+  #extractFunctionTagArgs(body, toolName) {
+    const parametersMatch = body.match(/<parameters>\s*([\s\S]*?)\s*<\/parameters>/i);
+    const parameters = parametersMatch ? parametersMatch[1].trim() : body;
+
+    const json = this.#safeJSONParse(parameters);
+    if (json && typeof json === 'object' && !Array.isArray(json)) {
+      return this.#normalizeFunctionTagArgs(json, toolName);
+    }
+
+    const args = {};
+    const parameterRegex = /<parameter(?:\s+name="([^"]+)")?>\s*([\s\S]*?)\s*<\/parameter>/gi;
+    let parameterMatch;
+    let index = 0;
+
+    while ((parameterMatch = parameterRegex.exec(parameters)) !== null) {
+      let key = parameterMatch[1]?.trim();
+      let value = parameterMatch[2].trim();
+      const inlineName = value.match(/^([A-Za-z_][\w-]*)\s*\n([\s\S]*)$/);
+
+      if (!key && inlineName) {
+        key = inlineName[1];
+        value = inlineName[2].trim();
+      }
+
+      args[key || `arg${index++}`] = value;
+    }
+
+    return this.#normalizeFunctionTagArgs(args, toolName);
+  }
+
+  #normalizeFunctionTagArgs(args, toolName) {
+    if (toolName === 'shell') {
+      const command = args.command || args.commands || args.cmd || args.code || args.arg0;
+      return command ? { command } : args;
+    }
+    return args;
+  }
+
+  /**
+   * 格式 8: 自然语言关键词匹配（fallback）
    */
   #parseNaturalLanguage(text) {
     const toolCalls = [];
@@ -354,7 +491,7 @@ export class TextToolParser {
     }
 
     const [rawName, args] = entries[0];
-    const name = this.#resolveToolName(rawName);
+    const name = this.#resolveFunctionTagToolName(rawName);
     if (!this.#toolRegistry?.has?.(name)) {
       return [];
     }
@@ -362,7 +499,10 @@ export class TextToolParser {
     return [{
       id: `call_${Date.now()}_${startIndex}`,
       name,
-      arguments: args && typeof args === 'object' && !Array.isArray(args) ? args : {},
+      arguments: this.#normalizeFunctionTagArgs(
+        args && typeof args === 'object' && !Array.isArray(args) ? args : {},
+        name
+      ),
       source,
     }];
   }

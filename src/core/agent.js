@@ -664,6 +664,9 @@ export class ReActAgent {
 
     const isLikelyTrivial = [
       /typo|拼写|文案|注释|comment|rename only|只改名/,
+      /简单|小.*(文件|页面|html)|单个.*(文件|页面|html)|独立.*(文件|页面|html)|直接.*(创建|写入|写)|demo|示例|standalone|single[- ]file|simple/,
+      /(创建|新建|写).*(html\s*文件|\.html)/,
+      /\.html\b.*\b(write[_ -]?file|writefile|read[_ -]?file|readfile)\b/,
     ].some(pattern => pattern.test(input));
 
     return { isCodingTask, isModificationTask, isBugTask, isLikelyTrivial };
@@ -672,13 +675,14 @@ export class ReActAgent {
   #buildCodingTaskOperatingPrompt(userInput) {
     const hasMethodologyTools = this.#hasAnyTool(METHODOLOGY_TOOLS);
     const methodologyLine = hasMethodologyTools
-      ? 'Use the built-in methodology tools proactively: setup for missing project context, diagnose for bugs, grill/zoom_out for unclear or shared changes, brainstorm/tdd before implementation when non-trivial, to_prd/to_issues for formal planning, review after editing, and verify before completion.'
+      ? 'Use the built-in methodology tools proactively when they fit: setup only when project context is missing, diagnose for bugs, grill/zoom_out for unclear or shared changes, brainstorm/tdd before implementation when non-trivial, to_prd/to_issues for formal planning, review after editing, and verify before completion. For a small standalone file creation, do not run setup repeatedly; write the file and inspect it.'
       : 'Use the same methodology directly in your reasoning because methodology tools are not registered in this runtime.';
 
     return (
       `Coding task mode is active for the previous user request:\n${userInput}\n\n` +
       `Act like a responsible coding agent. First understand the repo with tools, then make the smallest necessary change, then verify with fresh evidence.\n` +
       `${methodologyLine}\n` +
+      `For file creation or file edits, prefer write_file/edit_file directly when available; shell is for inspection, commands, and verification, not a substitute for editing files. ` +
       `If you write or edit files, you must inspect the result and run an appropriate verification command or verify tool before FINAL_ANSWER. ` +
       `Final answers must mention what changed and what verification passed.`
     );
@@ -746,7 +750,7 @@ export class ReActAgent {
       `Original user request: ${userInput}\n` +
       `Reason: ${reasonText}\n` +
       `Evidence so far: ${JSON.stringify(gate.evidence)}\n\n` +
-      `Continue working now. Use the appropriate methodology/tooling path, inspect your own changes, run a relevant verification command or verify tool, and only then answer with FINAL_ANSWER including what changed and what passed.`
+      `Continue working now. If this task creates or modifies a file and write_file/edit_file is available, call write_file or edit_file next to make the change. Inspect your own changes, run a relevant verification command or verify tool, and only then answer with FINAL_ANSWER including what changed and what passed.`
     );
   }
 

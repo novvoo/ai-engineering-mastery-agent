@@ -1876,6 +1876,53 @@ conversationProtocolTests.test('Text parser accepts action tag and raw JSON acti
   }
 });
 
+conversationProtocolTests.test('Text parser accepts function_call XML and maps bash to shell', async () => {
+  const { TextToolParser } = await import('./src/core/text-tool-parser.js');
+  const { ToolRegistry } = await import('./src/core/tool-registry.js');
+
+  const registry = new ToolRegistry();
+  registry.register({
+    name: 'shell',
+    description: 'Execute a shell command',
+    parameters: { command: { type: 'string' } },
+    async handler() {},
+  });
+
+  const parser = new TextToolParser(registry);
+  const calls = parser.parse(`
+<function_call>
+  <function_name>bash</function_name>
+  <parameters>
+    <parameter>commands
+pwd && ls -la
+    </parameter>
+  </parameters>
+</function_call>
+`);
+
+  if (calls.length !== 1 || calls[0].name !== 'shell' || calls[0].arguments.command !== 'pwd && ls -la') {
+    throw new Error(`Expected bash function_call XML to map to shell command, got ${JSON.stringify(calls)}`);
+  }
+
+  const embeddedCalls = parser.parse(`
+Final Answer
+{"memory":"Need to inspect files","action":{"run_in_terminal":{"command":"ls -la","description":"List files"}}}
+`);
+
+  if (embeddedCalls.length !== 1 || embeddedCalls[0].name !== 'shell' || embeddedCalls[0].arguments.command !== 'ls -la') {
+    throw new Error(`Expected embedded run_in_terminal action to map to shell command, got ${JSON.stringify(embeddedCalls)}`);
+  }
+
+  const runCommandCalls = parser.parse(`
+Final Answer
+{"action":{"run_command":{"command":"cat weather-card.html | head -20"}}}
+`);
+
+  if (runCommandCalls.length !== 1 || runCommandCalls[0].name !== 'shell' || runCommandCalls[0].arguments.command !== 'cat weather-card.html | head -20') {
+    throw new Error(`Expected embedded run_command action to map to shell command, got ${JSON.stringify(runCommandCalls)}`);
+  }
+});
+
 conversationProtocolTests.test('Text parser maps upstream slash and hyphen skill names to runtime tool names', async () => {
   const { TextToolParser } = await import('./src/core/text-tool-parser.js');
   const { ToolRegistry } = await import('./src/core/tool-registry.js');
@@ -2196,7 +2243,7 @@ conversationProtocolTests.test('Coding tasks are gated until methodology, change
     workingDirectory: TEST_CONFIG.testDir,
   }, recordingUI);
 
-  await agent.run('Create a simple HTML file named coding-tool-test.html');
+  await agent.run('Implement a non-trivial coding feature named coding-tool-test');
 
   if (chatCount !== 6) {
     throw new Error(`Expected coding gate to force methodology and verification, got ${chatCount} LLM calls`);
@@ -2220,6 +2267,118 @@ conversationProtocolTests.test('Coding tasks are gated until methodology, change
     throw new Error(`Expected coding task operating prompt, got ${JSON.stringify(requestMessages[0], null, 2)}`);
   }
   if (finalAnswers[0] !== 'Created coding-tool-test.html and verified it by reading the file back.') {
+    throw new Error(`Expected verified final answer, got ${JSON.stringify(finalAnswers)}`);
+  }
+});
+
+conversationProtocolTests.test('Standalone HTML tasks are gated for write and verification without mandatory methodology', async () => {
+  const { ReActAgent } = await import('./src/core/agent.js');
+  const { ToolRegistry } = await import('./src/core/tool-registry.js');
+  const { MemoryManager } = await import('./src/memory/memory-manager.js');
+
+  let chatCount = 0;
+  const toolExecutions = [];
+  const debugEvents = [];
+  const finalAnswers = [];
+  const recordingUI = {
+    iteration() {},
+    toolCall() {},
+    toolResult() {},
+    toolError() {},
+    warn() {},
+    error() {},
+    info() {},
+    debug() {},
+    debugEvent(label, details) {
+      debugEvents.push({ label, details });
+    },
+    finalAnswer(text) {
+      finalAnswers.push(text);
+    },
+  };
+
+  const mockProvider = {
+    async chat() {
+      chatCount++;
+      if (chatCount === 1) {
+        return {
+          text: 'FINAL_ANSWER: Created weather-card.html.',
+          toolCalls: [],
+          finishReason: 'stop',
+        };
+      }
+      if (chatCount === 2) {
+        return {
+          text: 'Action: CALL write_file({"path":"weather-card.html","content":"<!doctype html><title>Weather</title><article>Sunny</article>"})',
+          toolCalls: [],
+          finishReason: 'tool_calls',
+        };
+      }
+      if (chatCount === 3) {
+        return {
+          text: 'FINAL_ANSWER: Created weather-card.html.',
+          toolCalls: [],
+          finishReason: 'stop',
+        };
+      }
+      if (chatCount === 4) {
+        return {
+          text: 'Action: CALL read_file({"path":"weather-card.html"})',
+          toolCalls: [],
+          finishReason: 'tool_calls',
+        };
+      }
+      return {
+        text: 'FINAL_ANSWER: Created weather-card.html and verified it by reading it back.',
+        toolCalls: [],
+        finishReason: 'stop',
+      };
+    },
+    getMaxContextTokens() {
+      return 8000;
+    },
+    dispose() {},
+  };
+
+  const registry = new ToolRegistry();
+  for (const name of ['brainstorm', 'write_file', 'read_file']) {
+    registry.register({
+      name,
+      description: `${name} test tool`,
+      parameters: {
+        path: { type: 'string' },
+        content: { type: 'string' },
+      },
+      async handler(args) {
+        toolExecutions.push({ name, args });
+        return name === 'read_file' ? '<!doctype html><title>Weather</title><article>Sunny</article>' : { ok: true };
+      },
+    });
+  }
+
+  const agent = new ReActAgent(mockProvider, registry, new MemoryManager(TEST_CONFIG.testDir), {
+    maxIterations: 8,
+    workingDirectory: TEST_CONFIG.testDir,
+  }, recordingUI);
+
+  await agent.run('直接创建一个天气卡片的 HTML 文件 weather-card.html');
+
+  const executedNames = toolExecutions.map(call => call.name);
+  if (executedNames.includes('brainstorm')) {
+    throw new Error(`Standalone HTML task should not require methodology, got ${JSON.stringify(toolExecutions)}`);
+  }
+  for (const expectedName of ['write_file', 'read_file']) {
+    if (!executedNames.includes(expectedName)) {
+      throw new Error(`Expected ${expectedName} call, got ${JSON.stringify(toolExecutions)}`);
+    }
+  }
+  const gateReasons = debugEvents
+    .filter(event => event.label === 'Coding completion gate requested')
+    .map(event => event.details.reason);
+  if (gateReasons.join(',') !== 'no_tool_evidence,missing_verification') {
+    throw new Error(`Expected coding gate to require write and verification only, got ${JSON.stringify(gateReasons)}`);
+  }
+  if (finalAnswers[0] !== 'Created weather-card.html and verified it by reading it back.') {
     throw new Error(`Expected verified final answer, got ${JSON.stringify(finalAnswers)}`);
   }
 });
