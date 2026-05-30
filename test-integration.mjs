@@ -1865,6 +1865,12 @@ conversationProtocolTests.test('Text parser accepts action tag and raw JSON acti
     parameters: { path: { type: 'string' }, content: { type: 'string' } },
     async handler() {},
   });
+  registry.register({
+    name: 'brainstorm',
+    description: 'Plan solution',
+    parameters: { problem: { type: 'string' } },
+    async handler() {},
+  });
 
   const parser = new TextToolParser(registry);
   const actionTagCalls = parser.parse('<action>\n{"glob": {"pattern": "*.js"}}\n</action>');
@@ -1872,9 +1878,15 @@ conversationProtocolTests.test('Text parser accepts action tag and raw JSON acti
   const mkdirActionCalls = parser.parse('<action>\n{"create_directory": {"path": "real-2048-test"}}\n</action>');
   const toolCallTagCalls = parser.parse('<tool_call>\n<name>list_dir</name>\n<parameter>path</parameter>\n<parameter>.</parameter>\n</tool_call>');
   const toolCallArgumentsTagCalls = parser.parse('<tool_call>\n<name>list_dir</name>\n<arguments>{"path": "."}</arguments>\n</tool_call>');
+  const toolCallParametersTagCalls = parser.parse('<tool_call>\n<function_name>list_dir</function_name>\n<parameters>{"path": "."}</parameters>\n</tool_call>');
   const toolCallFunctionTagCalls = parser.parse('<tool_call>\n<function>list_dir</function>\n<parameter>path</parameter>\n<parameter>.</parameter>\n</function>\n</tool_call>');
+  const malformedParameterCalls = parser.parse('<tool_call>\n<function>write_file</function>\n<parameter>file_path</parameter>\n<parameter>real-2048-test/index.html</parameter>\n<parameter=content></parameter>\n<parameter><script src="game.js"></script></parameter>\n</tool_call>');
+  const planFunctionCalls = parser.parse('<tool_call>\n<function>plan</function>\n<parameter>steps</parameter>\n<parameter>["Create files", "Verify"]</parameter>\n</tool_call>');
   const filePathAliasCalls = parser.parse('<action>\n{"write_file": {"file_path": "real-2048-test/index.html", "content": "<script src=\\"game.js\\"></script>"}}\n</action>');
+  const looseRawJSONCalls = parser.parse('{"action":{"write_file":{"file_path":"real-2048-test/index.html","content":"<!DOCTYPE html>\\n<html lang=\\"zh-CN\\">\\n<meta name=\\"viewport\\" content=\\"width=device-width, initial-scale=1.0\\">\\n<script src=\\"game.js\\"></script>"}}}');
   const namedXmlCalls = parser.parse('<list_dir>\n<path>.</path>\n</list_dir>');
+  const functionCalls = parser.parse('<function_calls>\n<function>\n<name>list_dir</name>\n<parameter<path>.</parameter>\n</function>\n</function_calls>');
+  const functionPlanCalls = parser.parse('<function_calls>\n<function>\n<name>plan_solution</name>\n<parameter=plan>\nCreate 2048 files\n</function>\n</function_calls>');
   const rawJSONCalls = parser.parse(JSON.stringify({
     memory: 'User wants files',
     next_goal: 'List directory',
@@ -1899,14 +1911,32 @@ conversationProtocolTests.test('Text parser accepts action tag and raw JSON acti
   if (toolCallArgumentsTagCalls.length !== 1 || toolCallArgumentsTagCalls[0].name !== 'list_dir' || toolCallArgumentsTagCalls[0].arguments.path !== '.') {
     throw new Error(`Expected tool_call arguments tag to map JSON args to list_dir, got ${JSON.stringify(toolCallArgumentsTagCalls)}`);
   }
+  if (toolCallParametersTagCalls.length !== 1 || toolCallParametersTagCalls[0].name !== 'list_dir' || toolCallParametersTagCalls[0].arguments.path !== '.') {
+    throw new Error(`Expected tool_call function_name/parameters tags to map JSON args to list_dir, got ${JSON.stringify(toolCallParametersTagCalls)}`);
+  }
   if (toolCallFunctionTagCalls.length !== 1 || toolCallFunctionTagCalls[0].name !== 'list_dir' || toolCallFunctionTagCalls[0].arguments.path !== '.') {
     throw new Error(`Expected tool_call function tag to map parameter pair to list_dir, got ${JSON.stringify(toolCallFunctionTagCalls)}`);
+  }
+  if (malformedParameterCalls.length !== 1 || malformedParameterCalls[0].name !== 'write_file' || malformedParameterCalls[0].arguments.path !== 'real-2048-test/index.html' || !malformedParameterCalls[0].arguments.content.includes('game.js')) {
+    throw new Error(`Expected malformed parameter content to parse write_file, got ${JSON.stringify(malformedParameterCalls)}`);
+  }
+  if (planFunctionCalls.length !== 1 || planFunctionCalls[0].name !== 'brainstorm' || !planFunctionCalls[0].arguments.problem.includes('Create files')) {
+    throw new Error(`Expected plan function to map to brainstorm, got ${JSON.stringify(planFunctionCalls)}`);
   }
   if (filePathAliasCalls.length !== 1 || filePathAliasCalls[0].name !== 'write_file' || filePathAliasCalls[0].arguments.path !== 'real-2048-test/index.html') {
     throw new Error(`Expected file_path alias to map to path for write_file, got ${JSON.stringify(filePathAliasCalls)}`);
   }
+  if (looseRawJSONCalls.length !== 1 || looseRawJSONCalls[0].name !== 'write_file' || looseRawJSONCalls[0].arguments.path !== 'real-2048-test/index.html' || !looseRawJSONCalls[0].arguments.content.includes('initial-scale=1.0')) {
+    throw new Error(`Expected loose raw JSON action with multiline content to parse write_file, got ${JSON.stringify(looseRawJSONCalls)}`);
+  }
   if (namedXmlCalls.length !== 1 || namedXmlCalls[0].name !== 'list_dir' || namedXmlCalls[0].arguments.path !== '.') {
     throw new Error(`Expected named XML tool tag to parse list_dir path, got ${JSON.stringify(namedXmlCalls)}`);
+  }
+  if (functionCalls.length !== 1 || functionCalls[0].name !== 'list_dir' || functionCalls[0].arguments.path !== '.') {
+    throw new Error(`Expected function_calls broken path parameter to parse list_dir, got ${JSON.stringify(functionCalls)}`);
+  }
+  if (functionPlanCalls.length !== 1 || functionPlanCalls[0].name !== 'brainstorm' || !functionPlanCalls[0].arguments.problem.includes('2048')) {
+    throw new Error(`Expected function_calls plan_solution to map to brainstorm, got ${JSON.stringify(functionPlanCalls)}`);
   }
   if (rawJSONCalls.length !== 1 || rawJSONCalls[0].name !== 'list_dir' || rawJSONCalls[0].arguments.path !== '.') {
     throw new Error(`Expected raw JSON list_dir call, got ${JSON.stringify(rawJSONCalls)}`);
@@ -1940,6 +1970,8 @@ conversationProtocolTests.test('Text parser translates upstream tool_code helper
     ...parser.parse('<tool_code>\nprint(read_file(path="real-2048-test/game.js"))\n</tool_code>'),
     ...parser.parse('<tool_code>\nprint(shell("node --check real-2048-test/game.js"))\n</tool_code>'),
     ...parser.parse('<tool_code>\nwrite_file(path="real-2048-test/index.html", content="""<script src="game.js"></script>""")\n</tool_code>'),
+    ...parser.parse('<tool_code>\nwrite_file(path="escaped.html", content="<!DOCTYPE html>\\n<html lang=\\"en\\"></html>")\n</tool_code>'),
+    ...parser.parse('<tool_code>\nprint(write_file("viewport.html", "<meta name=\\"viewport\\" content=\\"width=device-width, initial-scale=1.0\\">\\n<script>Array.from({ length: 4 }, () => 0)</script>"))\n</tool_code>'),
     ...parser.parse('<tool_code>\ninspect_workspace()\n</tool_code>'),
     ...parser.parse('<tool_code>\nplan_solution()\n</tool_code>'),
   ];
@@ -1948,6 +1980,8 @@ conversationProtocolTests.test('Text parser translates upstream tool_code helper
   const readCall = calls.find(call => call.name === 'read_file');
   const shellCall = calls.find(call => call.name === 'shell');
   const writeCall = calls.find(call => call.name === 'write_file');
+  const escapedWriteCall = calls.find(call => call.name === 'write_file' && call.arguments.path === 'escaped.html');
+  const viewportWriteCall = calls.find(call => call.name === 'write_file' && call.arguments.path === 'viewport.html');
   const inspectCall = calls.find(call => call.name === 'list_dir' && call.source === 'tool_code' && call.arguments.path === '.');
   const planCall = calls.find(call => call.name === 'brainstorm');
   if (listCall?.arguments.path !== 'real-2048-test') {
@@ -1961,6 +1995,12 @@ conversationProtocolTests.test('Text parser translates upstream tool_code helper
   }
   if (writeCall?.arguments.path !== 'real-2048-test/index.html' || !writeCall.arguments.content.includes('game.js')) {
     throw new Error(`Expected write_file helper path and content, got ${JSON.stringify(calls)}`);
+  }
+  if (!escapedWriteCall?.arguments.content.includes('<html lang="en">')) {
+    throw new Error(`Expected escaped quoted content to decode, got ${JSON.stringify(calls)}`);
+  }
+  if (!viewportWriteCall?.arguments.content.includes('initial-scale=1.0') || !viewportWriteCall.arguments.content.includes('Array.from({ length: 4 }')) {
+    throw new Error(`Expected tool_code parser to preserve commas and parentheses inside quoted content, got ${JSON.stringify(calls)}`);
   }
   if (!inspectCall) {
     throw new Error(`Expected inspect_workspace helper to map to list_dir '.', got ${JSON.stringify(calls)}`);
@@ -2383,12 +2423,12 @@ conversationProtocolTests.test('Automatic orchestration drives a realistic 2048 
         1: 'FINAL_ANSWER: 2048 game is done.',
         2: 'Thought: I need to inspect the workspace first.\nAction: CALL list_dir({"path":"."})',
         3: 'Thought: I should plan the separated files.\nAction: CALL brainstorm({"topic":"2048 browser game","constraints":["separate HTML and JS","single playable screen"]})',
-        4: 'Thought: I will create the HTML shell.\nAction: CALL write_file({"path":"index.html","content":"<!doctype html><html><body><main id=\\"app\\"></main><script src=\\"game.js\\"></script></body></html>"})',
-        5: 'Thought: I will create the game logic separately.\nAction: CALL write_file({"path":"game.js","content":"const board = Array.from({ length: 4 }, () => Array(4).fill(0));\\nfunction spawn(){ board[0][0] = 2; }\\nspawn();\\nconsole.log(board.flat().join(\\",\\"));"})',
+        4: 'Thought: I will create the HTML shell.\nAction: CALL write_file({"path":"real-2048-test/index.html","content":"<!doctype html><html><body><main id=\\"app\\"></main><script src=\\"game.js\\"></script></body></html>"})',
+        5: 'Thought: I will create the game logic separately.\nAction: CALL write_file({"path":"real-2048-test/game.js","content":"const board = Array.from({ length: 4 }, () => Array(4).fill(0));\\nfunction spawn(){ board[0][0] = 2; }\\nspawn();\\nconsole.log(board.flat().join(\\",\\"));"})',
         6: 'FINAL_ANSWER: Created index.html and game.js.',
-        7: 'Thought: I need to inspect the generated HTML.\nAction: CALL read_file({"path":"index.html"})',
-        8: 'Thought: I should inspect the generated JavaScript too.\nAction: CALL read_file({"path":"game.js"})',
-        9: 'Thought: I need fresh verification from the JS runtime.\nAction: CALL shell({"command":"node --check game.js"})',
+        7: 'Thought: I need to inspect the generated HTML.\nAction: CALL read_file({"path":"real-2048-test/index.html"})',
+        8: 'Thought: I should inspect the generated JavaScript too.\nAction: CALL read_file({"path":"real-2048-test/game.js"})',
+        9: 'Thought: I need fresh verification from the JS runtime.\nAction: CALL shell({"command":"node --check real-2048-test/game.js"})',
       };
 
       return {
@@ -2446,11 +2486,11 @@ conversationProtocolTests.test('Automatic orchestration drives a realistic 2048 
   if (chatCount !== 10) {
     throw new Error(`Expected 2048 orchestration to finish after all milestones, got ${chatCount} LLM calls`);
   }
-  if (!files.get('index.html')?.includes('game.js')) {
-    throw new Error(`Expected index.html to reference game.js, got ${files.get('index.html')}`);
+  if (!files.get('real-2048-test/index.html')?.includes('game.js')) {
+    throw new Error(`Expected index.html to reference game.js, got ${files.get('real-2048-test/index.html')}`);
   }
-  if (!files.get('game.js')?.includes('spawn')) {
-    throw new Error(`Expected game.js to contain game logic, got ${files.get('game.js')}`);
+  if (!files.get('real-2048-test/game.js')?.includes('spawn')) {
+    throw new Error(`Expected game.js to contain game logic, got ${files.get('real-2048-test/game.js')}`);
   }
 
   const executedNames = toolExecutions.map(call => call.name);
@@ -2459,7 +2499,7 @@ conversationProtocolTests.test('Automatic orchestration drives a realistic 2048 
     throw new Error(`Expected orchestrated tool order ${expectedOrder.join(',')}, got ${executedNames.join(',')}`);
   }
   const shellCall = toolExecutions.find(call => call.name === 'shell');
-  if (shellCall?.args.command !== 'node --check game.js') {
+  if (shellCall?.args.command !== 'node --check real-2048-test/game.js') {
     throw new Error(`Expected node syntax verification, got ${JSON.stringify(shellCall)}`);
   }
 
@@ -3631,7 +3671,8 @@ newFeaturesTests.test('PTY tools - interactive stdin/stdout round trip', async (
     if (!startResult.session_id || startResult.status !== 'running') {
       throw new Error(`Expected running PTY session, got ${JSON.stringify(startResult)}`);
     }
-    if (!startResult.output.includes('ready>')) {
+    const usedPipeFallback = startResult.output.includes('PTY unavailable');
+    if (!startResult.output.includes('ready>') && !usedPipeFallback) {
       throw new Error(`Expected initial PTY prompt, got ${startResult.output}`);
     }
 
@@ -3641,6 +3682,10 @@ newFeaturesTests.test('PTY tools - interactive stdin/stdout round trip', async (
       wait_ms: 800,
     }, context));
 
+    const combinedOutput = `${startResult.output}\n${writeResult.output}`;
+    if (!combinedOutput.includes('ready>')) {
+      throw new Error(`Expected PTY prompt after settling, got ${combinedOutput}`);
+    }
     if (!writeResult.output.includes('echo:ping')) {
       throw new Error(`Expected PTY echo output, got ${writeResult.output}`);
     }

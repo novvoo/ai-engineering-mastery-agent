@@ -36,11 +36,14 @@ export class TextToolParser {
     toolCalls.push(...this.#parseJSONBlockFormat(text));
     toolCalls.push(...this.#parseActionTagFormat(text));
     toolCalls.push(...this.#parseRawJSONActionFormat(text));
+    toolCalls.push(...this.#parseFunctionCallsFormat(text));
     toolCalls.push(...this.#parseToolCallTagFormat(text));
     toolCalls.push(...this.#parseXMLFormat(text));
     toolCalls.push(...this.#parseNamedToolXMLFormat(text));
     toolCalls.push(...this.#parseToolCodeFormat(text));
-    toolCalls.push(...this.#parseNaturalLanguage(text));
+    if (toolCalls.length === 0) {
+      toolCalls.push(...this.#parseNaturalLanguage(text));
+    }
 
     // 去重
     return this.#deduplicate(toolCalls);
@@ -123,7 +126,126 @@ export class TextToolParser {
       return [];
     }
 
-    return this.#toolCallsFromJSON(this.#safeJSONParse(trimmed), 'raw_JSON_action', 0);
+    const parsedCalls = this.#toolCallsFromJSON(this.#safeJSONParse(trimmed), 'raw_JSON_action', 0);
+    if (parsedCalls.length > 0) {
+      return parsedCalls;
+    }
+    return this.#parseLooseRawJSONAction(trimmed);
+  }
+
+  #parseLooseRawJSONAction(text) {
+    const actionMatch = text.match(/"action"\s*:\s*\{\s*"([^"]+)"\s*:\s*\{([\s\S]*)\}\s*\}\s*$/);
+    if (!actionMatch) {
+      return [];
+    }
+
+    const rawArgs = this.#parseLooseJSONStringObject(actionMatch[2]);
+    const { name, args } = this.#normalizeJSONToolCall(actionMatch[1], rawArgs);
+    if (!this.#toolRegistry?.has?.(name)) {
+      return [];
+    }
+
+    return [{
+      id: `call_${Date.now()}_0`,
+      name,
+      arguments: args && typeof args === 'object' && !Array.isArray(args) ? args : {},
+      source: 'raw_JSON_action_loose',
+    }];
+  }
+
+  #parseLooseJSONStringObject(body) {
+    const args = {};
+    let index = 0;
+    const text = String(body || '');
+
+    while (index < text.length) {
+      const keyStart = text.indexOf('"', index);
+      if (keyStart === -1) {
+        break;
+      }
+      const keyEnd = this.#findJSONStringEnd(text, keyStart);
+      if (keyEnd === -1) {
+        break;
+      }
+      const key = this.#decodeStringLiteral(text.slice(keyStart + 1, keyEnd));
+      const colon = text.indexOf(':', keyEnd + 1);
+      if (colon === -1) {
+        break;
+      }
+      let valueStart = colon + 1;
+      while (/\s/.test(text[valueStart] || '')) {
+        valueStart++;
+      }
+
+      if (text[valueStart] !== '"') {
+        const valueEnd = this.#findLooseScalarEnd(text, valueStart);
+        args[key] = text.slice(valueStart, valueEnd).trim();
+        index = valueEnd + 1;
+        continue;
+      }
+
+      const valueEnd = this.#findLooseStringEnd(text, valueStart);
+      if (valueEnd === -1) {
+        break;
+      }
+      args[key] = this.#decodeStringLiteral(text.slice(valueStart + 1, valueEnd));
+      index = valueEnd + 1;
+    }
+
+    return args;
+  }
+
+  #findLooseStringEnd(text, start) {
+    let escaped = false;
+    for (let i = start + 1; i < text.length; i++) {
+      const char = text[i];
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (char === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (char !== '"') {
+        continue;
+      }
+      let next = i + 1;
+      while (/\s/.test(text[next] || '')) {
+        next++;
+      }
+      if (text[next] === ',' || text[next] === '}' || next >= text.length) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  #findJSONStringEnd(text, start) {
+    let escaped = false;
+    for (let i = start + 1; i < text.length; i++) {
+      const char = text[i];
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (char === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (char === '"') {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  #findLooseScalarEnd(text, start) {
+    let index = start;
+    while (index < text.length && text[index] !== ',' && text[index] !== '}') {
+      index++;
+    }
+    return index;
   }
 
   /**
@@ -169,13 +291,13 @@ export class TextToolParser {
 
     while ((match = callRegex.exec(text)) !== null) {
       const block = match[1];
-      const nameMatch = block.match(/<(?:name|function)>\s*([^<]+?)\s*<\/(?:name|function)>/i);
+      const nameMatch = block.match(/<(?:name|function|function_name)>\s*([^<]+?)\s*<\/(?:name|function|function_name)>/i);
       if (!nameMatch) {
         continue;
       }
 
       let rawArgs = {};
-      const argumentsMatch = block.match(/<arguments>\s*([\s\S]*?)\s*<\/arguments>/i);
+      const argumentsMatch = block.match(/<(?:arguments|parameters)>\s*([\s\S]*?)\s*<\/(?:arguments|parameters)>/i);
       if (argumentsMatch) {
         rawArgs = this.#safeJSONParse(argumentsMatch[1].trim()) || {};
       }
@@ -184,9 +306,25 @@ export class TextToolParser {
           name: parameterMatch[1],
           value: parameterMatch[2].trim(),
         }));
+      const malformedParameterValues = Array.from(block.matchAll(/<parameter=([A-Za-z_][\w-]*)>\s*<\/parameter>\s*<parameter>\s*([\s\S]*?)\s*<\/parameter>/gi))
+        .map(parameterMatch => ({
+          name: parameterMatch[1],
+          value: parameterMatch[2].trim(),
+        }));
 
       if (Object.keys(rawArgs).length > 0) {
         // Prefer explicit JSON arguments when provided.
+      } else if (malformedParameterValues.length > 0) {
+        for (const parameter of malformedParameterValues) {
+          rawArgs[parameter.name] = parameter.value;
+        }
+        for (let i = 0; i < parameterValues.length; i += 2) {
+          const current = parameterValues[i];
+          const next = parameterValues[i + 1];
+          if (current && next) {
+            rawArgs[current.value] = next.value;
+          }
+        }
       } else if (parameterValues.length === 1) {
         rawArgs.value = parameterValues[0].value;
       } else {
@@ -211,6 +349,57 @@ export class TextToolParser {
         name,
         arguments: this.#normalizeLooseArgs(name, args),
         source: 'tool_call_tag',
+      });
+    }
+
+    return toolCalls;
+  }
+
+  #parseFunctionCallsFormat(text) {
+    const toolCalls = [];
+    const functionRegex = /<function>\s*([\s\S]*?)\s*<\/function>/gi;
+    let match;
+
+    while ((match = functionRegex.exec(text)) !== null) {
+      const block = match[1];
+      const nameMatch = block.match(/<name>\s*([^<]+?)\s*<\/name>/i);
+      if (!nameMatch) {
+        continue;
+      }
+
+      const rawArgs = {};
+      for (const parameterMatch of block.matchAll(/<parameter<([A-Za-z_][\w-]*)>\s*([\s\S]*?)\s*<\/parameter>/gi)) {
+        rawArgs[parameterMatch[1]] = parameterMatch[2].trim();
+      }
+      for (const parameterMatch of block.matchAll(/<parameter=([A-Za-z_][\w-]*)>\s*([\s\S]*?)(?=<\/function>|<parameter[=>]|$)/gi)) {
+        rawArgs[parameterMatch[1]] = parameterMatch[2].trim();
+      }
+
+      const parameterValues = Array.from(block.matchAll(/<parameter(?:\s+name="([^"]+)")?>\s*([\s\S]*?)\s*<\/parameter>/gi))
+        .map(parameterMatch => ({
+          name: parameterMatch[1],
+          value: parameterMatch[2].trim(),
+        }));
+      for (let i = 0; i < parameterValues.length; i += 2) {
+        const current = parameterValues[i];
+        const next = parameterValues[i + 1];
+        if (current?.name) {
+          rawArgs[current.name] = current.value;
+        } else if (current && next) {
+          rawArgs[current.value] = next.value;
+        }
+      }
+
+      const { name, args } = this.#normalizeJSONToolCall(nameMatch[1], rawArgs);
+      if (!this.#toolRegistry?.has?.(name)) {
+        continue;
+      }
+
+      toolCalls.push({
+        id: `call_${Date.now()}_${toolCalls.length}`,
+        name,
+        arguments: this.#normalizeLooseArgs(name, args),
+        source: 'function_calls',
       });
     }
 
@@ -264,17 +453,14 @@ export class TextToolParser {
     }
 
     for (const block of blocks) {
-      const callRegex = /\b(ls|list|list_dir|list_directory|inspect_workspace|cat|read|read_file|write|write_file|shell|bash|run|run_command|plan_solution)\s*\(([\s\S]*?)\)/g;
-      let match;
-
-      while ((match = callRegex.exec(block)) !== null) {
-        const rawName = match[1];
+      for (const call of this.#extractToolCodeCalls(block)) {
+        const rawName = call.name;
         const mapped = this.#mapToolCodeName(rawName);
         if (!mapped || !this.#toolRegistry?.has?.(mapped)) {
           continue;
         }
 
-        const parsedArgs = this.#parseToolCodeArgs(match[2]);
+        const parsedArgs = this.#parseToolCodeArgs(call.argsText);
         const args = this.#normalizeToolCodeArgs(mapped, parsedArgs);
         if (!args) {
           continue;
@@ -290,6 +476,83 @@ export class TextToolParser {
     }
 
     return toolCalls;
+  }
+
+  #extractToolCodeCalls(block) {
+    const calls = [];
+    const names = ['ls', 'list', 'list_dir', 'list_directory', 'inspect_workspace', 'cat', 'read', 'read_file', 'write', 'write_file', 'shell', 'bash', 'run', 'run_command', 'plan_solution'];
+    const namePattern = new RegExp(`\\b(${names.join('|')})\\s*\\(`, 'g');
+    let match;
+
+    while ((match = namePattern.exec(block)) !== null) {
+      const argsStart = namePattern.lastIndex;
+      const argsEnd = this.#findMatchingParen(block, argsStart - 1);
+      if (argsEnd === -1) {
+        continue;
+      }
+      calls.push({
+        name: match[1],
+        argsText: block.slice(argsStart, argsEnd),
+      });
+      namePattern.lastIndex = argsEnd + 1;
+    }
+
+    return calls;
+  }
+
+  #findMatchingParen(text, openIndex) {
+    let depth = 0;
+    let quote = null;
+    let tripleQuote = false;
+    let escaped = false;
+
+    for (let i = openIndex; i < text.length; i++) {
+      const char = text[i];
+      const nextTwo = text.slice(i, i + 3);
+
+      if (quote) {
+        if (escaped) {
+          escaped = false;
+          continue;
+        }
+        if (char === '\\') {
+          escaped = true;
+          continue;
+        }
+        if (tripleQuote && nextTwo === quote.repeat(3)) {
+          i += 2;
+          quote = null;
+          tripleQuote = false;
+          continue;
+        }
+        if (!tripleQuote && char === quote) {
+          quote = null;
+        }
+        continue;
+      }
+
+      if (char === '"' || char === "'") {
+        quote = char;
+        tripleQuote = nextTwo === char.repeat(3);
+        if (tripleQuote) {
+          i += 2;
+        }
+        continue;
+      }
+
+      if (char === '(') {
+        depth++;
+        continue;
+      }
+      if (char === ')') {
+        depth--;
+        if (depth === 0) {
+          return i;
+        }
+      }
+    }
+
+    return -1;
   }
 
   /**
@@ -466,12 +729,12 @@ export class TextToolParser {
   #parseToolCodeArgs(argsText) {
     const args = { positional: [] };
     const text = String(argsText || '');
-    const stringRegex = /(?:([A-Za-z_][\w]*)\s*=\s*)?(?:"""([\s\S]*?)"""|'''([\s\S]*?)'''|"([^"]*)"|'([^']*)')/g;
+    const stringRegex = /(?:([A-Za-z_][\w]*)\s*=\s*)?(?:"""([\s\S]*?)"""|'''([\s\S]*?)'''|"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)')/g;
     let match;
 
     while ((match = stringRegex.exec(text)) !== null) {
       const key = match[1];
-      const value = match[2] ?? match[3] ?? match[4] ?? match[5] ?? '';
+      const value = this.#decodeStringLiteral(match[2] ?? match[3] ?? match[4] ?? match[5] ?? '');
       if (key) {
         args[key] = value;
       } else {
@@ -480,6 +743,15 @@ export class TextToolParser {
     }
 
     return args;
+  }
+
+  #decodeStringLiteral(value) {
+    return String(value)
+      .replace(/\\n/g, '\n')
+      .replace(/\\t/g, '\t')
+      .replace(/\\"/g, '"')
+      .replace(/\\'/g, "'")
+      .replace(/\\\\/g, '\\');
   }
 
   #normalizeToolCodeArgs(toolName, parsedArgs) {
@@ -613,6 +885,8 @@ export class TextToolParser {
       run_command: 'shell',
       execute_command: 'shell',
       bash: 'shell',
+      plan: 'brainstorm',
+      plan_solution: 'brainstorm',
     };
 
     if (snakeName === 'create_directory' || snakeName === 'mkdir') {
@@ -628,6 +902,12 @@ export class TextToolParser {
       return {
         name: resolvedName,
         args: { ...args, command: args.cmd || args.path },
+      };
+    }
+    if (resolvedName === 'brainstorm') {
+      return {
+        name: resolvedName,
+        args: { problem: args.problem || args.steps || args.plan || args.value || 'Plan the requested implementation before editing files.' },
       };
     }
 

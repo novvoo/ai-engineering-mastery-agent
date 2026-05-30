@@ -81,6 +81,10 @@ export class ReActAgent {
   #activeTaskProfile = null;
   /** @type {ExecutionPlan|null} */
   #activeExecutionPlan = null;
+  /** @type {Set<string>} */
+  #requiredMutationPaths = new Set();
+  /** @type {Set<string>} */
+  #completedMutationPaths = new Set();
 
   constructor(modelProvider, toolRegistry, memoryManager, config = {}, customUI = ui) {
     this.#modelProvider = modelProvider;
@@ -138,6 +142,8 @@ export class ReActAgent {
     this.#toolCallHistory = [];
     this.#runToolEvents = [];
     this.#activeTaskProfile = this.#classifyTask(userInput);
+    this.#requiredMutationPaths = this.#extractRequestedFilePaths(userInput);
+    this.#completedMutationPaths = new Set();
     this.#activeExecutionPlan = this.#createAutomaticExecutionPlan(userInput, this.#activeTaskProfile);
 
     let iteration = 0;
@@ -220,6 +226,26 @@ export class ReActAgent {
             native: nativeToolCalls.map(call => ({ name: call.name, arguments: call.arguments })),
             parsed: parsedToolCalls.map(call => ({ name: call.name, arguments: call.arguments, source: call.source })),
           });
+        }
+
+        if (
+          allToolCalls.length === 0 &&
+          response.finishReason === 'stop' &&
+          response.text?.trim() &&
+          this.#activeExecutionPlan?.status === TaskStatus.COMPLETED
+        ) {
+          const answer = this.#isTermination(response.text)
+            ? this.#extractFinalAnswer(response.text)
+            : response.text.trim();
+          this.#debugEvent('Final answer emitted', {
+            iteration,
+            totalDurationMs: Date.now() - runStartedAt,
+            reason: 'completed_plan_provider_stop_without_marker',
+            answerPreview: this.#preview(answer, 300),
+          });
+          this.#ui.finalAnswer(answer);
+          this.#sessionManager.addAssistantMessage(response.text);
+          return;
         }
 
         if (
@@ -537,6 +563,9 @@ export class ReActAgent {
     if (!plan || plan.status !== TaskStatus.RUNNING) {
       return;
     }
+    if (!this.#isSuccessfulToolResult(result)) {
+      return;
+    }
 
     const before = this.#summarizePlanProgress(plan);
     this.#completePlanTaskIf('inspect_workspace', () => this.#isWorkspaceInspectionTool(toolName, args));
@@ -545,7 +574,8 @@ export class ReActAgent {
     this.#startReadyTasks(plan);
     this.#completePlanTaskIf('plan_solution', () => this.#isMutationTool(toolName, args));
     this.#startReadyTasks(plan);
-    this.#completePlanTaskIf('implement_changes', () => this.#isMutationTool(toolName, args));
+    this.#recordMutationPath(toolName, args);
+    this.#completePlanTaskIf('implement_changes', () => this.#isMutationTool(toolName, args) && this.#hasCompletedRequiredMutationPaths());
     this.#startReadyTasks(plan);
     this.#completePlanTaskIf('inspect_changes', () => this.#isChangeInspectionTool(toolName, args));
     this.#startReadyTasks(plan);
@@ -581,6 +611,53 @@ export class ReActAgent {
     if (predicate()) {
       task.updateStatus(TaskStatus.COMPLETED, { result: { completedBy: 'tool-observation' } });
     }
+  }
+
+  #isSuccessfulToolResult(result) {
+    const text = typeof result === 'string' ? result : JSON.stringify(result);
+    return !/^(Error|Command failed|BLOCKED):/i.test(text.trim());
+  }
+
+  #extractRequestedFilePaths(text) {
+    const paths = new Set();
+    const regex = /\b((?:[\w.-]+\/)*[\w.-]+\.(?:html|js|css|ts|tsx|jsx|json|md|py|java|go|rs|c|cpp|h|hpp))\b/g;
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+      paths.add(match[1]);
+    }
+    const basenamesWithDirectory = new Set(
+      Array.from(paths)
+        .filter(path => path.includes('/'))
+        .map(path => path.split('/').pop())
+    );
+    for (const path of Array.from(paths)) {
+      if (!path.includes('/') && basenamesWithDirectory.has(path)) {
+        paths.delete(path);
+      }
+    }
+    return paths;
+  }
+
+  #recordMutationPath(toolName, args) {
+    if (!['write_file', 'edit_file'].includes(toolName)) {
+      return;
+    }
+    const path = args?.path || args?.file_path || args?.file;
+    if (path) {
+      this.#completedMutationPaths.add(String(path));
+    }
+  }
+
+  #hasCompletedRequiredMutationPaths() {
+    if (this.#requiredMutationPaths.size === 0) {
+      return true;
+    }
+    for (const path of this.#requiredMutationPaths) {
+      if (!this.#completedMutationPaths.has(path)) {
+        return false;
+      }
+    }
+    return true;
   }
 
   #startReadyTasks(plan) {
