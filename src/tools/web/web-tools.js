@@ -24,10 +24,10 @@ export function createWebTools() {
 export function createWebSearchTool() {
   return {
     name: 'web_search',
-    description: 'Search the public web using browser-like search pages. Use for current weather, news, prices, exchange rates, recent facts, and other time-sensitive information. Returns titles, snippets, and URLs; call web_fetch on a result when you need page details.',
+    description: 'Search the public web using browser-like search pages. Use for current weather, news, prices, exchange rates, recent facts, and other time-sensitive information. Returns titles, snippets, and URLs; call web_fetch on the most relevant result when you need detailed page content.',
     category: ToolCategory.WEB,
     params: {
-      query: { type: 'string', description: 'Search query' },
+      query: { type: 'string', description: 'Search query (be specific, e.g., "Shanghai current weather 2025" instead of just "weather")' },
       max_results: { type: 'number', description: 'Maximum number of results to return (default 5)' },
     },
     required: ['query'],
@@ -54,12 +54,17 @@ export function createWebSearchTool() {
               resultCount: result.results.length,
               durationMs: Date.now() - startedAt,
             });
-            return JSON.stringify({
+            
+            // Add helpful guidance in the search result
+            const enhancedResults = {
               query,
               provider: result.provider,
               fetched_at: new Date().toISOString(),
+              guidance: 'IMPORTANT: If these results lack specific details (e.g., weather temperatures, news facts), call web_fetch on the most relevant URL to get complete information.',
               results: result.results,
-            }, null, 2);
+            };
+            
+            return JSON.stringify(enhancedResults, null, 2);
           }
         } catch (error) {
           debugWebEvent(ctx, 'Web search provider failed', {
@@ -166,11 +171,20 @@ async function searchDuckDuckGoLite(query, maxResults) {
   const regex = /<a[^>]*rel="nofollow"[^>]*href="([^"]+)"[^>]*class=['"]result-link['"][^>]*>([\s\S]*?)<\/a>[\s\S]*?<td class=['"]result-snippet['"][^>]*>([\s\S]*?)<\/td>/g;
   let match;
   while ((match = regex.exec(html)) !== null && results.length < maxResults) {
-    results.push({
+    const result = {
       title: cleanHTML(match[2]),
       url: unwrapDuckDuckGoURL(match[1]),
       snippet: cleanHTML(match[3]),
-    });
+    };
+    // Add priority hint for weather/official sites
+    result.priority = (
+      result.title.toLowerCase().includes('weather') ||
+      result.url.includes('weather.com') ||
+      result.url.includes('accuweather') ||
+      result.url.includes('bbc') ||
+      result.url.includes('gov')
+    ) ? 'high' : 'normal';
+    results.push(result);
   }
   return { provider: 'duckduckgo_lite', results: dedupeResults(results) };
 }
@@ -182,11 +196,20 @@ async function searchDuckDuckGoHTML(query, maxResults) {
   const regex = /<a rel="nofollow" class="result__a" href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<a class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
   let match;
   while ((match = regex.exec(html)) !== null && results.length < maxResults) {
-    results.push({
+    const result = {
       title: cleanHTML(match[2]),
       url: unwrapDuckDuckGoURL(match[1]),
       snippet: cleanHTML(match[3]),
-    });
+    };
+    // Add priority hint for weather/official sites
+    result.priority = (
+      result.title.toLowerCase().includes('weather') ||
+      result.url.includes('weather.com') ||
+      result.url.includes('accuweather') ||
+      result.url.includes('bbc') ||
+      result.url.includes('gov')
+    ) ? 'high' : 'normal';
+    results.push(result);
   }
   return { provider: 'duckduckgo_html', results: dedupeResults(results) };
 }
@@ -198,11 +221,20 @@ async function searchBing(query, maxResults) {
   const regex = /<li class="b_algo"[\s\S]*?<h2[^>]*>\s*<a href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<p[^>]*>([\s\S]*?)<\/p>/g;
   let match;
   while ((match = regex.exec(html)) !== null && results.length < maxResults) {
-    results.push({
+    const result = {
       title: cleanHTML(match[2]),
       url: decodeHTMLEntities(match[1]),
       snippet: cleanHTML(match[3]),
-    });
+    };
+    // Add priority hint for weather/official sites
+    result.priority = (
+      result.title.toLowerCase().includes('weather') ||
+      result.url.includes('weather.com') ||
+      result.url.includes('accuweather') ||
+      result.url.includes('bbc') ||
+      result.url.includes('gov')
+    ) ? 'high' : 'normal';
+    results.push(result);
   }
   return { provider: 'bing', results: dedupeResults(results) };
 }
