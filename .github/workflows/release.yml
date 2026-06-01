@@ -60,6 +60,11 @@ jobs:
           node-version: 20
           cache: npm
 
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
       - name: Install production dependencies
         run: npm ci --omit=dev --omit=optional
 
@@ -67,6 +72,7 @@ jobs:
         run: npm run package:release
         env:
           RELEASE_PLATFORM: ${{ matrix.platform }}
+          RELEASE_STANDALONE: bun
 
       - name: Read package metadata
         id: meta
@@ -106,7 +112,7 @@ jobs:
           cat > "$BIN_ROOT/agent" <<EOF
           #!/usr/bin/env sh
           set -e
-          exec node "/usr/lib/$NAME/src/index.js" "\$@"
+          exec "/usr/lib/$NAME/bin/agent" "\$@"
           EOF
           chmod 755 "$BIN_ROOT/agent"
 
@@ -117,7 +123,6 @@ jobs:
           Priority: optional
           Architecture: $DEB_ARCH
           Maintainer: novvoo
-          Depends: nodejs (>= 18)
           Description: AI Engineering Mastery Agent CLI
            Standalone ReAct agent CLI with coding skills and tool orchestration.
           EOF
@@ -141,7 +146,7 @@ jobs:
           mkdir -p /usr/local/bin
           cat > /usr/local/bin/agent <<'WRAPPER'
           #!/bin/sh
-          exec node "/usr/local/lib/$NAME/src/index.js" "\$@"
+          exec "/usr/local/lib/$NAME/bin/agent" "\$@"
           WRAPPER
           chmod 755 /usr/local/bin/agent
           exit 0

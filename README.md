@@ -193,15 +193,16 @@ CD / Release 用于生成系统安装包：
 - Linux 产物是 `.deb`，安装到 `/usr/lib/ai-engineering-mastery-agent`，并提供 `/usr/bin/agent` 命令。
 - macOS 产物是 `.pkg`，安装到 `/usr/local/lib/ai-engineering-mastery-agent`，并提供 `/usr/local/bin/agent` 命令。
 - Windows 产物是 `.msi`，安装到 `Program Files`，并将安装目录下的 `bin` 加入系统 `PATH`。
-- 安装包内包含源码、生产依赖、`README.md`、`.env.example` 和对应平台启动脚本；运行机器仍需安装 Node.js 18+。
+- 安装包内包含 Bun standalone binary、`README.md`、`.env.example` 和 License，不包含 `src/`、`package.json`、`package-lock.json` 或 `node_modules`；运行机器不需要额外安装 Node.js 或 Bun。
+- `node-pty` 等原生 PTY 能力在 standalone binary 中不可用时会自动降级到 pipe fallback，不影响 CLI 启动和普通命令执行。
 
 发布流程示例：
 
 ```bash
 git checkout main
 git pull origin main
-git tag v1.0.2
-git push origin v1.0.2
+git tag v1.0.3
+git push origin v1.0.3
 ```
 
 ## 配置项

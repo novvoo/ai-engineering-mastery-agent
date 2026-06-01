@@ -6,7 +6,6 @@ import os from 'os';
 import { resolve } from 'path';
 import { existsSync, mkdirSync } from 'fs';
 import { spawn } from 'child_process';
-import * as pty from 'node-pty';
 import { ToolCategory } from '../../core/types.js';
 
 const MAX_BUFFER_CHARS = 200000;
@@ -25,6 +24,7 @@ const DANGEROUS_PATTERNS = [
 ];
 
 const sessions = new Map();
+let ptyModulePromise = null;
 
 function delay(ms) {
   return new Promise(resolveDelay => setTimeout(resolveDelay, ms));
@@ -86,6 +86,11 @@ function requireSession(sessionId) {
   return session;
 }
 
+async function loadPtyModule() {
+  ptyModulePromise ||= import('node-pty');
+  return ptyModulePromise;
+}
+
 export function createPtyTools() {
   return [
     {
@@ -126,6 +131,7 @@ export function createPtyTools() {
         };
 
         try {
+          const pty = await loadPtyModule();
           const processHandle = pty.spawn(getShell(), getShellArgs(command), {
             name: 'xterm-256color',
             cols: cols || 120,
