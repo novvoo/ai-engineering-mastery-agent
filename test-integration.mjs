@@ -4098,13 +4098,23 @@ cliInputLoopTests.test('CLI built-in aliases show memory and list resources with
     child.stdin.write('/task\n');
     child.stdin.write('/schedule\n');
     child.stdin.write('/subagent\n');
+    child.stdin.write('/mcp\n');
+    child.stdin.write('/security\n');
+    child.stdin.write('/experience\n');
+    child.stdin.write('/reason\n');
+    child.stdin.write('/auto\n');
     await waitForOutput(
       () => output,
       text => (text.match(/No tasks found/g) || []).length >= 2 &&
         (text.match(/No schedules found/g) || []).length >= 2 &&
-        (text.match(/No active subagents/g) || []).length >= 2,
+        (text.match(/No active subagents/g) || []).length >= 2 &&
+        text.includes('MCP Status') &&
+        text.includes('Security Report') &&
+        text.includes('Experience Memory Stats') &&
+        text.includes('Usage: /reason <intent|tools|decompose> <text>') &&
+        text.includes('Automation Engine Status'),
       10000,
-      'singular default list output'
+      'default command status output'
     );
 
     child.stdin.write('exit\n');
@@ -4112,6 +4122,59 @@ cliInputLoopTests.test('CLI built-in aliases show memory and list resources with
     if (!child.killed) {
       child.kill('SIGTERM');
     }
+  }
+});
+
+cliInputLoopTests.test('MCP CLI connect registers runtime tools and calls qualified tool names', async () => {
+  const { createEnhancedCommands } = await import('./src/cli/enhanced-commands.js');
+
+  const fakeScheduler = {
+    getTaskQueue: () => ({}),
+    getCronScheduler: () => ({}),
+    getSubAgentPool: () => ({}),
+    getMessageBus: () => ({}),
+  };
+
+  let registeredServer = null;
+  let calledTool = null;
+  const tools = [];
+  const fakeMcpClient = {
+    async connect(name) {
+      tools.push({
+        name: 'echo',
+        fullName: `${name}/echo`,
+        serverName: name,
+        description: 'Echo input',
+        inputSchema: { properties: {}, required: [] },
+      });
+      return true;
+    },
+    getTools: () => tools,
+    getResources: () => [],
+    getConnectedServers: () => ['demo'],
+    isConnected: () => true,
+    async callTool(name, args) {
+      calledTool = { name, args };
+      return { ok: true };
+    },
+  };
+
+  const commands = createEnhancedCommands(fakeScheduler, {
+    mcpClient: fakeMcpClient,
+    registerMcpTools(name) {
+      registeredServer = name;
+      return 1;
+    },
+  });
+
+  await commands.handleMcpCommand(['connect', 'demo', 'fake-mcp']);
+  if (registeredServer !== 'demo') {
+    throw new Error(`Expected MCP runtime tools to register for demo, got ${registeredServer}`);
+  }
+
+  await commands.handleMcpCommand(['call', 'demo/echo']);
+  if (calledTool?.name !== 'demo/echo') {
+    throw new Error(`Expected qualified MCP tool call, got ${JSON.stringify(calledTool)}`);
   }
 });
 

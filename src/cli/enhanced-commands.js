@@ -28,7 +28,24 @@ export function createEnhancedCommands(schedulerEngine, options = {}) {
   const securityPolicy = options.securityPolicy || null;
   const intelligentReasoning = options.intelligentReasoning || null;
   const automationEngine = options.automationEngine || null;
+  const registerMcpTools = options.registerMcpTools || null;
   const theme = enhancedUI.theme;
+
+  async function runGit(args) {
+    const { spawnSync } = await import('child_process');
+    const result = spawnSync('git', args, {
+      encoding: 'utf-8',
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    const output = `${result.stdout || ''}${result.stderr || ''}`;
+    if (result.error) {
+      throw result.error;
+    }
+    if (result.status !== 0) {
+      throw new Error(output.trim() || `git exited with status ${result.status}`);
+    }
+    return output;
+  }
 
   return {
     /**
@@ -546,12 +563,15 @@ export function createEnhancedCommands(schedulerEngine, options = {}) {
         case 'reset':
           await this.gitReset(args.slice(1));
           break;
+        case 'menu':
+          await this.showGitMenu();
+          break;
         default:
           if (!subcommand) {
-            await this.showGitMenu();
+            await this.gitStatus([]);
           } else {
             enhancedUI.error(`Unknown git subcommand: ${subcommand}`);
-            enhancedUI.info('Available: status, diff, add, commit, branch, log, push, pull, stash, reset');
+            enhancedUI.info('Available: status, diff, add, commit, branch, log, push, pull, stash, reset, menu');
           }
       }
     },
@@ -585,11 +605,7 @@ export function createEnhancedCommands(schedulerEngine, options = {}) {
       const spinner = enhancedUI.spinner('Getting git status...');
       spinner.start();
       try {
-        const { execSync } = await import('child_process');
-        const output = execSync('git status --porcelain=v1 --branch 2>&1', {
-          encoding: 'utf-8',
-          maxBuffer: 10 * 1024 * 1024,
-        });
+        const output = await runGit(['status', '--porcelain=v1', '--branch']);
         spinner.stop();
 
         if (!output.trim()) {
@@ -656,20 +672,21 @@ export function createEnhancedCommands(schedulerEngine, options = {}) {
       const spinner = enhancedUI.spinner('Getting diff...');
       spinner.start();
       try {
-        const { execSync } = await import('child_process');
         const isStaged = args.includes('--staged') || args.includes('--cached');
         const isStat = args.includes('--stat');
-        const file = args.filter(a => !a.startsWith('--')).join(' ');
+        const files = args.filter(a => !a.startsWith('--'));
+        const gitArgs = ['diff'];
+        if (isStaged) {
+          gitArgs.push('--cached');
+        }
+        if (isStat) {
+          gitArgs.push('--stat');
+        }
+        if (files.length > 0) {
+          gitArgs.push('--', ...files);
+        }
 
-        let cmd = 'git diff';
-        if (isStaged) cmd += ' --cached';
-        if (isStat) cmd += ' --stat';
-        if (file) cmd += ` -- ${file}`;
-
-        const output = execSync(cmd + ' 2>&1', {
-          encoding: 'utf-8',
-          maxBuffer: 10 * 1024 * 1024,
-        });
+        const output = await runGit(gitArgs);
         spinner.stop();
 
         if (!output.trim()) {
@@ -713,10 +730,8 @@ export function createEnhancedCommands(schedulerEngine, options = {}) {
       const spinner = enhancedUI.spinner('Adding files...');
       spinner.start();
       try {
-        const { execSync } = await import('child_process');
         const isAll = args.includes('-A') || args.includes('--all');
-        const cmd = isAll ? 'git add -A' : `git add ${args.map(f => `"${f}"`).join(' ')}`;
-        execSync(cmd + ' 2>&1', { encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 });
+        await runGit(isAll ? ['add', '-A'] : ['add', ...args]);
         spinner.stop();
         enhancedUI.success(isAll ? 'All changes added to staging area' : `${args.length} file(s) added`);
       } catch (error) {
@@ -741,9 +756,8 @@ export function createEnhancedCommands(schedulerEngine, options = {}) {
       const spinner = enhancedUI.spinner('Committing...');
       spinner.start();
       try {
-        const { execSync } = await import('child_process');
-        execSync(`git commit -m "${message}" 2>&1`, { encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 });
-        const hash = execSync('git rev-parse --short HEAD 2>&1', { encoding: 'utf-8' }).trim();
+        await runGit(['commit', '-m', message]);
+        const hash = (await runGit(['rev-parse', '--short', 'HEAD'])).trim();
         spinner.stop();
         enhancedUI.success(`Committed: ${hash} - ${message}`);
       } catch (error) {
@@ -755,11 +769,9 @@ export function createEnhancedCommands(schedulerEngine, options = {}) {
     async gitBranch(args) {
       const action = args[0] || 'list';
       try {
-        const { execSync } = await import('child_process');
-
         if (action === 'list' || !action) {
-          const output = execSync('git branch -a --color=never 2>&1', { encoding: 'utf-8' });
-          const current = execSync('git branch --show-current 2>&1', { encoding: 'utf-8' }).trim();
+          const output = await runGit(['branch', '-a', '--color=never']);
+          const current = (await runGit(['branch', '--show-current'])).trim();
           console.log(enhancedUI.createHeader('Branches'));
           for (const line of output.trim().split('\n')) {
             const name = line.replace(/^\* /, '').trim();
@@ -778,10 +790,10 @@ export function createEnhancedCommands(schedulerEngine, options = {}) {
             });
             args[1] = name;
           }
-          const cmd = action === 'create'
-            ? `git checkout -b "${args[1]}"`
-            : `git checkout "${args[1]}"`;
-          execSync(cmd + ' 2>&1', { encoding: 'utf-8' });
+          const gitArgs = action === 'create'
+            ? ['checkout', '-b', args[1]]
+            : ['checkout', args[1]];
+          await runGit(gitArgs);
           enhancedUI.success(`Switched to branch: ${args[1]}`);
         } else if (action === 'delete') {
           const branchName = args[1];
@@ -789,7 +801,7 @@ export function createEnhancedCommands(schedulerEngine, options = {}) {
             enhancedUI.error('Usage: /git delete <branch-name>');
             return;
           }
-          execSync(`git branch -d "${branchName}" 2>&1`, { encoding: 'utf-8' });
+          await runGit(['branch', '-d', branchName]);
           enhancedUI.success(`Deleted branch: ${branchName}`);
         }
       } catch (error) {
@@ -801,13 +813,14 @@ export function createEnhancedCommands(schedulerEngine, options = {}) {
       const spinner = enhancedUI.spinner('Getting log...');
       spinner.start();
       try {
-        const { execSync } = await import('child_process');
         const limit = (args.find(a => a.startsWith('-n')) || '-n 15').replace('-n', '').trim();
-        const file = args.filter(a => !a.startsWith('-')).join(' ');
-        let cmd = `git log --oneline --decorate --graph -n ${limit}`;
-        if (file) cmd += ` -- "${file}"`;
+        const files = args.filter(a => !a.startsWith('-'));
+        const gitArgs = ['log', '--oneline', '--decorate', '--graph', '-n', limit];
+        if (files.length > 0) {
+          gitArgs.push('--', ...files);
+        }
 
-        const output = execSync(cmd + ' 2>&1', { encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 });
+        const output = await runGit(gitArgs);
         spinner.stop();
 
         console.log(enhancedUI.createHeader('Commit Log'));
@@ -825,22 +838,29 @@ export function createEnhancedCommands(schedulerEngine, options = {}) {
       const spinner = enhancedUI.spinner('Pushing...');
       spinner.start();
       try {
-        const { execSync } = await import('child_process');
         const remote = args[0] || 'origin';
         const branch = args[1] || '';
         const setUpstream = args.includes('-u') || args.includes('--set-upstream');
         const force = args.includes('-f') || args.includes('--force');
 
-        let cmd = 'git push';
-        if (force) cmd += ' --force';
-        if (setUpstream) cmd += ' -u';
-        cmd += ` ${remote}`;
-        if (branch) cmd += ` ${branch}`;
+        const gitArgs = ['push'];
+        if (force) {
+          gitArgs.push('--force');
+        }
+        if (setUpstream) {
+          gitArgs.push('-u');
+        }
+        gitArgs.push(remote);
+        if (branch) {
+          gitArgs.push(branch);
+        }
 
-        const output = execSync(cmd + ' 2>&1', { encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 });
+        const output = await runGit(gitArgs);
         spinner.stop();
         enhancedUI.success('Push successful');
-        if (output.trim()) console.log(theme.dim(output.trim()));
+        if (output.trim()) {
+          console.log(theme.dim(output.trim()));
+        }
       } catch (error) {
         spinner.stop();
         enhancedUI.error(error.message.replace(/\n/g, ' '));
@@ -851,20 +871,25 @@ export function createEnhancedCommands(schedulerEngine, options = {}) {
       const spinner = enhancedUI.spinner('Pulling...');
       spinner.start();
       try {
-        const { execSync } = await import('child_process');
         const rebase = args.includes('--rebase');
         const remote = args.find(a => !a.startsWith('-')) || 'origin';
         const branch = args.filter(a => !a.startsWith('-') && a !== remote)[0] || '';
 
-        let cmd = 'git pull';
-        if (rebase) cmd += ' --rebase';
-        cmd += ` ${remote}`;
-        if (branch) cmd += ` ${branch}`;
+        const gitArgs = ['pull'];
+        if (rebase) {
+          gitArgs.push('--rebase');
+        }
+        gitArgs.push(remote);
+        if (branch) {
+          gitArgs.push(branch);
+        }
 
-        const output = execSync(cmd + ' 2>&1', { encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 });
+        const output = await runGit(gitArgs);
         spinner.stop();
         enhancedUI.success('Pull successful');
-        if (output.trim()) console.log(theme.dim(output.trim()));
+        if (output.trim()) {
+          console.log(theme.dim(output.trim()));
+        }
       } catch (error) {
         spinner.stop();
         enhancedUI.error(error.message.replace(/\n/g, ' '));
@@ -874,33 +899,32 @@ export function createEnhancedCommands(schedulerEngine, options = {}) {
     async gitStash(args) {
       const action = args[0] || 'list';
       try {
-        const { execSync } = await import('child_process');
-        let cmd;
+        let gitArgs;
         switch (action) {
           case 'push':
-            cmd = 'git stash push';
+            gitArgs = ['stash', 'push'];
             if (args.includes('-m')) {
               const idx = args.indexOf('-m');
-              cmd += ` -m "${args[idx + 1] || 'auto stash'}"`;
+              gitArgs.push('-m', args[idx + 1] || 'auto stash');
             }
             break;
           case 'pop':
-            cmd = `git stash pop stash@{${args[1] || 0}}`;
+            gitArgs = ['stash', 'pop', `stash@{${args[1] || 0}}`];
             break;
           case 'list':
-            cmd = 'git stash list';
+            gitArgs = ['stash', 'list'];
             break;
           case 'drop':
-            cmd = `git stash drop stash@{${args[1] || 0}}`;
+            gitArgs = ['stash', 'drop', `stash@{${args[1] || 0}}`];
             break;
           case 'clear':
-            cmd = 'git stash clear';
+            gitArgs = ['stash', 'clear'];
             break;
           default:
-            cmd = 'git stash list';
+            gitArgs = ['stash', 'list'];
         }
 
-        const output = execSync(cmd + ' 2>&1', { encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 });
+        const output = await runGit(gitArgs);
         if (!output.trim()) {
           enhancedUI.info('No stashes');
         } else {
@@ -928,10 +952,11 @@ export function createEnhancedCommands(schedulerEngine, options = {}) {
       }
 
       try {
-        const { execSync } = await import('child_process');
-        let cmd = `git reset ${mode} ${target}`;
-        if (files.length > 0) cmd += ` -- ${files.map(f => `"${f}"`).join(' ')}`;
-        execSync(cmd + ' 2>&1', { encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 });
+        const gitArgs = ['reset', mode, target];
+        if (files.length > 0) {
+          gitArgs.push('--', ...files);
+        }
+        await runGit(gitArgs);
         enhancedUI.success(`Reset ${mode} ${target} done`);
       } catch (error) {
         enhancedUI.error(error.message.replace(/\n/g, ' '));
@@ -978,12 +1003,15 @@ export function createEnhancedCommands(schedulerEngine, options = {}) {
         case 'call':
           await this.mcpCallTool(args.slice(1));
           break;
+        case 'menu':
+          await this.showMcpMenu();
+          break;
         default:
           if (!subcommand) {
-            await this.showMcpMenu();
+            await this.mcpStatus();
           } else {
             enhancedUI.error(`Unknown mcp subcommand: ${subcommand}`);
-            enhancedUI.info('Available: status, list, tools, resources, connect, disconnect, call');
+            enhancedUI.info('Available: status, list, tools, resources, connect, disconnect, call, menu');
           }
       }
     },
@@ -1061,7 +1089,7 @@ export function createEnhancedCommands(schedulerEngine, options = {}) {
       });
       for (const tool of tools) {
         table.push([
-          theme.secondary(tool.name),
+          theme.secondary(tool.fullName || tool.name),
           truncate(tool.description || '', 48),
         ]);
       }
@@ -1121,10 +1149,12 @@ export function createEnhancedCommands(schedulerEngine, options = {}) {
         const success = await mcpClient.connect(name, { command, args: cmdArgs, env });
         spinner.stop();
         if (success) {
+          const registered = typeof registerMcpTools === 'function' ? registerMcpTools(name) : 0;
           enhancedUI.success(`Connected to MCP server: ${name}`);
-          const tools = mcpClient.getTools().filter(t => t.name.startsWith(name + '/'));
+          const tools = mcpClient.getTools().filter(t => t.serverName === name || t.fullName?.startsWith(name + '/'));
           if (tools.length > 0) {
-            enhancedUI.info(`Loaded ${tools.length} tool(s): ${tools.map(t => t.name.split('/')[1]).join(', ')}`);
+            const registeredSuffix = registered ? `; registered ${registered} for agent use` : '';
+            enhancedUI.info(`Loaded ${tools.length} tool(s): ${tools.map(t => t.fullName || `${name}/${t.name}`).join(', ')}${registeredSuffix}`);
           }
         } else {
           enhancedUI.error(`Failed to connect to ${name}`);
@@ -1170,13 +1200,16 @@ export function createEnhancedCommands(schedulerEngine, options = {}) {
       if (!toolName) {
         const selected = await select({
           message: 'Select tool:',
-          choices: tools.map(t => ({ name: `${t.name} - ${truncate(t.description || '', 40)}`, value: t.name })),
+          choices: tools.map(t => {
+            const fullName = t.fullName || t.name;
+            return { name: `${fullName} - ${truncate(t.description || '', 40)}`, value: fullName };
+          }),
         });
         toolName = selected;
       }
 
       // 获取工具参数 schema
-      const tool = tools.find(t => t.name === toolName);
+      const tool = tools.find(t => (t.fullName || t.name) === toolName);
       let toolArgs = {};
       if (tool?.parameters?.properties) {
         for (const [key, schema] of Object.entries(tool.parameters.properties)) {
@@ -1229,12 +1262,15 @@ export function createEnhancedCommands(schedulerEngine, options = {}) {
         case 'list':
           await this.securityListTools();
           break;
+        case 'menu':
+          await this.showSecurityMenu();
+          break;
         default:
           if (!subcommand) {
-            await this.showSecurityMenu();
+            await this.securityReport();
           } else {
             enhancedUI.error(`Unknown security subcommand: ${subcommand}`);
-            enhancedUI.info('Available: report, policy <tool>, list');
+            enhancedUI.info('Available: report, policy <tool>, list, menu');
           }
       }
     },
@@ -1359,12 +1395,15 @@ export function createEnhancedCommands(schedulerEngine, options = {}) {
             enhancedUI.success('Experience memory cleared');
           }
           break;
+        case 'menu':
+          await this.showExperienceMenu();
+          break;
         default:
           if (!subcommand) {
-            await this.showExperienceMenu();
+            await this.experienceStats();
           } else {
             enhancedUI.error(`Unknown experience subcommand: ${subcommand}`);
-            enhancedUI.info('Available: stats, list [n], search <query>, clear');
+            enhancedUI.info('Available: stats, list [n], search <query>, clear, menu');
           }
       }
     },
@@ -1467,9 +1506,13 @@ export function createEnhancedCommands(schedulerEngine, options = {}) {
         case 'decompose':
           await this.decomposeTask(args.slice(1).join(' '));
           break;
+        case 'menu':
+          await this.showReasonMenu();
+          break;
         default:
           if (!subcommand) {
-            await this.showReasonMenu();
+            enhancedUI.info('Usage: /reason <intent|tools|decompose> <text>');
+            enhancedUI.info('Use /reason menu for the interactive reasoning menu.');
           } else {
             // 默认当作意图分析
             await this.analyzeIntent(args.join(' '));
@@ -1600,8 +1643,16 @@ export function createEnhancedCommands(schedulerEngine, options = {}) {
         case 'background':
           await this.autoListBackground();
           break;
-        default:
+        case 'menu':
           await this.showAutoMenu();
+          break;
+        default:
+          if (!subcommand) {
+            await this.autoStatus();
+          } else {
+            enhancedUI.error(`Unknown automation subcommand: ${subcommand}`);
+            enhancedUI.info('Available: status, start, stop, triggers, workflows, background, menu');
+          }
       }
     },
 
@@ -1763,7 +1814,8 @@ export function createEnhancedCommands(schedulerEngine, options = {}) {
         ['/subagent stop <id>', 'Stop a subagent'],
         ['', ''],
         ['Git Commands', ''],
-        ['/git', 'Git interactive menu'],
+        ['/git', 'Show working tree status'],
+        ['/git menu', 'Open Git interactive menu'],
         ['/git status', 'Show working tree status'],
         ['/git diff [--staged] [--stat]', 'Show file changes'],
         ['/git add [-A | <files...>]', 'Stage files'],
@@ -1776,7 +1828,8 @@ export function createEnhancedCommands(schedulerEngine, options = {}) {
         ['/git reset [--soft|--mixed|--hard]', 'Reset changes'],
         ['', ''],
         ['MCP Commands', ''],
-        ['/mcp', 'MCP interactive menu'],
+        ['/mcp', 'Show MCP client status'],
+        ['/mcp menu', 'Open MCP interactive menu'],
         ['/mcp status', 'Show MCP client status'],
         ['/mcp list', 'List connected servers'],
         ['/mcp tools', 'List available MCP tools'],
@@ -1785,13 +1838,15 @@ export function createEnhancedCommands(schedulerEngine, options = {}) {
         ['/mcp call <tool-name>', 'Call an MCP tool'],
         ['', ''],
         ['Security Commands', ''],
-        ['/security', 'Security interactive menu'],
+        ['/security', 'Show security report'],
+        ['/security menu', 'Open security interactive menu'],
         ['/security report', 'Show security report'],
         ['/security policy <tool>', 'View tool security policy'],
         ['/security list', 'List tools by permission level'],
         ['', ''],
         ['Experience Commands', ''],
-        ['/experience', 'Experience memory menu'],
+        ['/experience', 'Show experience statistics'],
+        ['/experience menu', 'Open experience interactive menu'],
         ['/experience stats', 'Show experience statistics'],
         ['/experience list [n]', 'List recent experiences'],
         ['/experience search <q>', 'Search experiences'],
@@ -1801,13 +1856,15 @@ export function createEnhancedCommands(schedulerEngine, options = {}) {
         ['/debug', 'Toggle debug mode on/off'],
         ['', ''],
         ['Reasoning Commands', ''],
-        ['/reason', 'Intelligent reasoning menu'],
+        ['/reason', 'Show reasoning usage'],
+        ['/reason menu', 'Open reasoning interactive menu'],
         ['/reason intent <text>', 'Analyze user intent'],
         ['/reason tools <task>', 'Recommend tools for task'],
         ['/reason decompose <task>', 'Decompose complex task'],
         ['', ''],
         ['Automation Commands', ''],
-        ['/auto', 'Automation engine menu'],
+        ['/auto', 'Show automation status'],
+        ['/auto menu', 'Open automation interactive menu'],
         ['/auto start', 'Start automation engine'],
         ['/auto stop', 'Stop automation engine'],
         ['/auto status', 'Show automation status'],
@@ -1843,6 +1900,7 @@ export function createEnhancedCommands(schedulerEngine, options = {}) {
       const subcommand = args[0];
 
       switch (subcommand) {
+        case undefined:
         case 'list':
           await this.showTaskList();
           break;
@@ -1890,6 +1948,7 @@ export function createEnhancedCommands(schedulerEngine, options = {}) {
       const subcommand = args[0];
 
       switch (subcommand) {
+        case undefined:
         case 'list':
           await this.showScheduleList();
           break;
@@ -1918,6 +1977,7 @@ export function createEnhancedCommands(schedulerEngine, options = {}) {
       const subcommand = args[0];
 
       switch (subcommand) {
+        case undefined:
         case 'list':
           await this.showSubAgentList();
           break;

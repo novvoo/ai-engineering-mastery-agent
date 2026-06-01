@@ -201,8 +201,12 @@ class AIEngineeringAgent {
    */
   #registerMCPTools(toolRegistry, serverName) {
     const tools = this.mcpClient.getTools().filter(t => t.serverName === serverName);
+    let registered = 0;
     
     for (const mcpTool of tools) {
+      if (toolRegistry.has(mcpTool.fullName)) {
+        continue;
+      }
       const tool = {
         name: mcpTool.fullName,
         description: mcpTool.description,
@@ -219,7 +223,9 @@ class AIEngineeringAgent {
         },
       };
       toolRegistry.register(tool);
+      registered += 1;
     }
+    return registered;
   }
 
   /**
@@ -455,6 +461,7 @@ class AIEngineeringAgent {
       securityPolicy: this.securityPolicy,
       intelligentReasoning: this.intelligentReasoning,
       automationEngine: this.automationEngine,
+      registerMcpTools: serverName => this.#registerMCPTools(toolRegistry, serverName),
     });
 
     // Create readline interface
