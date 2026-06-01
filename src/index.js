@@ -666,7 +666,11 @@ class AIEngineeringAgent {
 
     // Help
     if (['/help', '/?', 'help'].includes(commandName)) {
-      this.commands.showHelp();
+      if (argsText) {
+        this.showCommandHelp(argsText);
+      } else {
+        this.commands.showHelp();
+      }
       return true;
     }
 
@@ -930,10 +934,15 @@ class AIEngineeringAgent {
     }
 
     const argsText = (match[2] || '').trim();
+    if (!argsText || ['help', '--help', '-h'].includes(argsText.toLowerCase())) {
+      this.#showSlashToolHelp(rawName, tool);
+      return true;
+    }
+
     const parsed = this.#parseSlashToolArgs(tool, argsText);
     if (parsed.error) {
       enhancedUI.error(parsed.error);
-      this.#showSlashToolUsage(rawName, tool);
+      this.#showSlashToolHelp(rawName, tool);
       return true;
     }
 
@@ -941,7 +950,7 @@ class AIEngineeringAgent {
       .filter(paramName => parsed.args[paramName] === undefined || parsed.args[paramName] === '');
     if (missing.length > 0) {
       enhancedUI.warning(`Missing required argument(s): ${missing.join(', ')}`);
-      this.#showSlashToolUsage(rawName, tool);
+      this.#showSlashToolHelp(rawName, tool);
       return true;
     }
 
@@ -963,6 +972,25 @@ class AIEngineeringAgent {
     }
 
     return true;
+  }
+
+  showCommandHelp(commandText = '') {
+    const normalized = String(commandText || '').trim().replace(/^\//, '');
+    if (!normalized) {
+      this.commands.showHelp();
+      return;
+    }
+
+    const rawName = normalized.split(/\s+/, 1)[0].toLowerCase();
+    const toolName = rawName.replace(/-/g, '_');
+    const tool = this.agent?.getTools()?.get(toolName);
+    if (tool) {
+      this.#showSlashToolHelp(rawName, tool);
+      return;
+    }
+
+    enhancedUI.info(`No detailed help found for /${rawName}.`);
+    enhancedUI.info('Use /help to list available commands.');
   }
 
   #parseSlashToolArgs(tool, argsText) {
@@ -1049,30 +1077,132 @@ class AIEngineeringAgent {
     return tool.required || (tool.parameters && tool.parameters.required ? tool.parameters.required : []);
   }
 
-  #showSlashToolUsage(rawName, tool) {
+  #showSlashToolHelp(rawName, tool) {
+    const params = tool.params || tool.parameters?.properties || {};
     const required = this.#getToolRequiredParams(tool);
-    const optional = Object.keys(tool.params || tool.parameters?.properties || {})
-      .filter(paramName => !required.includes(paramName));
+    const examples = this.#getSlashToolExamples(rawName, tool);
 
-    console.log(enhancedUI.createHeader(`/${rawName} Usage`));
+    console.log(enhancedUI.createHeader(`Command Help: /${rawName}`));
     console.log(tool.description || `Run the ${tool.name} tool.`);
     console.log('');
-    console.log('JSON:');
-    console.log(`  /${rawName} {"${required[0] || 'arg'}":"value"}`);
+    console.log(`Usage: ${this.#formatSlashToolUsage(rawName, tool)}`);
     console.log('');
-    console.log('key=value:');
-    const requiredExample = required.map(paramName => `${paramName}="value"`).join(' ');
-    console.log(`  /${rawName}${requiredExample ? ` ${requiredExample}` : ''}`);
-    if (tool.name === 'tdd') {
-      console.log('');
-      console.log('TDD shorthand:');
-      console.log(`  /${rawName} red ComponentName expected behavior`);
+    console.log('Effects:');
+    for (const effect of this.#inferSlashToolEffects(tool)) {
+      console.log(`  - ${effect}`);
     }
-    if (optional.length > 0) {
+
+    if (Object.keys(params).length > 0) {
       console.log('');
-      console.log(`Optional: ${optional.join(', ')}`);
+      console.log('Arguments:');
+      for (const [name, schema] of Object.entries(params)) {
+        const requiredMark = required.includes(name) ? 'required' : 'optional';
+        const enumText = schema.enum ? ` (${schema.enum.join('|')})` : '';
+        console.log(`  - ${name}${enumText}: ${requiredMark}. ${schema.description || ''}`);
+      }
+    }
+
+    if (examples.length > 0) {
+      console.log('');
+      console.log('Examples:');
+      for (const example of examples) {
+        console.log(`  ${example}`);
+      }
     }
     console.log('');
+  }
+
+  #formatSlashToolUsage(rawName, tool) {
+    const params = tool.params || tool.parameters?.properties || {};
+    const required = this.#getToolRequiredParams(tool);
+    const parts = [];
+    const orderedEntries = tool.name === 'tdd'
+      ? ['phase', 'component', 'spec', 'test_file', 'source_file']
+        .filter(name => params[name])
+        .map(name => [name, params[name]])
+      : Object.entries(params);
+
+    for (const [name, schema] of orderedEntries) {
+      const value = schema.enum ? `<${schema.enum.join('|')}>` : '<value>';
+      const token = `${name}=${value}`;
+      parts.push(required.includes(name) ? token : `[${token}]`);
+    }
+
+    return `/${rawName}${parts.length > 0 ? ` ${parts.join(' ')}` : ''}`;
+  }
+
+  #inferSlashToolEffects(tool) {
+    const effects = ['Runs locally as a slash skill command; it does not call the LLM.'];
+    if (tool.name === 'setup') {
+      effects.push('Creates or updates project context files in the working directory.');
+    } else if (tool.name === 'review') {
+      effects.push('Reads a file from the working directory and prints a review report.');
+    } else if (tool.name === 'handoff') {
+      effects.push('Writes a handoff document to a temporary location.');
+    } else {
+      effects.push('Prints structured guidance/report text; it does not modify files by itself.');
+    }
+    return effects;
+  }
+
+  #getSlashToolExamples(rawName, tool) {
+    const examplesByTool = {
+      tdd: [
+        '/tdd phase=red component=LoginForm spec="valid credentials submit the form"',
+        '/tdd phase=green component=WeatherSearch spec="上海天气 triggers web_search" test_file=tests/weather.test.js',
+        '/tdd red SnakeGame "snake moves once per tick without exceeding the configured FPS"',
+      ],
+      review: [
+        '/review file_path=src/index.js',
+        '/review file_path=src/index.js focus_areas="security,cli ux,tests"',
+      ],
+      brainstorm: [
+        '/brainstorm problem="make CLI commands self-documenting"',
+        '/brainstorm problem="package Bun standalone binary" constraints="macOS,Linux,Windows"',
+      ],
+      grill: [
+        '/grill task="add command help system"',
+        '/grill task="ship CD artifacts" assumptions="GitHub Actions available, Bun installed in CI"',
+      ],
+      architect: [
+        '/architect scope="CLI command routing"',
+        '/architect scope="agent context management" pain_points="duplicated help,hidden defaults"',
+      ],
+      diagnose: [
+        '/diagnose symptom="slash command output hides whether it executed"',
+      ],
+      verify: [
+        '/verify claim="CLI command help works" criteria="help output shown,no LLM request,test passes" evidence="bun test-integration.mjs passed"',
+      ],
+      'zoom-out': [
+        '/zoom-out proposed_change="add another hardcoded command router branch"',
+      ],
+      caveman: [
+        '/caveman mode=simplify content="The system dynamically orchestrates tool affordances"',
+      ],
+      handoff: [
+        '/handoff session_summary="Implemented CLI command help" next_steps="review remaining built-in commands"',
+      ],
+      'to-prd': [
+        '/to-prd title="Command Help" context="Users do not know what slash commands do"',
+      ],
+      'to-issues': [
+        '/to-issues plan="Add command registry, help output, and tests" granularity=medium',
+      ],
+      setup: [
+        '/setup project_name="AI Engineering Agent" project_type=cli',
+      ],
+    };
+
+    if (examplesByTool[rawName]) {
+      return examplesByTool[rawName];
+    }
+
+    const required = this.#getToolRequiredParams(tool);
+    if (required.length === 0) {
+      return [`/${rawName} --help`];
+    }
+    return [`/${rawName} ${required.map(name => `${name}="value"`).join(' ')}`];
   }
 
   /**

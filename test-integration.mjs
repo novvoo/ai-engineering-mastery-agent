@@ -4007,6 +4007,26 @@ cliInputLoopTests.test('CLI slash skill command executes local tool without LLM 
       'initial CLI prompt'
     );
 
+    child.stdin.write('/tdd\n');
+    await waitForOutput(
+      () => output,
+      text => text.includes('Command Help: /tdd') &&
+        text.includes('Usage: /tdd phase=<red|green|refactor>') &&
+        text.includes('Effects:') &&
+        text.includes('Runs locally as a slash skill command; it does not call the LLM.') &&
+        text.includes('/tdd phase=red component=LoginForm'),
+      15000,
+      'slash skill no-arg help output'
+    );
+
+    child.stdin.write('/help tdd\n');
+    await waitForOutput(
+      () => output,
+      text => (text.match(/Command Help: \/tdd/g) || []).length >= 2,
+      15000,
+      'slash skill named help output'
+    );
+
     child.stdin.write('/tdd phase=red component=SlashCommand spec="direct slash input executes a local skill tool"\n');
     await waitForOutput(
       () => output,
