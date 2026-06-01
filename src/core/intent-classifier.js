@@ -1,0 +1,311 @@
+/**
+ * LLM-backed intent classification for short or implicit user requests.
+ *
+ * This layer does not execute tools. It turns raw user input into a structured
+ * routing hint that the ReAct loop can use before deciding its first action.
+ */
+
+const DEFAULT_CONFIDENCE_THRESHOLD = 0.75;
+
+export class IntentClassifier {
+  #modelProvider;
+  #toolRegistry;
+  #config;
+
+  constructor(modelProvider, toolRegistry, config = {}) {
+    this.#modelProvider = modelProvider;
+    this.#toolRegistry = toolRegistry;
+    this.#config = {
+      confidenceThreshold: DEFAULT_CONFIDENCE_THRESHOLD,
+      maxTools: 32,
+      maxTokens: 700,
+      ...config,
+    };
+  }
+
+  async classify(userInput, context = {}) {
+    if (!this.#modelProvider?.chat || !userInput || typeof userInput !== 'string') {
+      return null;
+    }
+    if (!this.shouldClassify(userInput)) {
+      return null;
+    }
+
+    const messages = [
+      { role: 'system', content: this.#buildSystemPrompt() },
+      { role: 'user', content: this.#buildUserPrompt(userInput, context) },
+    ];
+
+    try {
+      const response = await this.#modelProvider.chat(messages, {
+        maxTokens: this.#config.maxTokens,
+        temperature: 0,
+      });
+      const parsed = this.#parseJSON(response?.text || '');
+      const intent = this.#normalizeIntent(parsed);
+      return this.#shouldUseFallback(intent) ? this.#fallbackIntent(userInput) : intent;
+    } catch {
+      return this.#fallbackIntent(userInput);
+    }
+  }
+
+  buildRoutingPrompt(intent) {
+    if (!intent || intent.confidence < this.#config.confidenceThreshold) {
+      return '';
+    }
+
+    const lines = [
+      'Intent routing hint for the previous user message:',
+      `- intent: ${intent.intent}`,
+      `- confidence: ${intent.confidence}`,
+      `- normalized task: ${intent.normalizedTask || 'none'}`,
+      `- requires fresh data: ${intent.requiresFreshData ? 'true' : 'false'}`,
+    ];
+
+    if (intent.slots && Object.keys(intent.slots).length > 0) {
+      lines.push(`- slots: ${JSON.stringify(intent.slots)}`);
+    }
+    if (intent.recommendedTools.length > 0) {
+      lines.push(`- recommended tools: ${intent.recommendedTools.join(', ')}`);
+    }
+    if (intent.firstActionHint?.tool) {
+      lines.push(`- recommended first action: CALL ${intent.firstActionHint.tool}(${JSON.stringify(intent.firstActionHint.arguments || {})})`);
+    }
+
+    lines.push(
+      '',
+      'Use this only as a routing hint. If the intent requires fresh/current data, do not answer from memory; call an appropriate tool first.'
+    );
+
+    return lines.join('\n');
+  }
+
+  shouldClassify(userInput) {
+    const input = String(userInput || '').trim();
+    if (!input) {
+      return false;
+    }
+
+    const explicitDirectReply = [
+      /只回复|只回答|不要解释|不用解释|直接回复|直接回答/,
+      /\b(just reply|only reply|answer only|no explanation|respond only)\b/i,
+    ].some(pattern => pattern.test(input));
+    const memoryOnly = [
+      /记住|记一下|remember this|keep this in mind/i,
+    ].some(pattern => pattern.test(input));
+    if (explicitDirectReply || memoryOnly) {
+      return false;
+    }
+
+    return true;
+  }
+
+  #buildSystemPrompt() {
+    return [
+      'You are an intent classifier for an agent runtime.',
+      'Classify the latest user message into structured JSON only.',
+      'Do not answer the user. Do not call tools. Do not include markdown.',
+      '',
+      'Return this JSON shape:',
+      '{',
+      '  "intent": "weather_query | web_research | local_file_task | terminal_task | coding_task | git_task | schedule_task | explanation | general_chat | unknown",',
+      '  "confidence": 0.0,',
+      '  "normalizedTask": "clear task in the user language",',
+      '  "slots": {},',
+      '  "requiresFreshData": false,',
+      '  "recommendedTools": [],',
+      '  "firstActionHint": {"tool": "tool_name", "arguments": {}}',
+      '}',
+      '',
+      'Important examples:',
+      '- "上海天气" means a weather_query for location 上海, likely today/current weather.',
+      '- "明天北京会下雨吗" means a weather_query for 北京 with date 明天.',
+      '- "最新汇率" and "今天新闻" require fresh public data.',
+      '- File, terminal, coding, git, and schedule requests should be routed to the matching tool family when available.',
+    ].join('\n');
+  }
+
+  #buildUserPrompt(userInput, context) {
+    const availableTools = this.#summarizeTools();
+    const recentMessages = Array.isArray(context.recentMessages) ? context.recentMessages : [];
+    const recent = recentMessages
+      .slice(-6)
+      .map(message => `${message.role}: ${String(message.content || '').slice(0, 240)}`)
+      .join('\n');
+
+    return [
+      `User message:\n${userInput}`,
+      '',
+      `Available tools:\n${availableTools || 'none'}`,
+      recent ? `\nRecent conversation context:\n${recent}` : '',
+      '',
+      'Return JSON only.',
+    ].filter(Boolean).join('\n');
+  }
+
+  #summarizeTools() {
+    const tools = this.#toolRegistry?.getAll?.() || [];
+    return tools
+      .slice(0, this.#config.maxTools)
+      .map(tool => `- ${tool.name}: ${String(tool.description || '').slice(0, 180)}`)
+      .join('\n');
+  }
+
+  #parseJSON(text) {
+    const trimmed = String(text || '').trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    const fenceMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+    const candidate = fenceMatch ? fenceMatch[1].trim() : trimmed;
+
+    try {
+      return JSON.parse(candidate);
+    } catch {
+      const firstBrace = candidate.indexOf('{');
+      const lastBrace = candidate.lastIndexOf('}');
+      if (firstBrace === -1 || lastBrace <= firstBrace) {
+        return null;
+      }
+      try {
+        return JSON.parse(candidate.slice(firstBrace, lastBrace + 1));
+      } catch {
+        return null;
+      }
+    }
+  }
+
+  #normalizeIntent(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return null;
+    }
+
+    const intent = typeof value.intent === 'string' ? value.intent.trim() : 'unknown';
+    const confidence = Number.isFinite(Number(value.confidence))
+      ? Math.max(0, Math.min(1, Number(value.confidence)))
+      : 0;
+    const recommendedTools = Array.isArray(value.recommendedTools)
+      ? value.recommendedTools.filter(tool => typeof tool === 'string' && this.#toolRegistry?.has?.(tool))
+      : [];
+    const firstActionHint = this.#normalizeFirstActionHint(value.firstActionHint);
+
+    if (firstActionHint?.tool && !recommendedTools.includes(firstActionHint.tool)) {
+      recommendedTools.unshift(firstActionHint.tool);
+    }
+
+    return {
+      intent,
+      confidence,
+      normalizedTask: typeof value.normalizedTask === 'string' ? value.normalizedTask.trim() : '',
+      slots: value.slots && typeof value.slots === 'object' && !Array.isArray(value.slots) ? value.slots : {},
+      requiresFreshData: Boolean(value.requiresFreshData),
+      recommendedTools,
+      firstActionHint,
+    };
+  }
+
+  #shouldUseFallback(intent) {
+    if (!intent) {
+      return true;
+    }
+    return intent.intent === 'unknown' || intent.confidence < this.#config.confidenceThreshold;
+  }
+
+  #fallbackIntent(userInput) {
+    const input = String(userInput || '').trim();
+    const weatherIntent = this.#fallbackWeatherIntent(input);
+    if (weatherIntent) {
+      return weatherIntent;
+    }
+    return null;
+  }
+
+  #fallbackWeatherIntent(input) {
+    if (!this.#toolRegistry?.has?.('web_search')) {
+      return null;
+    }
+
+    const weatherLike = /天气|气温|温度|降雨|下雨|雨吗|带伞|预报|weather|temperature|forecast|rain/i.test(input);
+    if (!weatherLike) {
+      return null;
+    }
+
+    const location = this.#inferWeatherLocation(input);
+    const query = location ? `${location}天气` : input;
+
+    const recommendedTools = ['web_search'];
+    if (this.#toolRegistry?.has?.('web_fetch')) {
+      recommendedTools.push('web_fetch');
+    }
+
+    return {
+      intent: 'weather_query',
+      confidence: 0.86,
+      normalizedTask: `查询${query}`,
+      slots: {
+        ...(location ? { location } : {}),
+        date: this.#inferDateSlot(input),
+      },
+      requiresFreshData: true,
+      recommendedTools,
+      firstActionHint: {
+        tool: 'web_search',
+        arguments: { query, max_results: 5 },
+      },
+    };
+  }
+
+  #inferWeatherLocation(input) {
+    const quoted = input.match(/[“"']([^“”"']{1,30}?)(?:天气|气温|温度|预报)[”"']?/);
+    if (quoted?.[1]) {
+      return quoted[1].trim();
+    }
+
+    const beforeKeyword = input.match(/([\p{Script=Han}A-Za-z\s·.-]{1,30}?)(?:天气|气温|温度|预报)/u);
+    if (beforeKeyword?.[1]) {
+      return beforeKeyword[1]
+        .replace(/^(查询|查|看|搜索|搜|今天|明天|后天|本周|这周|当前|现在)/, '')
+        .trim();
+    }
+
+    const afterKeyword = input.match(/(?:天气|气温|温度|预报).*?(?:在|查询|查|看)?\s*([\p{Script=Han}A-Za-z\s·.-]{1,30})/u);
+    if (afterKeyword?.[1]) {
+      return afterKeyword[1].trim();
+    }
+
+    return '';
+  }
+
+  #inferDateSlot(input) {
+    if (/后天/.test(input)) {
+      return 'day_after_tomorrow';
+    }
+    if (/明天/.test(input)) {
+      return 'tomorrow';
+    }
+    if (/昨天/.test(input)) {
+      return 'yesterday';
+    }
+    if (/本周|这周|一周|7天|七天/.test(input)) {
+      return 'week';
+    }
+    return 'today';
+  }
+
+  #normalizeFirstActionHint(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return null;
+    }
+    const tool = typeof value.tool === 'string' ? value.tool.trim() : '';
+    if (!tool || !this.#toolRegistry?.has?.(tool)) {
+      return null;
+    }
+    const args = value.arguments && typeof value.arguments === 'object' && !Array.isArray(value.arguments)
+      ? value.arguments
+      : {};
+    return { tool, arguments: args };
+  }
+}
+
+export default IntentClassifier;

@@ -9,7 +9,8 @@
  * 4. {"action": {"tool_name": {"param": "value"}}}
  * 5. <tool>tool_name</tool><arg>value</arg>
  * 6. <tool_code>print(ls("path"))</tool_code> style code emitted by some models
- * 7. 自然语言描述（通过关键词匹配）
+ * 7. ```bash\ncommand\n``` shell code fences emitted by some models
+ * 8. 自然语言描述（通过关键词匹配）
  */
 
 export class TextToolParser {
@@ -43,6 +44,7 @@ export class TextToolParser {
     toolCalls.push(...this.#parseXMLFormat(text));
     toolCalls.push(...this.#parseNamedToolXMLFormat(text));
     toolCalls.push(...this.#parseToolCodeFormat(text));
+    toolCalls.push(...this.#parseShellCodeBlockFormat(text));
     if (toolCalls.length === 0) {
       toolCalls.push(...this.#parseNaturalLanguage(text));
     }
@@ -61,16 +63,19 @@ export class TextToolParser {
     let match;
 
     while ((match = callRegex.exec(text)) !== null) {
-      const name = this.#resolveToolName(match[1]);
       const argsStr = match[2];
       
       try {
         const args = this.#safeJSONParse(argsStr);
         if (args) {
+          const { name, args: normalizedArgs } = this.#normalizeJSONToolCall(match[1], args);
+          if (this.#toolRegistry?.has && !this.#toolRegistry.has(name)) {
+            continue;
+          }
           toolCalls.push({
             id: `call_${Date.now()}_${toolCalls.length}`,
             name,
-            arguments: args,
+            arguments: args && typeof args === 'object' && !Array.isArray(args) ? normalizedArgs : args,
             source: 'CALL_format',
           });
         }
@@ -97,6 +102,42 @@ export class TextToolParser {
       } catch (e) {
         // 不是有效的工具调用 JSON
       }
+    }
+
+    return toolCalls;
+  }
+
+  #parseShellCodeBlockFormat(text) {
+    if (!this.#toolRegistry?.has?.('shell')) {
+      return [];
+    }
+
+    const toolCalls = [];
+    const blockRegex = /```(?:bash|sh|zsh|shell|terminal|console)\s*\n([\s\S]*?)```/gi;
+    let match;
+
+    while ((match = blockRegex.exec(text)) !== null) {
+      const command = match[1].trim();
+      if (!command || command.startsWith('$')) {
+        const normalized = command.replace(/^\$\s*/, '').trim();
+        if (!normalized) {
+          continue;
+        }
+        toolCalls.push({
+          id: `call_${Date.now()}_${toolCalls.length}`,
+          name: 'shell',
+          arguments: { command: normalized },
+          source: 'shell_code_block',
+        });
+        continue;
+      }
+
+      toolCalls.push({
+        id: `call_${Date.now()}_${toolCalls.length}`,
+        name: 'shell',
+        arguments: { command },
+        source: 'shell_code_block',
+      });
     }
 
     return toolCalls;
@@ -157,6 +198,10 @@ export class TextToolParser {
 
   #parseEmbeddedJSONActionFormat(text) {
     if (!text.includes('"action"') && !text.includes("'action'")) {
+      return [];
+    }
+    const trimmed = text.trim();
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
       return [];
     }
 
@@ -626,7 +671,7 @@ export class TextToolParser {
 
   #extractToolCodeCalls(block) {
     const calls = [];
-    const names = ['ls', 'list', 'list_dir', 'list_directory', 'inspect_workspace', 'cat', 'read', 'read_file', 'write', 'write_file', 'shell', 'bash', 'run', 'run_command', 'plan_solution'];
+    const names = ['ls', 'list', 'list_files', 'list_dir', 'list_directory', 'inspect_workspace', 'cat', 'read', 'read_file', 'write', 'write_file', 'shell', 'bash', 'run', 'run_command', 'web_search', 'search_web', 'browser_search', 'web_fetch', 'fetch_url', 'plan_solution'];
     const namePattern = new RegExp(`\\b(${names.join('|')})\\s*\\(`, 'g');
     let match;
 
@@ -855,6 +900,7 @@ export class TextToolParser {
     const aliases = {
       ls: 'list_dir',
       list: 'list_dir',
+      list_files: 'list_dir',
       list_dir: 'list_dir',
       list_directory: 'list_dir',
       inspect_workspace: 'list_dir',
@@ -871,6 +917,14 @@ export class TextToolParser {
       run_in_terminal: 'shell',
       terminal: 'shell',
       exec: 'shell',
+      search_web: 'web_search',
+      browser_search: 'web_search',
+      web_search: 'web_search',
+      google: 'web_search',
+      internet_search: 'web_search',
+      fetch_url: 'web_fetch',
+      browser_fetch: 'web_fetch',
+      web_fetch: 'web_fetch',
       plan_solution: 'brainstorm',
     };
     return aliases[name] || this.#resolveToolName(name);
@@ -892,6 +946,12 @@ export class TextToolParser {
       terminal: 'shell',
       exec: 'shell',
       bash: 'shell',
+      search_web: 'web_search',
+      browser_search: 'web_search',
+      google: 'web_search',
+      internet_search: 'web_search',
+      fetch_url: 'web_fetch',
+      browser_fetch: 'web_fetch',
       plan: 'brainstorm',
       plan_solution: 'brainstorm',
     };
@@ -942,6 +1002,14 @@ export class TextToolParser {
       const command = parsedArgs.command ?? parsedArgs.cmd ?? parsedArgs.positional[0];
       return command ? { command } : null;
     }
+    if (toolName === 'web_search') {
+      const query = parsedArgs.query ?? parsedArgs.q ?? parsedArgs.text ?? parsedArgs.positional[0];
+      return query ? { query } : null;
+    }
+    if (toolName === 'web_fetch') {
+      const url = parsedArgs.url ?? parsedArgs.href ?? parsedArgs.link ?? parsedArgs.positional[0];
+      return url ? { url } : null;
+    }
     if (toolName === 'brainstorm') {
       const problem = parsedArgs.problem ?? parsedArgs.positional[0] ?? 'Plan the requested implementation before editing files.';
       return { problem };
@@ -974,6 +1042,11 @@ export class TextToolParser {
   #toolCallsFromJSON(json, source, startIndex = 0) {
     if (!json || typeof json !== 'object' || Array.isArray(json)) {
       return [];
+    }
+
+    const browserActionCall = this.#browserActionCallFromJSON(json, source, startIndex);
+    if (browserActionCall) {
+      return [browserActionCall];
     }
 
     const directName = json.name || json.tool;
@@ -1011,6 +1084,171 @@ export class TextToolParser {
       arguments: args && typeof args === 'object' && !Array.isArray(args) ? args : {},
       source,
     }];
+  }
+
+  #browserActionCallFromJSON(json, source, startIndex) {
+    const browserActions = new Set([
+      'navigate',
+      'go_to',
+      'goto',
+      'open_url',
+      'open_page',
+      'browse',
+      'browser',
+      'type',
+      'input',
+      'input_text',
+      'fill',
+      'enter_text',
+      'search',
+      'click',
+      'click_element',
+      'click_link',
+      'select',
+      'press',
+    ]);
+    const action = json.action && typeof json.action === 'object' && !Array.isArray(json.action)
+      ? json.action
+      : json;
+    const entries = Object.entries(action);
+    if (entries.length < 1) {
+      return null;
+    }
+
+    const normalizeActionName = value => String(value || '')
+      .replace(/^\//, '')
+      .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+      .replace(/-/g, '_')
+      .toLowerCase();
+    const selectedEntry = entries.find(([name, value]) => {
+      const normalized = normalizeActionName(name);
+      if (!browserActions.has(normalized)) {
+        return false;
+      }
+      return value && typeof value === 'object' && !Array.isArray(value) && (
+        value.query || value.q || value.search || value.text || value.keywords ||
+        value.url || value.href || value.link || value.value
+      );
+    }) || entries.find(([name]) => browserActions.has(normalizeActionName(name)));
+
+    if (!selectedEntry) {
+      return null;
+    }
+
+    const [rawName, rawArgs] = selectedEntry;
+    const actionName = normalizeActionName(rawName);
+    if (!browserActions.has(actionName)) {
+      return null;
+    }
+
+    const args = rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs : {};
+    const url = args.url || args.href || args.link || args.value;
+    const explicitQuery = args.query || args.q || args.search || args.text || args.keywords;
+    const searchQuery = explicitQuery || this.#queryFromSearchURL(url) || this.#inferSearchQuery(json);
+
+    if (searchQuery && this.#toolRegistry?.has?.('web_search') && this.#isSearchNavigation(url)) {
+      return {
+        id: `call_${Date.now()}_${startIndex}`,
+        name: 'web_search',
+        arguments: { query: searchQuery },
+        source: `${source}_browser_action`,
+      };
+    }
+
+    if (url && this.#toolRegistry?.has?.('web_fetch')) {
+      return {
+        id: `call_${Date.now()}_${startIndex}`,
+        name: 'web_fetch',
+        arguments: { url },
+        source: `${source}_browser_action`,
+      };
+    }
+
+    if (searchQuery && this.#toolRegistry?.has?.('web_search')) {
+      return {
+        id: `call_${Date.now()}_${startIndex}`,
+        name: 'web_search',
+        arguments: { query: searchQuery },
+        source: `${source}_browser_action`,
+      };
+    }
+
+    return null;
+  }
+
+  #isSearchNavigation(url) {
+    if (!url) {
+      return true;
+    }
+    try {
+      const parsed = new globalThis.URL(String(url));
+      const host = parsed.hostname.toLowerCase();
+      return host.includes('google.')
+        || host.includes('bing.')
+        || host.includes('duckduckgo.')
+        || host.includes('baidu.')
+        || host.includes('search.yahoo.');
+    } catch {
+      return false;
+    }
+  }
+
+  #queryFromSearchURL(url) {
+    if (!url) {
+      return '';
+    }
+    try {
+      const parsed = new globalThis.URL(String(url));
+      return parsed.searchParams.get('q')
+        || parsed.searchParams.get('query')
+        || parsed.searchParams.get('wd')
+        || parsed.searchParams.get('p')
+        || '';
+    } catch {
+      return '';
+    }
+  }
+
+  #inferSearchQuery(json) {
+    const fields = [
+      json.query,
+      json.q,
+      json.search,
+      json.user_request,
+      json.input,
+      json.task,
+      json.next_goal,
+      json.memory,
+      json.evaluation_previous_goal,
+    ];
+    const text = fields.find(value => typeof value === 'string' && value.trim());
+    if (!text) {
+      return '';
+    }
+    const quotedInput = text.match(/(?:输入|搜索|查询|查找|search(?:\s+for)?)[“"'']([^“”"'']+)[”"'']/i);
+    if (quotedInput?.[1]) {
+      return quotedInput[1].trim();
+    }
+
+    const chineseWeatherRequest = text.match(/(?:用户要求|需要|想要|请|帮.*?)(?:查询|搜索|查找|了解)([^。；;,.，]+天气[^。；;,.，]*)/);
+    if (chineseWeatherRequest?.[1]) {
+      return chineseWeatherRequest[1].trim();
+    }
+
+    const chineseWeatherClick = text.match(/点击([^。；;,.，]*?)(?:城市)?链接[\s\S]*?(?:天气|weather)/i);
+    if (chineseWeatherClick?.[1]) {
+      const city = chineseWeatherClick[1].replace(/并$/, '').trim();
+      if (city) {
+        return `${city}天气`;
+      }
+    }
+
+    return text
+      .replace(/^Beginning task to\s+/i, '')
+      .replace(/\bNeed to navigate\b[\s\S]*$/i, '')
+      .replace(/\bNeed to search\b[\s\S]*$/i, '')
+      .trim()
+      .replace(/\s+/g, ' ');
   }
 
   #resolveToolName(name) {
@@ -1059,6 +1297,12 @@ export class TextToolParser {
       terminal: 'shell',
       exec: 'shell',
       bash: 'shell',
+      search_web: 'web_search',
+      browser_search: 'web_search',
+      google: 'web_search',
+      internet_search: 'web_search',
+      fetch_url: 'web_fetch',
+      browser_fetch: 'web_fetch',
       plan: 'brainstorm',
       plan_solution: 'brainstorm',
     };
@@ -1084,6 +1328,24 @@ export class TextToolParser {
         args: { problem: args.problem || args.steps || args.plan || args.value || 'Plan the requested implementation before editing files.' },
       };
     }
+    if (resolvedName === 'web_search') {
+      return {
+        name: resolvedName,
+        args: {
+          ...args,
+          query: args.query || args.q || args.text || args.value || args.question,
+        },
+      };
+    }
+    if (resolvedName === 'web_fetch') {
+      return {
+        name: resolvedName,
+        args: {
+          ...args,
+          url: args.url || args.href || args.link || args.value,
+        },
+      };
+    }
 
     return { name: resolvedName, args: this.#normalizeToolArgumentAliases(resolvedName, args) };
   }
@@ -1100,6 +1362,12 @@ export class TextToolParser {
     }
     if (toolName === 'shell' && args.value && !args.command) {
       return { ...args, command: args.value };
+    }
+    if (toolName === 'web_search' && args.value && !args.query) {
+      return { ...args, query: args.value };
+    }
+    if (toolName === 'web_fetch' && args.value && !args.url) {
+      return { ...args, url: args.value };
     }
     return args;
   }

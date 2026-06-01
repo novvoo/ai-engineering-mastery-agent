@@ -36,6 +36,7 @@ import { createFileSystemTools } from './tools/filesystem/filesystem-tools.js';
 import { createShellTool } from './tools/system/shell.js';
 import { createPtyTools, stopAllPtySessions } from './tools/system/pty.js';
 import { createSemanticSearchTool } from './tools/memory/semantic-search.js';
+import { createWebTools } from './tools/web/web-tools.js';
 import { createTaskTools } from './tools/scheduler/task-tools.js';
 import { createScheduleTools } from './tools/scheduler/schedule-tools.js';
 import { createSubAgentTools } from './tools/scheduler/subagent-tools.js';
@@ -118,6 +119,7 @@ class AIEngineeringAgent {
       workingDir: resolve(process.env.WORKING_DIRECTORY || process.cwd()),
       debug: process.env.DEBUG === 'true',
       logDir: process.env.LOG_DIR || './logs',
+      intentClassification: process.env.INTENT_CLASSIFICATION !== 'false',
     };
   }
 
@@ -236,6 +238,11 @@ class AIEngineeringAgent {
     }
     toolRegistry.register(createSemanticSearchTool());
 
+    // Register browser-like web search and fetch tools
+    for (const tool of createWebTools()) {
+      toolRegistry.register(tool);
+    }
+
     // Register skill tools
     const skillTools = [
       createBrainstormTool(),
@@ -295,6 +302,12 @@ class AIEngineeringAgent {
 
     this.modelProvider = modelProvider;
 
+    // Initialize Security Policy before scheduler/subagents so every agent
+    // receives the same enforcement object.
+    this.securityPolicy = new SecurityPolicy({
+      requireApproval: process.env.REQUIRE_APPROVAL === 'true',
+    });
+
     // Create scheduler engine
     this.schedulerEngine = new SchedulerEngine(
       {
@@ -302,6 +315,7 @@ class AIEngineeringAgent {
         dataDir: resolve(this.workingDir, '.agent-data'),
         checkIntervalMs: 60000,
         maxAgents: 10,
+        securityPolicy: this.securityPolicy,
       },
       modelProvider,
       toolRegistry,
@@ -355,10 +369,7 @@ class AIEngineeringAgent {
       maxExperiences: 500,
     });
 
-    // Initialize Security Policy (inspired by OpenHuman's security model)
-    this.securityPolicy = new SecurityPolicy({
-      requireApproval: process.env.REQUIRE_APPROVAL === 'true',
-    });
+    // Register policies after all built-in/MCP tools have been registered.
     this.securityPolicy.registerDefaultPolicies(toolRegistry.getAll());
 
     // Initialize Intelligent Reasoning Engine
@@ -392,6 +403,8 @@ class AIEngineeringAgent {
         temperature: this.config.temperature,
         workingDirectory: this.workingDir,
         debug: this.debugMode,
+        intentClassification: this.config.intentClassification,
+        securityPolicy: this.securityPolicy,
       },
       enhancedUI
     );
