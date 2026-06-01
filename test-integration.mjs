@@ -1836,6 +1836,183 @@ conversationProtocolTests.test('OpenAI-compatible provider recognizes qwen long-
   }
 });
 
+conversationProtocolTests.test('Intent classifier parses implicit weather intent from short input', async () => {
+  const { IntentClassifier } = await import('./src/core/intent-classifier.js');
+  const { ToolRegistry } = await import('./src/core/tool-registry.js');
+  const { createWebSearchTool, createWebFetchTool } = await import('./src/tools/web/web-tools.js');
+
+  const registry = new ToolRegistry();
+  registry.register(createWebSearchTool());
+  registry.register(createWebFetchTool());
+
+  const mockProvider = {
+    async chat(messages, options) {
+      const systemMessage = messages.find(message => message.role === 'system')?.content || '';
+      if (!systemMessage.includes('intent classifier')) {
+        throw new Error(`Expected classifier system prompt, got ${systemMessage}`);
+      }
+      return {
+        text: '```json\n{"intent":"weather_query","confidence":0.94,"normalizedTask":"查询上海天气","slots":{"location":"上海","date":"today"},"requiresFreshData":true,"recommendedTools":["web_search","web_fetch"],"firstActionHint":{"tool":"web_search","arguments":{"query":"上海天气","max_results":5}}}\n```',
+        toolCalls: [],
+      };
+    },
+    getMaxContextTokens() {
+      return 4000;
+    },
+    dispose() {},
+  };
+
+  const classifier = new IntentClassifier(mockProvider, registry);
+  const intent = await classifier.classify('上海天气');
+  const prompt = classifier.buildRoutingPrompt(intent);
+
+  if (intent?.intent !== 'weather_query' || intent.confidence < 0.9 || intent.slots.location !== '上海') {
+    throw new Error(`Expected weather_query intent for 上海天气, got ${JSON.stringify(intent)}`);
+  }
+  if (intent.firstActionHint?.tool !== 'web_search' || intent.firstActionHint.arguments.query !== '上海天气') {
+    throw new Error(`Expected web_search first action hint, got ${JSON.stringify(intent)}`);
+  }
+  if (!prompt.includes('requires fresh data: true') || !prompt.includes('CALL web_search')) {
+    throw new Error(`Expected routing prompt to include fresh-data and web_search hints, got ${prompt}`);
+  }
+});
+
+conversationProtocolTests.test('Intent classifier falls back when model misses obvious weather intent', async () => {
+  const { IntentClassifier } = await import('./src/core/intent-classifier.js');
+  const { ToolRegistry } = await import('./src/core/tool-registry.js');
+  const { createWebSearchTool, createWebFetchTool } = await import('./src/tools/web/web-tools.js');
+
+  const registry = new ToolRegistry();
+  registry.register(createWebSearchTool());
+  registry.register(createWebFetchTool());
+
+  const mockProvider = {
+    async chat() {
+      return {
+        text: '{"intent":"unknown","confidence":0,"normalizedTask":"","slots":{},"requiresFreshData":false,"recommendedTools":[],"firstActionHint":null}',
+        toolCalls: [],
+      };
+    },
+    getMaxContextTokens() {
+      return 4000;
+    },
+    dispose() {},
+  };
+
+  const classifier = new IntentClassifier(mockProvider, registry);
+  const intent = await classifier.classify('上海天气');
+
+  if (intent?.intent !== 'weather_query' || intent.confidence < 0.8 || intent.slots.location !== '上海') {
+    throw new Error(`Expected weather fallback intent, got ${JSON.stringify(intent)}`);
+  }
+  if (intent.firstActionHint?.tool !== 'web_search' || intent.firstActionHint.arguments.query !== '上海天气') {
+    throw new Error(`Expected fallback web_search 上海天气, got ${JSON.stringify(intent)}`);
+  }
+});
+
+conversationProtocolTests.test('Agent injects intent routing hint before ReAct tool selection', async () => {
+  const { ReActAgent } = await import('./src/core/agent.js');
+  const { ToolRegistry } = await import('./src/core/tool-registry.js');
+  const { MemoryManager } = await import('./src/memory/memory-manager.js');
+
+  const requestSnapshots = [];
+  let chatCount = 0;
+  let webSearchArgs = null;
+  const mockProvider = {
+    async chat(messages, options) {
+      chatCount++;
+      requestSnapshots.push(messages.map(message => ({
+        role: message.role,
+        content: message.content,
+      })));
+
+      if (chatCount === 1) {
+        return {
+          text: JSON.stringify({
+            intent: 'weather_query',
+            confidence: 0.96,
+            normalizedTask: '查询上海天气',
+            slots: { location: '上海', date: 'today' },
+            requiresFreshData: true,
+            recommendedTools: ['web_search', 'web_fetch'],
+            firstActionHint: {
+              tool: 'web_search',
+              arguments: { query: '上海天气', max_results: 5 },
+            },
+          }),
+          toolCalls: [],
+        };
+      }
+
+      const hasRoutingHint = messages.some(message =>
+        message.role === 'user' &&
+        message.content.includes('Intent routing hint') &&
+        message.content.includes('weather_query') &&
+        message.content.includes('CALL web_search')
+      );
+      if (!hasRoutingHint) {
+        throw new Error(`Expected ReAct request to include intent routing hint, got ${JSON.stringify(messages, null, 2)}`);
+      }
+
+      if (chatCount === 2) {
+        return {
+          text: 'Thought: The routing hint says this requires fresh weather data, so I should search first.\nAction: CALL web_search({"query":"上海天气","max_results":5})',
+          toolCalls: [],
+        };
+      }
+
+      return {
+        text: 'FINAL_ANSWER: 上海天气已查询。',
+        toolCalls: [],
+      };
+    },
+    getMaxContextTokens() {
+      return 4000;
+    },
+    dispose() {},
+  };
+
+  const registry = new ToolRegistry();
+  registry.register({
+    name: 'web_search',
+    description: 'Search the public web for current information',
+    parameters: {
+      query: { type: 'string', description: 'Search query' },
+      max_results: { type: 'number', description: 'Maximum results' },
+    },
+    async handler(args) {
+      webSearchArgs = args;
+      return JSON.stringify({
+        query: args.query,
+        results: [{ title: '上海天气', url: 'https://weather.example/shanghai' }],
+      });
+    },
+  });
+  registry.register({
+    name: 'web_fetch',
+    description: 'Fetch a public web page',
+    parameters: { url: { type: 'string', description: 'URL' } },
+    async handler() {
+      return 'ok';
+    },
+  });
+
+  const agent = new ReActAgent(mockProvider, registry, new MemoryManager(TEST_CONFIG.testDir), {
+    maxIterations: 4,
+    workingDirectory: TEST_CONFIG.testDir,
+    intentClassification: true,
+  });
+
+  await agent.run('上海天气');
+
+  if (webSearchArgs?.query !== '上海天气') {
+    throw new Error(`Expected web_search to be called with 上海天气, got ${JSON.stringify(webSearchArgs)}`);
+  }
+  if (!requestSnapshots[1]?.some(message => message.role === 'user' && message.content.includes('Intent routing hint'))) {
+    throw new Error(`Expected second provider request to include routing hint, got ${JSON.stringify(requestSnapshots[1])}`);
+  }
+});
+
 conversationProtocolTests.test('Text parser accepts action tag and raw JSON action tool calls', async () => {
   const { TextToolParser } = await import('./src/core/text-tool-parser.js');
   const { ToolRegistry } = await import('./src/core/tool-registry.js');
@@ -4352,6 +4529,89 @@ webSearchTests.test('auto-trigger rules clearly define two-step workflow', async
   }
 
   console.log('     Auto-trigger rules define two-step search workflow');
+});
+
+webSearchTests.test('browser-style type action maps to web_search', async () => {
+  const { TextToolParser } = await import('./src/core/text-tool-parser.js');
+  const { ToolRegistry } = await import('./src/core/tool-registry.js');
+  const { createWebSearchTool } = await import('./src/tools/web/web-tools.js');
+
+  const registry = new ToolRegistry();
+  registry.register(createWebSearchTool());
+  const parser = new TextToolParser(registry);
+  const calls = parser.parse(JSON.stringify({
+    evaluation_previous_goal: '开始执行查询上海天气的任务，当前位于谷歌首页，准备输入搜索关键词。',
+    memory: '当前页面为谷歌首页，搜索框可用，下一步需输入搜索词并提交。',
+    next_goal: "在搜索框中输入'上海天气'并触发搜索。",
+    action: {
+      type: {
+        index: 2,
+        text: '上海天气',
+      },
+    },
+  }));
+
+  if (calls.length !== 1 || calls[0].name !== 'web_search' || calls[0].arguments.query !== '上海天气') {
+    throw new Error(`Expected browser-style type action to map to web_search, got ${JSON.stringify(calls)}`);
+  }
+
+  console.log('     Browser-style type action maps to web_search');
+});
+
+webSearchTests.test('browser-style click action infers weather search', async () => {
+  const { TextToolParser } = await import('./src/core/text-tool-parser.js');
+  const { ToolRegistry } = await import('./src/core/tool-registry.js');
+  const { createWebSearchTool } = await import('./src/tools/web/web-tools.js');
+
+  const registry = new ToolRegistry();
+  registry.register(createWebSearchTool());
+  const parser = new TextToolParser(registry);
+  const calls = parser.parse(JSON.stringify({
+    evaluation_previous_goal: '成功访问了中国天气网(www.weather.com.cn)，页面加载完成。Verdict: Success',
+    memory: '已访问中国天气网，页面显示有热门城市列表，其中包括上海。需要点击上海查看具体天气信息。',
+    next_goal: '在页面上找到并点击上海城市链接，查看上海天气详情。',
+    action: {
+      click: {
+        index: 0,
+      },
+    },
+  }));
+
+  if (calls.length !== 1 || calls[0].name !== 'web_search' || calls[0].arguments.query !== '上海天气') {
+    throw new Error(`Expected browser-style click action to infer Shanghai weather web_search, got ${JSON.stringify(calls)}`);
+  }
+
+  console.log('     Browser-style click action infers weather search');
+});
+
+webSearchTests.test('browser-style multi action uses input_text search query', async () => {
+  const { TextToolParser } = await import('./src/core/text-tool-parser.js');
+  const { ToolRegistry } = await import('./src/core/tool-registry.js');
+  const { createWebSearchTool } = await import('./src/tools/web/web-tools.js');
+
+  const registry = new ToolRegistry();
+  registry.register(createWebSearchTool());
+  const parser = new TextToolParser(registry);
+  const calls = parser.parse(JSON.stringify({
+    evaluation_previous_goal: '初始步骤，尚未执行任何操作。Verdict: N/A',
+    memory: '开始查询上海天气任务，需要打开浏览器并搜索相关信息。',
+    next_goal: "在浏览器搜索框中输入'上海天气'并执行搜索。",
+    action: {
+      input_text: {
+        index: 1,
+        text: '上海天气',
+      },
+      click_element: {
+        index: 2,
+      },
+    },
+  }));
+
+  if (calls.length !== 1 || calls[0].name !== 'web_search' || calls[0].arguments.query !== '上海天气') {
+    throw new Error(`Expected browser-style multi action to use input_text web_search, got ${JSON.stringify(calls)}`);
+  }
+
+  console.log('     Browser-style multi action uses input_text search query');
 });
 
 webSearchTests.test('search functions prioritize weather sites', async () => {

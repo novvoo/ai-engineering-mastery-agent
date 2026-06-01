@@ -119,6 +119,7 @@ class AIEngineeringAgent {
       workingDir: resolve(process.env.WORKING_DIRECTORY || process.cwd()),
       debug: process.env.DEBUG === 'true',
       logDir: process.env.LOG_DIR || './logs',
+      intentClassification: process.env.INTENT_CLASSIFICATION !== 'false',
     };
   }
 
@@ -398,6 +399,7 @@ class AIEngineeringAgent {
         temperature: this.config.temperature,
         workingDirectory: this.workingDir,
         debug: this.debugMode,
+        intentClassification: this.config.intentClassification,
       },
       enhancedUI
     );

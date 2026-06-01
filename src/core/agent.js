@@ -10,6 +10,7 @@ import { buildSystemPrompt } from '../prompts/system-prompt.js';
 import { classifyError, RetryStrategy, withTimeout } from '../errors/error-handler.js';
 import { ui } from '../cli/ui.js';
 import { TextToolParser } from './text-tool-parser.js';
+import { IntentClassifier } from './intent-classifier.js';
 import { ExecutionPlan, TaskStatus } from '../planner/graph-planner.js';
 
 const TERMINATION_KEYWORDS = ['FINAL_ANSWER:', 'Answer:', 'TASK_COMPLETE'];
@@ -75,6 +76,8 @@ export class ReActAgent {
   #toolResultCache = new Map();
   /** @type {TextToolParser} */
   #textToolParser;
+  /** @type {IntentClassifier|null} */
+  #intentClassifier;
   /** @type {Array<{name: string, success: boolean, args: object, resultPreview: string}>} */
   #runToolEvents = [];
   /** @type {object} */
@@ -98,6 +101,9 @@ export class ReActAgent {
     this.#sessionManager = new SessionManager();
     this.#retryStrategy = new RetryStrategy();
     this.#textToolParser = new TextToolParser(toolRegistry);
+    this.#intentClassifier = config.intentClassification
+      ? new IntentClassifier(modelProvider, toolRegistry, config.intentClassifier || {})
+      : null;
     this.#ui = customUI;
   }
 
@@ -133,8 +139,28 @@ export class ReActAgent {
       });
     }
 
+    const intent = this.#intentClassifier
+      ? await this.#intentClassifier.classify(userInput, {
+        recentMessages: this.#sessionManager.getRecentExchanges(3),
+      })
+      : null;
+    if (intent) {
+      this.#debugEvent('Intent classified', {
+        intent: intent.intent,
+        confidence: intent.confidence,
+        normalizedTask: intent.normalizedTask,
+        requiresFreshData: intent.requiresFreshData,
+        recommendedTools: intent.recommendedTools,
+        firstActionHint: intent.firstActionHint,
+      });
+    }
+
     // Add user message
     this.#sessionManager.addUserMessage(userInput);
+    const routingPrompt = this.#intentClassifier?.buildRoutingPrompt(intent);
+    if (routingPrompt) {
+      this.#sessionManager.addUserMessage(routingPrompt);
+    }
 
     // Reset tracking
     this.#lastResponse = '';

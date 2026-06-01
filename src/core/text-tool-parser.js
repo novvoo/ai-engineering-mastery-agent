@@ -1086,21 +1086,56 @@ export class TextToolParser {
   }
 
   #browserActionCallFromJSON(json, source, startIndex) {
-    const browserActions = new Set(['navigate', 'go_to', 'goto', 'open_url', 'open_page', 'browse', 'browser']);
+    const browserActions = new Set([
+      'navigate',
+      'go_to',
+      'goto',
+      'open_url',
+      'open_page',
+      'browse',
+      'browser',
+      'type',
+      'input',
+      'input_text',
+      'fill',
+      'enter_text',
+      'search',
+      'click',
+      'click_element',
+      'click_link',
+      'select',
+      'press',
+    ]);
     const action = json.action && typeof json.action === 'object' && !Array.isArray(json.action)
       ? json.action
       : json;
     const entries = Object.entries(action);
-    if (entries.length !== 1) {
+    if (entries.length < 1) {
       return null;
     }
 
-    const [rawName, rawArgs] = entries[0];
-    const actionName = String(rawName || '')
+    const normalizeActionName = value => String(value || '')
       .replace(/^\//, '')
       .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
       .replace(/-/g, '_')
       .toLowerCase();
+    const selectedEntry = entries.find(([name, value]) => {
+      const normalized = normalizeActionName(name);
+      if (!browserActions.has(normalized)) {
+        return false;
+      }
+      return value && typeof value === 'object' && !Array.isArray(value) && (
+        value.query || value.q || value.search || value.text || value.keywords ||
+        value.url || value.href || value.link || value.value
+      );
+    }) || entries.find(([name]) => browserActions.has(normalizeActionName(name)));
+
+    if (!selectedEntry) {
+      return null;
+    }
+
+    const [rawName, rawArgs] = selectedEntry;
+    const actionName = normalizeActionName(rawName);
     if (!browserActions.has(actionName)) {
       return null;
     }
@@ -1189,6 +1224,24 @@ export class TextToolParser {
     if (!text) {
       return '';
     }
+    const quotedInput = text.match(/(?:输入|搜索|查询|查找|search(?:\s+for)?)[“"'']([^“”"'']+)[”"'']/i);
+    if (quotedInput?.[1]) {
+      return quotedInput[1].trim();
+    }
+
+    const chineseWeatherRequest = text.match(/(?:用户要求|需要|想要|请|帮.*?)(?:查询|搜索|查找|了解)([^。；;,.，]+天气[^。；;,.，]*)/);
+    if (chineseWeatherRequest?.[1]) {
+      return chineseWeatherRequest[1].trim();
+    }
+
+    const chineseWeatherClick = text.match(/点击([^。；;,.，]*?)(?:城市)?链接[\s\S]*?(?:天气|weather)/i);
+    if (chineseWeatherClick?.[1]) {
+      const city = chineseWeatherClick[1].replace(/并$/, '').trim();
+      if (city) {
+        return `${city}天气`;
+      }
+    }
+
     return text
       .replace(/^Beginning task to\s+/i, '')
       .replace(/\bNeed to navigate\b[\s\S]*$/i, '')
