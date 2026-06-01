@@ -191,6 +191,16 @@ bun start
 
 通过 `.deb`、`.pkg`、`.msi` 安装后，也可以直接运行 `agent`。如果没有配置 `.env` 或环境变量，交互式终端会进入首次启动向导，选择 provider、填写 API Key、Base URL、模型和工作目录，并写入用户配置文件。
 
+安装后推荐流程：
+
+```bash
+agent setup       # 显式运行配置向导
+agent doctor      # 检查配置和工作目录
+agent             # 启动交互式 Agent
+agent --help      # 查看 CLI 用法
+agent config-path # 查看用户配置文件位置
+```
+
 配置加载优先级：
 
 1. 系统环境变量
@@ -214,6 +224,16 @@ bun test-integration.mjs # 运行完整集成测试
 bun run lint            # 运行 ESLint
 bun run package:release # 生成当前系统的 dist 分发目录
 bunx eslint src/tools/web/web-tools.js
+```
+
+安装包命令：
+
+```bash
+agent setup       # 配置 provider、API Key、模型和工作目录
+agent doctor      # 检查必要配置是否齐全
+agent config-path # 输出用户级 .env 路径
+agent --version   # 输出版本
+agent --help      # 输出帮助
 ```
 
 ## CI / CD

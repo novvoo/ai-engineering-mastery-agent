@@ -3795,6 +3795,31 @@ function waitForOutput(getOutput, predicate, timeoutMs, description) {
   });
 }
 
+function runCliOnce(args, env = {}) {
+  return new Promise((resolve) => {
+    let output = '';
+    const child = spawn(process.execPath, ['src/index.js', ...args], {
+      cwd: process.cwd(),
+      env: {
+        PATH: process.env.PATH,
+        HOME: process.env.HOME,
+        ...env,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    child.stdout.on('data', chunk => {
+      output += chunk.toString();
+    });
+    child.stderr.on('data', chunk => {
+      output += chunk.toString();
+    });
+    child.on('close', code => {
+      resolve({ code, output });
+    });
+  });
+}
+
 function startMockOpenAIServer(handler) {
   const server = createServer((req, res) => {
     if (req.method !== 'POST' || !req.url.endsWith('/chat/completions')) {
@@ -5392,6 +5417,34 @@ productionReadinessTests.test('Runtime config reports missing provider secrets f
   const written = readFileSync(envPath, 'utf8');
   if (!written.includes('MCP_CUSTOM_ENABLED=true') || !written.includes('DEEPSEEK_API_KEY=sk-test') || !written.includes('WORKING_DIRECTORY="/tmp/workspace with spaces"')) {
     throw new Error(`Expected user config file to be written safely, got ${written}`);
+  }
+});
+
+productionReadinessTests.test('CLI onboarding commands expose help, config path, and doctor checks', async () => {
+  const configDir = join(TEST_CONFIG.testDir, 'cli-onboarding-config');
+  mkdirSync(configDir, { recursive: true });
+
+  const help = await runCliOnce(['--help'], {
+    AGENT_CONFIG_DIR: configDir,
+    MODEL_PROVIDER: 'deepseek',
+  });
+  if (help.code !== 0 || !help.output.includes('agent setup') || !help.output.includes('agent doctor')) {
+    throw new Error(`Expected CLI help to explain onboarding commands, got code=${help.code}, output=${help.output}`);
+  }
+
+  const configPath = await runCliOnce(['config-path'], {
+    AGENT_CONFIG_DIR: configDir,
+  });
+  if (configPath.code !== 0 || !configPath.output.includes(join(configDir, '.env'))) {
+    throw new Error(`Expected CLI config-path output, got code=${configPath.code}, output=${configPath.output}`);
+  }
+
+  const doctor = await runCliOnce(['doctor'], {
+    AGENT_CONFIG_DIR: configDir,
+    MODEL_PROVIDER: 'deepseek',
+  });
+  if (doctor.code !== 1 || !doctor.output.includes('Missing required configuration: DEEPSEEK_API_KEY') || !doctor.output.includes('agent setup')) {
+    throw new Error(`Expected CLI doctor to report missing setup, got code=${doctor.code}, output=${doctor.output}`);
   }
 });
 
