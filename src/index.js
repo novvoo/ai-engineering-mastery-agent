@@ -1243,6 +1243,34 @@ class AIEngineeringAgent {
     }
     console.log('');
 
+    let prepared = before;
+    if (!before.modelFile.exists && before.autoDownload) {
+      const downloadSpinner = enhancedUI.spinner('Downloading embedding model...');
+      try {
+        downloadSpinner.start();
+        prepared = await embedder.prepareModel();
+        downloadSpinner.stop();
+        enhancedUI.success(`Embedding model downloaded: ${this.#formatBytes(prepared.modelFile.bytes)}`);
+      } catch (error) {
+        downloadSpinner.stop();
+        enhancedUI.error(`Embedding model download failed: ${error.message}`);
+        enhancedUI.info('Runtime initialization will continue with the fallback embedder if needed.');
+      }
+      console.log('');
+    } else if (!before.modelFile.exists && !before.autoDownload) {
+      enhancedUI.warning('Embedding model file is missing and auto download is disabled.');
+      console.log('');
+    }
+
+    const currentModel = await embedder.inspect();
+    console.log('Model File After Prepare');
+    console.log(`  exists: ${currentModel.modelFile.exists ? 'yes' : 'no'}`);
+    if (currentModel.modelFile.exists) {
+      console.log(`  size: ${this.#formatBytes(currentModel.modelFile.bytes)}`);
+      console.log(`  modified: ${currentModel.modelFile.modifiedAt}`);
+    }
+    console.log('');
+
     const spinner = enhancedUI.spinner('Initializing embedding runtime...');
     try {
       spinner.start();

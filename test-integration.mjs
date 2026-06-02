@@ -17,6 +17,7 @@ import { existsSync, mkdirSync, writeFileSync, readFileSync, rmSync, readdirSync
 import { performance } from 'perf_hooks';
 import { spawn, spawnSync } from 'child_process';
 import { createServer } from 'http';
+import { Buffer } from 'buffer';
 
 config();
 
@@ -5532,6 +5533,48 @@ newFeaturesTests.test('Embedder - model download candidates prefer official then
   }
 
   console.log('     Embedder model download candidates prefer official then mirrors');
+});
+
+newFeaturesTests.test('Embedder - prepareModel downloads missing model before runtime init', async () => {
+  const { Embedder } = await import('./src/core/embedder.js');
+  const modelPath = join(TEST_CONFIG.testDir, 'downloaded-model.onnx');
+  rmSync(modelPath, { force: true });
+
+  const originalFetch = globalThis.fetch;
+  const downloadedBytes = Buffer.from('fake-onnx-model');
+  const requestedUrls = [];
+  globalThis.fetch = async (url) => {
+    requestedUrls.push(String(url));
+    return new globalThis.Response(downloadedBytes, { status: 200 });
+  };
+
+  try {
+    const embedder = new Embedder({
+      modelPath,
+      autoDownload: true,
+      downloadTimeoutMs: 1000,
+    });
+    const before = await embedder.inspect();
+    if (before.modelFile.exists) {
+      throw new Error(`Expected model to be missing before prepare, got ${JSON.stringify(before)}`);
+    }
+
+    const prepared = await embedder.prepareModel();
+    if (!prepared.modelFile.exists || prepared.modelFile.bytes !== downloadedBytes.length) {
+      throw new Error(`Expected prepareModel to download model, got ${JSON.stringify(prepared)}`);
+    }
+    if (readFileSync(modelPath, 'utf-8') !== downloadedBytes.toString('utf-8')) {
+      throw new Error('Downloaded model contents did not match mocked response');
+    }
+    if (requestedUrls.length !== 1 || !requestedUrls[0].startsWith('https://huggingface.co/')) {
+      throw new Error(`Expected prepareModel to try official HuggingFace first, got ${JSON.stringify(requestedUrls)}`);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    rmSync(modelPath, { force: true });
+  }
+
+  console.log('     Embedder prepareModel downloads missing model before runtime init');
 });
 
 newFeaturesTests.test('Embedder - batch embedding', async () => {

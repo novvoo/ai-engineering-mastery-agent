@@ -108,6 +108,11 @@ export class Embedder {
     };
   }
 
+  async prepareModel() {
+    await this.#ensureModelAvailable();
+    return await this.inspect();
+  }
+
   async #getModelFileStatus() {
     try {
       const fileStat = await stat(this.#modelPath);
