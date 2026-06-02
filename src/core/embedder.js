@@ -10,7 +10,7 @@
 import { createWriteStream, existsSync } from 'fs';
 import { mkdir, rename, rm, stat } from 'fs/promises';
 import { dirname, join } from 'path';
-import { Readable } from 'stream';
+import { Readable, Transform } from 'stream';
 import { pipeline } from 'stream/promises';
 import { homedir } from 'os';
 
@@ -19,6 +19,7 @@ const DEFAULT_EMBEDDING_REVISION = 'main';
 const DEFAULT_EMBEDDING_FILE = 'onnx/model.onnx';
 const DEFAULT_HF_ENDPOINT = 'https://huggingface.co';
 const DEFAULT_HF_MIRROR = 'https://hf-mirror.com';
+const DEFAULT_DOWNLOAD_TIMEOUT_MS = 600000;
 
 export function getDefaultEmbeddingModelPath() {
   return join(
@@ -71,7 +72,9 @@ export class Embedder {
     this.#model = null;
     this.#tokenizer = null;
     this.#autoDownload = options.autoDownload ?? process.env.EMBEDDING_MODEL_AUTO_DOWNLOAD !== 'false';
-    this.#downloadTimeoutMs = Number(options.downloadTimeoutMs || process.env.EMBEDDING_MODEL_DOWNLOAD_TIMEOUT_MS || 120000);
+    this.#downloadTimeoutMs = Number(
+      options.downloadTimeoutMs || process.env.EMBEDDING_MODEL_DOWNLOAD_TIMEOUT_MS || DEFAULT_DOWNLOAD_TIMEOUT_MS
+    );
     this.#fallbackReason = null;
   }
 
@@ -108,8 +111,8 @@ export class Embedder {
     };
   }
 
-  async prepareModel() {
-    await this.#ensureModelAvailable();
+  async prepareModel(options = {}) {
+    await this.#ensureModelAvailable(options);
     return await this.inspect();
   }
 
@@ -159,7 +162,7 @@ export class Embedder {
     }
   }
 
-  async #ensureModelAvailable() {
+  async #ensureModelAvailable(options = {}) {
     if (existsSync(this.#modelPath) || !this.#autoDownload) {
       return;
     }
@@ -170,7 +173,7 @@ export class Embedder {
 
     for (const url of candidates) {
       try {
-        await this.#downloadModel(url);
+        await this.#downloadModel(url, options);
         return;
       } catch (error) {
         errors.push(`${url}: ${error.message}`);
@@ -180,25 +183,43 @@ export class Embedder {
     throw new Error(`Embedding model is missing and download failed. Tried: ${errors.join('; ')}`);
   }
 
-  async #downloadModel(url) {
+  async #downloadModel(url, options = {}) {
     const tmpPath = `${this.#modelPath}.download`;
     await rm(tmpPath, { force: true });
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.#downloadTimeoutMs);
     try {
-      console.warn(`Downloading embedding model from ${url}`);
+      options.onDownloadStart?.({ url, timeoutMs: this.#downloadTimeoutMs });
       const response = await fetch(url, { signal: controller.signal });
       if (!response.ok || !response.body) {
         throw new Error(`HTTP ${response.status}`);
       }
 
-      await pipeline(Readable.fromWeb(response.body), createWriteStream(tmpPath));
+      const totalBytes = Number(response.headers?.get?.('content-length')) || null;
+      let downloadedBytes = 0;
+      options.onDownloadProgress?.({ url, downloadedBytes, totalBytes });
+
+      const progress = new Transform({
+        transform(chunk, encoding, callback) {
+          downloadedBytes += chunk.length;
+          options.onDownloadProgress?.({ url, downloadedBytes, totalBytes });
+          callback(null, chunk);
+        },
+      });
+
+      await pipeline(Readable.fromWeb(response.body), progress, createWriteStream(tmpPath));
       const fileStat = await stat(tmpPath);
       if (fileStat.size === 0) {
         throw new Error('Downloaded model file is empty');
       }
       await rename(tmpPath, this.#modelPath);
+      options.onDownloadComplete?.({ url, bytes: fileStat.size });
+    } catch (error) {
+      if (error?.name === 'AbortError') {
+        throw new Error(`download timed out after ${this.#downloadTimeoutMs}ms`);
+      }
+      throw error;
     } finally {
       clearTimeout(timeout);
       await rm(tmpPath, { force: true });

@@ -1245,14 +1245,40 @@ class AIEngineeringAgent {
 
     let prepared = before;
     if (!before.modelFile.exists && before.autoDownload) {
-      const downloadSpinner = enhancedUI.spinner('Downloading embedding model...');
+      enhancedUI.info('Embedding model is missing. Starting download before runtime initialization.');
+      let lastProgressBytes = -1;
+      let lastProgressAt = 0;
       try {
-        downloadSpinner.start();
-        prepared = await embedder.prepareModel();
-        downloadSpinner.stop();
+        prepared = await embedder.prepareModel({
+          onDownloadStart: ({ url, timeoutMs }) => {
+            console.log(`  downloading from: ${url}`);
+            console.log(`  timeout: ${timeoutMs}ms`);
+          },
+          onDownloadProgress: ({ downloadedBytes, totalBytes }) => {
+            const now = Date.now();
+            const bytesDelta = downloadedBytes - lastProgressBytes;
+            const shouldReport =
+              lastProgressBytes < 0 ||
+              downloadedBytes === totalBytes ||
+              bytesDelta >= 25 * 1024 * 1024 ||
+              now - lastProgressAt >= 5000;
+
+            if (!shouldReport) {
+              return;
+            }
+
+            lastProgressBytes = downloadedBytes;
+            lastProgressAt = now;
+            const totalText = totalBytes ? ` / ${this.#formatBytes(totalBytes)}` : '';
+            const percentText = totalBytes ? ` (${Math.min(100, (downloadedBytes / totalBytes) * 100).toFixed(1)}%)` : '';
+            console.log(`  progress: ${this.#formatBytes(downloadedBytes)}${totalText}${percentText}`);
+          },
+          onDownloadComplete: ({ bytes }) => {
+            console.log(`  downloaded: ${this.#formatBytes(bytes)}`);
+          },
+        });
         enhancedUI.success(`Embedding model downloaded: ${this.#formatBytes(prepared.modelFile.bytes)}`);
       } catch (error) {
-        downloadSpinner.stop();
         enhancedUI.error(`Embedding model download failed: ${error.message}`);
         enhancedUI.info('Runtime initialization will continue with the fallback embedder if needed.');
       }

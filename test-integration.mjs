@@ -5483,6 +5483,31 @@ newFeaturesTests.test('Embedder - inspect reports runtime and model status', asy
   console.log('     Embedder inspect reports runtime and model status');
 });
 
+newFeaturesTests.test('Embedder - default model download timeout supports large ONNX files', async () => {
+  const { Embedder } = await import('./src/core/embedder.js');
+  const oldTimeout = process.env.EMBEDDING_MODEL_DOWNLOAD_TIMEOUT_MS;
+
+  try {
+    delete process.env.EMBEDDING_MODEL_DOWNLOAD_TIMEOUT_MS;
+    const embedder = new Embedder({
+      modelPath: join(TEST_CONFIG.testDir, 'missing-large-model.onnx'),
+      autoDownload: false,
+    });
+    const status = await embedder.inspect();
+    if (status.downloadTimeoutMs !== 600000) {
+      throw new Error(`Expected 10 minute default download timeout for large ONNX model, got ${status.downloadTimeoutMs}`);
+    }
+  } finally {
+    if (oldTimeout === undefined) {
+      delete process.env.EMBEDDING_MODEL_DOWNLOAD_TIMEOUT_MS;
+    } else {
+      process.env.EMBEDDING_MODEL_DOWNLOAD_TIMEOUT_MS = oldTimeout;
+    }
+  }
+
+  console.log('     Embedder default model download timeout supports large ONNX files');
+});
+
 newFeaturesTests.test('Embedder - model download candidates prefer official then mirrors', async () => {
   const {
     getDefaultEmbeddingModelPath,
@@ -5545,7 +5570,12 @@ newFeaturesTests.test('Embedder - prepareModel downloads missing model before ru
   const requestedUrls = [];
   globalThis.fetch = async (url) => {
     requestedUrls.push(String(url));
-    return new globalThis.Response(downloadedBytes, { status: 200 });
+    return new globalThis.Response(downloadedBytes, {
+      status: 200,
+      headers: {
+        'content-length': String(downloadedBytes.length),
+      },
+    });
   };
 
   try {
@@ -5559,7 +5589,12 @@ newFeaturesTests.test('Embedder - prepareModel downloads missing model before ru
       throw new Error(`Expected model to be missing before prepare, got ${JSON.stringify(before)}`);
     }
 
-    const prepared = await embedder.prepareModel();
+    const downloadEvents = [];
+    const prepared = await embedder.prepareModel({
+      onDownloadStart: (event) => downloadEvents.push(['start', event]),
+      onDownloadProgress: (event) => downloadEvents.push(['progress', event]),
+      onDownloadComplete: (event) => downloadEvents.push(['complete', event]),
+    });
     if (!prepared.modelFile.exists || prepared.modelFile.bytes !== downloadedBytes.length) {
       throw new Error(`Expected prepareModel to download model, got ${JSON.stringify(prepared)}`);
     }
@@ -5569,12 +5604,65 @@ newFeaturesTests.test('Embedder - prepareModel downloads missing model before ru
     if (requestedUrls.length !== 1 || !requestedUrls[0].startsWith('https://huggingface.co/')) {
       throw new Error(`Expected prepareModel to try official HuggingFace first, got ${JSON.stringify(requestedUrls)}`);
     }
+    if (!downloadEvents.some(([type]) => type === 'start')) {
+      throw new Error(`Expected download start callback, got ${JSON.stringify(downloadEvents)}`);
+    }
+    if (!downloadEvents.some(([type, event]) => type === 'progress' && event.totalBytes === downloadedBytes.length)) {
+      throw new Error(`Expected progress callback with total bytes, got ${JSON.stringify(downloadEvents)}`);
+    }
+    if (!downloadEvents.some(([type, event]) => type === 'complete' && event.bytes === downloadedBytes.length)) {
+      throw new Error(`Expected download complete callback, got ${JSON.stringify(downloadEvents)}`);
+    }
   } finally {
     globalThis.fetch = originalFetch;
     rmSync(modelPath, { force: true });
   }
 
   console.log('     Embedder prepareModel downloads missing model before runtime init');
+});
+
+newFeaturesTests.test('Embedder - prepareModel reports readable download timeout errors', async () => {
+  const { Embedder } = await import('./src/core/embedder.js');
+  const modelPath = join(TEST_CONFIG.testDir, 'timeout-model.onnx');
+  const originalFetch = globalThis.fetch;
+  const oldUrl = process.env.EMBEDDING_MODEL_URL;
+  rmSync(modelPath, { force: true });
+
+  globalThis.fetch = async () => {
+    const error = new Error('The operation was aborted.');
+    error.name = 'AbortError';
+    throw error;
+  };
+  process.env.EMBEDDING_MODEL_URL = 'https://example.test/model.onnx';
+
+  try {
+    const embedder = new Embedder({
+      modelPath,
+      autoDownload: true,
+      downloadTimeoutMs: 123,
+    });
+
+    let thrown = null;
+    try {
+      await embedder.prepareModel();
+    } catch (error) {
+      thrown = error;
+    }
+
+    if (!thrown || !thrown.message.includes('download timed out after 123ms')) {
+      throw new Error(`Expected readable timeout error, got ${thrown?.message}`);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (oldUrl === undefined) {
+      delete process.env.EMBEDDING_MODEL_URL;
+    } else {
+      process.env.EMBEDDING_MODEL_URL = oldUrl;
+    }
+    rmSync(modelPath, { force: true });
+  }
+
+  console.log('     Embedder prepareModel reports readable download timeout errors');
 });
 
 newFeaturesTests.test('Embedder - batch embedding', async () => {
