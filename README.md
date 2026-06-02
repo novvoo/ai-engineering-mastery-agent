@@ -259,8 +259,9 @@ CD / Release 用于生成系统安装包：
 ```bash
 git checkout main
 git pull origin main
-git tag v1.0.4
-git push origin v1.0.4
+VERSION="$(bun -e "const pkg = await import('./package.json'); console.log(pkg.default.version)")"
+git tag "v$VERSION"
+git push origin "v$VERSION"
 ```
 
 ## 配置项

@@ -79,6 +79,7 @@ import { enhancedUI } from './cli/enhanced-ui.js';
 import { createEnhancedCommands } from './cli/enhanced-commands.js';
 import {
   buildSlashCommandSuggestions,
+  completeSlashCommand,
   formatSlashCommandSuggestions,
   filterSlashCommandSuggestions,
 } from './cli/slash-command-suggestions.js';
@@ -616,6 +617,7 @@ class AIEngineeringAgent {
     this.rl = createInterface({
       input: process.stdin,
       output: process.stdout,
+      completer: line => this.#completeSlashCommandLine(line),
     });
     this.rl.on('close', () => {
       this.rlClosed = true;
@@ -735,7 +737,7 @@ class AIEngineeringAgent {
 
     const line = this.rl.line || '';
     const suggestions = filterSlashCommandSuggestions(this.slashCommandSuggestions, line, 6);
-    const suggestionKey = suggestions.map(command => command.name).join('|');
+    const suggestionKey = `${line}::${suggestions.map(command => command.name).join('|')}`;
 
     if (!suggestions.length) {
       this.lastSlashSuggestionKey = '';
@@ -752,6 +754,10 @@ class AIEngineeringAgent {
     cursorTo(process.stdout, 0);
     process.stdout.write(`${formatSlashCommandSuggestions(suggestions, enhancedUI.theme)}\n`);
     this.rl.prompt(true);
+  }
+
+  #completeSlashCommandLine(line) {
+    return completeSlashCommand(this.slashCommandSuggestions, line);
   }
 
   /**

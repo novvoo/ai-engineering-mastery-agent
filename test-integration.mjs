@@ -4646,6 +4646,7 @@ newFeaturesTests.test('System prompt advertises the aligned AI Engineering Maste
 newFeaturesTests.test('Slash command suggestions include skill commands while typing prefixes', async () => {
   const {
     buildSlashCommandSuggestions,
+    completeSlashCommand,
     formatSlashCommandSuggestions,
     filterSlashCommandSuggestions,
   } = await import('./src/cli/slash-command-suggestions.js');
@@ -4660,15 +4661,23 @@ newFeaturesTests.test('Slash command suggestions include skill commands while ty
   ]);
 
   const tSuggestions = filterSlashCommandSuggestions(commands, '/t').map(command => command.name);
+  const tdSuggestions = filterSlashCommandSuggestions(commands, '/td').map(command => command.name);
   const toSuggestions = filterSlashCommandSuggestions(commands, '/to').map(command => command.name);
   const afterSpaceSuggestions = filterSlashCommandSuggestions(commands, '/tdd ');
   const rendered = formatSlashCommandSuggestions(filterSlashCommandSuggestions(commands, '/t'));
+  const [tabHits, tabPrefix] = completeSlashCommand(commands, '/td');
 
   if (!tSuggestions.includes('/tdd')) {
     throw new Error(`Expected /t to suggest /tdd, got ${JSON.stringify(tSuggestions)}`);
   }
+  if (!tdSuggestions.includes('/tdd')) {
+    throw new Error(`Expected /td to suggest /tdd, got ${JSON.stringify(tdSuggestions)}`);
+  }
   if (tSuggestions[0] !== '/tdd') {
     throw new Error(`Expected skill slash command /tdd to be prioritized, got ${JSON.stringify(tSuggestions)}`);
+  }
+  if (!tabHits.includes('/tdd ') || tabPrefix !== '/td') {
+    throw new Error(`Expected Tab completion for /td to include /tdd, got hits=${JSON.stringify(tabHits)} prefix=${tabPrefix}`);
   }
   if (!toSuggestions.includes('/to-prd') || !toSuggestions.includes('/to-issues')) {
     throw new Error(`Expected /to to suggest upstream hyphen skill names, got ${JSON.stringify(toSuggestions)}`);
@@ -4676,8 +4685,8 @@ newFeaturesTests.test('Slash command suggestions include skill commands while ty
   if (afterSpaceSuggestions.length !== 0) {
     throw new Error(`Expected suggestions to stop after arguments begin, got ${JSON.stringify(afterSpaceSuggestions)}`);
   }
-  if (rendered.includes('Test-driven development workflow tool')) {
-    throw new Error(`Expected compact command-only suggestions, got ${rendered}`);
+  if (!rendered.includes('/tdd') || !rendered.includes('Test-driven development workflow tool')) {
+    throw new Error(`Expected suggestions to include command descriptions, got ${rendered}`);
   }
 
   console.log('     Slash command suggestions expose skill prefixes');

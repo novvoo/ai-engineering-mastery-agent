@@ -71,9 +71,33 @@ export function filterSlashCommandSuggestions(commands, input, limit = 8) {
     .slice(0, limit);
 }
 
+export function completeSlashCommand(commands, line) {
+  const trimmed = String(line || '').trimStart();
+  if (!trimmed.startsWith('/') || /\s/.test(trimmed)) {
+    return [[], line];
+  }
+
+  const suggestions = filterSlashCommandSuggestions(commands, trimmed, 50);
+  const hits = suggestions.map(command => `${command.name} `);
+  return [hits.length > 0 ? hits : [], trimmed];
+}
+
+function compactDescription(description = '') {
+  const text = String(description || '').replace(/\s+/g, ' ').trim();
+  if (!text) {
+    return '';
+  }
+  return text.length > 56 ? `${text.slice(0, 53)}...` : text;
+}
+
 export function formatSlashCommandSuggestions(commands, theme = {}) {
   const primary = theme.primary || (text => text);
   const dim = theme.dim || (text => text);
-  const names = commands.map(command => primary(command.name));
-  return `${dim('Commands:')} ${names.join(dim('  '))}`;
+  const lines = commands.map(command => {
+    const description = compactDescription(command.description);
+    return description
+      ? `${primary(command.name)} ${dim('-')} ${dim(description)}`
+      : primary(command.name);
+  });
+  return `${dim('Commands:')} ${lines.join(dim('  '))}`;
 }
