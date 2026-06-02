@@ -214,6 +214,57 @@ agent config-path # 查看用户配置文件位置
 
 可以用 `AGENT_CONFIG_DIR=/path/to/config-dir` 改写用户配置目录。
 
+## 安装与卸载
+
+从 GitHub Release 下载对应系统安装包：
+
+- macOS Apple Silicon: `ai-engineering-mastery-agent-<version>-darwin-arm64.pkg`
+- Linux x64: `ai-engineering-mastery-agent-<version>-linux-x64.deb`
+- Windows x64: `ai-engineering-mastery-agent-<version>-win32-x64.msi`
+
+macOS 安装：
+
+```bash
+sudo installer -pkg ai-engineering-mastery-agent-<version>-darwin-arm64.pkg -target /
+agent --version
+```
+
+macOS 卸载：
+
+```bash
+sudo rm -rf /usr/local/lib/ai-engineering-mastery-agent
+sudo rm -f /usr/local/bin/agent
+pkgutil --forget com.novvoo.ai-engineering-mastery-agent 2>/dev/null || true
+```
+
+如果 macOS 安装新版本时提示安装包“已损坏”或无法打开，优先卸载旧版本后重新安装。用户配置文件不会被上面的卸载命令删除；需要重置配置时再删除 `~/.config/ai-engineering-mastery-agent/.env`。
+
+Linux 安装与升级：
+
+```bash
+sudo apt install ./ai-engineering-mastery-agent-<version>-linux-x64.deb
+agent --version
+```
+
+Linux 卸载：
+
+```bash
+sudo apt remove ai-engineering-mastery-agent
+```
+
+Windows 安装：双击 `.msi`，或在管理员 PowerShell 中运行：
+
+```powershell
+msiexec /i .\ai-engineering-mastery-agent-<version>-win32-x64.msi
+agent --version
+```
+
+Windows 卸载：在“设置 → 应用 → 已安装的应用”中卸载，或使用管理员 PowerShell：
+
+```powershell
+msiexec /x .\ai-engineering-mastery-agent-<version>-win32-x64.msi
+```
+
 ## 常用命令
 
 ```bash
