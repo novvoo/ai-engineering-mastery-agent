@@ -4,18 +4,58 @@
 
 当前设计目标不是“让模型自由发挥”，而是让模型在本地运行时里被可靠地引导：先识别任务，选择工具，执行变更，验证结果，最后输出对用户有用的结论。
 
+## AI Agent 对比
+
+### 三大主流 AI 工程 Agent 对比表
+
+| 特性 | AI Engineering Mastery Agent | Claude Code (Copilot CLI) | Hermes Agent |
+|------|-----|-----|-----|
+| **基础架构** | ReAct + 意图识别 + 按需路由 | Graph Planning + Native Function Calling | Lightweight ReAct |
+| **部署方式** | 本地 CLI + 系统二进制包 | VS Code 集成 + 后端 Claude 服务 | 本地 Python/JS |
+| **支持模型** | 5+ providers (OpenAI, Llama, Zhipu, DeepSeek, OpenRouter) | Claude 3/3.5 (Anthropic only) | OpenAI, 本地模型 |
+| **上下文管理** | 3 层记忆系统 (TokenJuice + ExperienceMemory + DynamicContextPruning) | Checkpoints + Session Store + Graph Memory | 基础对话历史 |
+| **工具总数** | 30+ 工具 + 12+ 方法论技能 | 15+ VS Code 集成工具 | 核心 5-8 工具 |
+| **工具路由策略** | 智能按需裁剪（避免工具泛滥） | 全量工具可用 | 固定工具集 |
+| **工程方法论** | setup, diagnose, grill, zoom_out, brainstorm, tdd, review, verify, architect, to_prd, to_issues, caveman, handoff | VS Code Copilot 编程助手 | 基础指导框架 |
+| **任务自动编排** | ✅ 自动编排 + 编码守门 + 语义风险审查 | ⚠️ 用户指导 + 图规划 | ❌ 简单循环 |
+| **沙箱隔离** | macOS Seatbelt, Linux bubblewrap, Policy 检查 | VS Code 内安全隔离 | 取决于部署 |
+| **CLI 易用性** | ⭐⭐⭐⭐⭐ (独立 CLI/二进制包) | ⭐⭐⭐⭐ (VS Code 集成) | ⭐⭐⭐ (需手动配置) |
+| **多 Provider 支持** | ✅ 5+ 模型供应商 | ❌ Anthropic only | ✅ 多家支持 |
+| **实时 Web 搜索** | ✅ Bing (优先) + DuckDuckGo | ⚠️ 需要扩展支持 | ✅ 可选集成 |
+| **MCP 支持** | ✅ MCP client + adapter | ✅ MCP 协议集成 | ⚠️ 有限支持 |
+| **调试友好性** | ⭐⭐⭐⭐⭐ (DEBUG 日志 + trace) | ⭐⭐⭐⭐ (Session history + checkpoints) | ⭐⭐⭐ (基础日志) |
+| **安全性** | SecurityPolicy 工具审批 + 结果截断 | Anthropic 企业级安全 | 社区审查 |
+| **生产就绪** | ✅ 集成测试 + CI/CD 发布 | ✅ Anthropic 官方维护 | ⚠️ 社区维护 |
+| **许可证** | MIT | Proprietary | MIT/Apache |
+| **版本** | v1.0.11 | v1.0.49+ | Community |
+
+### 选择建议
+
+- **AI Engineering Mastery Agent**：适合需要本地化部署、多模型支持、丰富工程方法论、完全可控、成本优化的团队
+- **Claude Code (Copilot CLI)**：适合已在 VS Code 内工作、需要最先进 LLM（Claude 3.5）、追求开箱即用体验的开发者
+- **Hermes Agent**：适合追求轻量级、易定制、社区驱动、单机部署的场景
+
+---
+
 ## 核心能力
 
-- **智能意图识别**：短输入如“上海天气”会先经过 LLM intent classifier，生成结构化 routing hint，再进入 ReAct 循环。明显天气查询有窄兜底，避免模型漏判。
+- **智能意图识别**：短输入如"上海天气"会先经过 LLM intent classifier，生成结构化 routing hint，再进入 ReAct 循环。明显天气查询有窄兜底，避免模型漏判。
 - **按需工具路由**：每轮 LLM request 只暴露当前任务需要的工具子集。工程任务默认使用文件、终端、PTY、方法论和只读 Git 工具；如果任务提到最新资料、浏览器、MCP、后台任务或发布操作，会按需加入 Web、Browser、MCP、调度或 Git 写入工具。
 - **轻量任务画像**：明显工程任务会先用本地画像识别，跳过无收益的 intent 预请求，避免首轮在工具很多时等待额外 LLM 调用。
 - **ReAct 工具执行**：支持原生 function calling，也支持文本模型输出的 `CALL tool({...})`、JSON action、XML、`<tool_code>`、bash code fence 等工具格式。
 - **编码任务守门**：编码类请求会自动进入 coding task mode，要求理解仓库、做最小必要修改、检查变更、运行验证，再给最终答案。
-- **方法论工具**：内置 `setup`、`diagnose`、`grill`、`zoom_out`、`brainstorm`、`tdd`、`review`、`verify`、`architect`、`to_prd`、`to_issues` 等工程流程工具。
-- **Web 查询链路**：`web_search` 默认优先 Bing，失败或无结果时 fallback 到 DuckDuckGo；需要详情时继续 `web_fetch`。
+- **方法论工具**：内置 `setup`、`diagnose`、`grill`、`zoom_out`、`brainstorm`、`tdd`、`review`、`verify`、`architect`、`to_prd`、`to_issues`、`caveman`、`handoff` 等 12+ 工程流程工具。
+- **Web 查询链路**：`web_search` 默认优先 Bing（中文本地化），失败或无结果时 fallback 到 DuckDuckGo；需要详情时继续 `web_fetch`。
 - **本地系统工具**：文件读写、目录列表、shell、PTY、语义搜索、浏览器打开等工具统一通过 tool registry 暴露。
+- **3 层记忆系统**：TokenJuice (Token 计数) + ExperienceMemory (经验学习) + DynamicContextPruning (动态裁剪)，实现高效上下文管理。
+- **自动任务编排**：AutomationEngine 支持工作流触发、条件分支、并发执行、失败恢复。
+- **智能推理引擎**：IntelligentReasoning 支持因果链路分析、决策树构建、多路径规划。
+- **安全审批层**：SecurityPolicy 工具审批、结果截断、敏感路径保护、沙箱执行。
+- **多 Provider 支持**：OpenAI、Llama、Zhipu、DeepSeek、OpenRouter，支持模型能力自动识别和在线查询。
+- **MCP 协议支持**：MCP client/adapter，支持扩展工具集成，兼容第三方 MCP 服务。
+- **Shell 沙箱**：macOS Seatbelt、Linux bubblewrap、Policy 策略检查，支持可选隔离执行。
 - **默认安静运行**：`DEBUG=false` 为默认模式；需要排障时可用 `/debug on` 或 `bun run start:debug` 打开详细事件日志。
-- **集成测试覆盖**：`test-integration.mjs` 覆盖 Agent 循环、工具解析、Web 搜索、CLI 输入、编码守门和稳定性。
+- **集成测试覆盖**：`test-integration.mjs` 覆盖 Agent 循环、工具解析、Web 搜索、CLI 输入、编码守门、记忆系统、安全策略和稳定性。
 
 ## 运行链路
 
@@ -39,15 +79,25 @@ User Input
 
 关键文件：
 
-- `src/index.js`：CLI 入口、配置加载、工具注册、模型 provider 初始化、slash command、debug 开关。
+- `src/index.js`：CLI 入口、配置加载、工具注册、模型 provider 初始化、slash command、debug 开关、AutomationEngine 启动。
 - `src/core/agent.js`：ReAct 主循环、意图路由注入、工具执行、编码任务守门、自动任务编排、最终答案处理。
 - `src/core/intent-classifier.js`：LLM-backed intent classifier，把短输入转换成结构化任务意图。
 - `src/core/tool-router.js`：本地任务画像和按需工具路由，避免每轮向模型暴露全量工具。
 - `src/core/text-tool-parser.js`：兼容非 function calling 模型的文本工具调用解析。
 - `src/core/tool-registry.js`：工具注册、查找、执行和 function definitions 输出。
+- `src/core/session-manager.js`：会话管理、上下文裁剪、消息历史维护。
+- `src/core/security-policy.js`：工具审批、结果截断、敏感信息保护。
+- `src/core/intelligent-reasoning.js`：智能推理引擎、因果链路分析。
+- `src/memory/memory-manager.js`：记忆管理、长期记忆存储和检索。
+- `src/core/token-juice.js`：Token 计数、上下文管理、动态裁剪。
+- `src/core/experience-memory.js`：经验记忆、任务学习积累。
 - `src/prompts/system-prompt.js`：系统提示、工具使用规范、Web 查询和编码方法论约束。
 - `src/tools/web/web-tools.js`：`web_search`、`web_fetch`、`browser_open`。
-- `src/tools/skills/*.js`：AI Engineering Mastery 方法论工具。
+- `src/tools/skills/*.js`：AI Engineering Mastery 方法论工具（12+ 个）。
+- `src/sandbox/shell-sandbox.js`：Shell 沙箱、策略检查、隔离执行。
+- `src/scheduler/SchedulerEngine.js`：任务调度、工作流自动化、触发器管理。
+- `src/mcp/`：MCP 客户端、协议适配、工具桥接。
+- `src/models/`：多 provider 适配（OpenAI, Llama, Zhipu, DeepSeek, OpenRouter）。
 - `test-integration.mjs`：端到端集成测试套件。
 
 ## 方法论
