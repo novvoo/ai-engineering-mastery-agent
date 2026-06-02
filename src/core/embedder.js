@@ -8,8 +8,8 @@
  */
 
 import { createWriteStream, existsSync } from 'fs';
-import { mkdir, rename, rm, stat } from 'fs/promises';
-import { dirname, join } from 'path';
+import { mkdir, readFile, rename, rm, stat } from 'fs/promises';
+import { basename, dirname, join } from 'path';
 import { Readable, Transform } from 'stream';
 import { pipeline } from 'stream/promises';
 import { homedir } from 'os';
@@ -17,6 +17,8 @@ import { homedir } from 'os';
 const DEFAULT_EMBEDDING_REPO = 'Alibaba-NLP/gte-modernbert-base';
 const DEFAULT_EMBEDDING_REVISION = 'main';
 const DEFAULT_EMBEDDING_FILE = 'onnx/model.onnx';
+const DEFAULT_TOKENIZER_FILE = 'tokenizer.json';
+const DEFAULT_TOKENIZER_CONFIG_FILE = 'tokenizer_config.json';
 const DEFAULT_HF_ENDPOINT = 'https://huggingface.co';
 const DEFAULT_HF_MIRROR = 'https://hf-mirror.com';
 const DEFAULT_DOWNLOAD_TIMEOUT_MS = 600000;
@@ -33,13 +35,21 @@ export function getDefaultEmbeddingModelPath() {
 }
 
 export function resolveEmbeddingModelDownloadCandidates(options = {}) {
-  if (options.modelUrl || process.env.EMBEDDING_MODEL_URL) {
+  return resolveEmbeddingFileDownloadCandidates(
+    options.file || process.env.EMBEDDING_MODEL_FILE || DEFAULT_EMBEDDING_FILE,
+    { ...options, allowModelUrl: true }
+  );
+}
+
+export function resolveEmbeddingFileDownloadCandidates(file, options = {}) {
+  const resolvedFile = file || options.file || process.env.EMBEDDING_MODEL_FILE || DEFAULT_EMBEDDING_FILE;
+
+  if (options.allowModelUrl && (options.modelUrl || process.env.EMBEDDING_MODEL_URL)) {
     return [options.modelUrl || process.env.EMBEDDING_MODEL_URL];
   }
 
   const repo = options.repo || process.env.EMBEDDING_MODEL_REPO || DEFAULT_EMBEDDING_REPO;
   const revision = options.revision || process.env.EMBEDDING_MODEL_REVISION || DEFAULT_EMBEDDING_REVISION;
-  const file = options.file || process.env.EMBEDDING_MODEL_FILE || DEFAULT_EMBEDDING_FILE;
   const extraMirrors = [
     options.hfEndpoint || process.env.HF_ENDPOINT,
     ...(options.mirrors || splitEnvList(process.env.EMBEDDING_MODEL_MIRRORS)),
@@ -49,13 +59,15 @@ export function resolveEmbeddingModelDownloadCandidates(options = {}) {
     .filter(Boolean)
     .map(endpoint => endpoint.replace(/\/+$/, ''));
 
-  return endpoints.map(endpoint => `${endpoint}/${repo}/resolve/${revision}/${file}`);
+  return endpoints.map(endpoint => `${endpoint}/${repo}/resolve/${revision}/${resolvedFile}`);
 }
 
 export class Embedder {
   #model;
   #tokenizer;
   #modelPath;
+  #tokenizerPath;
+  #tokenizerConfigPath;
   #dimension;
   #batchSize;
   #initialized;
@@ -67,6 +79,10 @@ export class Embedder {
 
   constructor(options = {}) {
     this.#modelPath = options.modelPath || process.env.EMBEDDING_MODEL_PATH || getDefaultEmbeddingModelPath();
+    const modelDirectory = dirname(this.#modelPath);
+    const modelRoot = basename(modelDirectory) === 'onnx' ? dirname(modelDirectory) : modelDirectory;
+    this.#tokenizerPath = options.tokenizerPath || process.env.EMBEDDING_TOKENIZER_PATH || join(modelRoot, DEFAULT_TOKENIZER_FILE);
+    this.#tokenizerConfigPath = options.tokenizerConfigPath || process.env.EMBEDDING_TOKENIZER_CONFIG_PATH || join(modelRoot, DEFAULT_TOKENIZER_CONFIG_FILE);
     this.#dimension = options.dimension || 768;
     this.#batchSize = options.batchSize || 32;
     this.#initialized = false;
@@ -84,7 +100,9 @@ export class Embedder {
   }
 
   async initialize() {
-    if (this.#initialized) return;
+    if (this.#initialized) {
+      return;
+    }
 
     try {
       this.#onnxRuntime = await this.#loadONNXRuntime();
@@ -107,6 +125,8 @@ export class Embedder {
       usingFallback: !(this.#onnxRuntime && this.#tokenizer && this.#model),
       fallbackReason: this.#fallbackReason,
       modelPath: this.#modelPath,
+      tokenizerPath: this.#tokenizerPath,
+      tokenizerConfigPath: this.#tokenizerConfigPath,
       modelFile,
       autoDownload: this.#autoDownload,
       downloadTimeoutMs: this.#downloadTimeoutMs,
@@ -151,8 +171,12 @@ export class Embedder {
   async #loadTokenizer() {
     try {
       const { Tokenizer } = await import('@huggingface/tokenizers');
-      const tokenizer = await Tokenizer.frompretrained(process.env.EMBEDDING_MODEL_REPO || DEFAULT_EMBEDDING_REPO);
-      return tokenizer;
+      await this.#ensureTokenizerFilesAvailable();
+      const [tokenizerJson, tokenizerConfig] = await Promise.all([
+        this.#readJSONFile(this.#tokenizerPath),
+        this.#readJSONFile(this.#tokenizerConfigPath),
+      ]);
+      return new Tokenizer(tokenizerJson, tokenizerConfig);
     } catch (error) {
       throw new Error(`Failed to load tokenizer: ${error.message}`);
     }
@@ -191,6 +215,28 @@ export class Embedder {
         .join('; ');
       throw new Error(`Embedding model is missing and selected download failed. Selected: ${selected.url}: ${error.message}. Probes: ${probeSummary}`);
     }
+  }
+
+  async #ensureTokenizerFilesAvailable(options = {}) {
+    await this.#ensureAuxiliaryFileAvailable(this.#tokenizerPath, DEFAULT_TOKENIZER_FILE, options);
+    await this.#ensureAuxiliaryFileAvailable(this.#tokenizerConfigPath, DEFAULT_TOKENIZER_CONFIG_FILE, options);
+  }
+
+  async #ensureAuxiliaryFileAvailable(path, file, options = {}) {
+    if (existsSync(path) || !this.#autoDownload) {
+      return;
+    }
+
+    await mkdir(dirname(path), { recursive: true });
+    const candidates = resolveEmbeddingFileDownloadCandidates(file);
+    const rankedCandidates = await this.#rankDownloadCandidates(candidates, options);
+    const selected = rankedCandidates[0];
+
+    if (!selected) {
+      throw new Error(`${file} is missing and no download candidates are configured.`);
+    }
+
+    await this.#downloadFile(selected.url, path, options);
   }
 
   async #rankDownloadCandidates(candidates, options = {}) {
@@ -271,7 +317,11 @@ export class Embedder {
   }
 
   async #downloadModel(url, options = {}) {
-    const tmpPath = `${this.#modelPath}.download`;
+    await this.#downloadFile(url, this.#modelPath, options);
+  }
+
+  async #downloadFile(url, destinationPath, options = {}) {
+    const tmpPath = `${destinationPath}.download`;
     await rm(tmpPath, { force: true });
 
     const controller = new AbortController();
@@ -298,9 +348,9 @@ export class Embedder {
       await pipeline(Readable.fromWeb(response.body), progress, createWriteStream(tmpPath));
       const fileStat = await stat(tmpPath);
       if (fileStat.size === 0) {
-        throw new Error('Downloaded model file is empty');
+        throw new Error('Downloaded file is empty');
       }
-      await rename(tmpPath, this.#modelPath);
+      await rename(tmpPath, destinationPath);
       options.onDownloadComplete?.({ url, bytes: fileStat.size });
     } catch (error) {
       if (error?.name === 'AbortError') {
@@ -313,8 +363,14 @@ export class Embedder {
     }
   }
 
+  async #readJSONFile(path) {
+    return JSON.parse(await readFile(path, 'utf8'));
+  }
+
   async embed(text, options = {}) {
-    if (!text) return this.#createZeroVector();
+    if (!text) {
+      return this.#createZeroVector();
+    }
 
     const texts = Array.isArray(text) ? text : [text];
     const embeddings = await this.#generateEmbeddings(texts, options);
@@ -347,44 +403,77 @@ export class Embedder {
   }
 
   async #processWithONNX(texts) {
-    const encodings = this.#tokenizer.encodeBatch(texts);
+    const encodings = texts.map(text => this.#tokenizer.encode(text));
 
     const maxLength = Math.min(
-      Math.max(...encodings.map((e) => e.length)),
+      Math.max(...encodings.map((e) => e.ids.length)),
       512
     );
 
     const paddedIds = encodings.map((e) => {
-      const ids = e.getIds();
-      while (ids.length < maxLength) ids.push(0);
+      const ids = [...e.ids];
+      while (ids.length < maxLength) {
+        ids.push(0);
+      }
       return ids.slice(0, maxLength);
     });
 
     const attentionMask = paddedIds.map((ids) => ids.map((id) => (id !== 0 ? 1 : 0)));
 
-    const inputIdsTensor = new this.#onnxRuntime.Tensor(
-      'input_ids',
-      new this.#onnxRuntime.TensorProto.int64(paddedIds.flat()),
-      [texts.length, maxLength]
-    );
+    const feeds = {
+      input_ids: new this.#onnxRuntime.Tensor(
+        'int64',
+        BigInt64Array.from(paddedIds.flat().map(value => BigInt(value))),
+        [texts.length, maxLength]
+      ),
+      attention_mask: new this.#onnxRuntime.Tensor(
+        'int64',
+        BigInt64Array.from(attentionMask.flat().map(value => BigInt(value))),
+        [texts.length, maxLength]
+      ),
+    };
 
-    const attentionMaskTensor = new this.#onnxRuntime.Tensor(
-      'attention_mask',
-      new this.#onnxRuntime.TensorProto.int64(attentionMask.flat()),
-      [texts.length, maxLength]
-    );
+    const outputs = await this.#model.run(feeds);
+    const outputName = this.#model.outputNames?.[0] || Object.keys(outputs)[0];
+    const output = outputs[outputName];
+    return this.#poolTokenEmbeddings(output, attentionMask, texts.length, maxLength);
+  }
 
-    const outputs = await this.#model.run([inputIdsTensor, attentionMaskTensor]);
-    const lastHiddenState = outputs[0].data;
+  #poolTokenEmbeddings(output, attentionMask, batchSize, sequenceLength) {
+    const data = output.data;
+    const dims = output.dims || [];
+    const hiddenSize = dims.length >= 3 ? dims[2] : this.#dimension;
+    this.#dimension = hiddenSize;
 
-    const embeddings = [];
-    for (let i = 0; i < texts.length; i++) {
-      const start = i * this.#dimension;
-      const end = start + this.#dimension;
-      embeddings.push(Array.from(lastHiddenState.slice(start, end)));
+    if (dims.length === 2) {
+      return Array.from({ length: batchSize }, (_, index) => {
+        const start = index * hiddenSize;
+        return Array.from(data.slice(start, start + hiddenSize));
+      });
     }
 
-    return embeddings;
+    return Array.from({ length: batchSize }, (_, batchIndex) => {
+      const embedding = new Array(hiddenSize).fill(0);
+      let tokenCount = 0;
+
+      for (let tokenIndex = 0; tokenIndex < sequenceLength; tokenIndex++) {
+        if (!attentionMask[batchIndex][tokenIndex]) {
+          continue;
+        }
+
+        tokenCount += 1;
+        const base = (batchIndex * sequenceLength + tokenIndex) * hiddenSize;
+        for (let dim = 0; dim < hiddenSize; dim++) {
+          embedding[dim] += data[base + dim];
+        }
+      }
+
+      if (tokenCount === 0) {
+        return embedding;
+      }
+
+      return embedding.map(value => value / tokenCount);
+    });
   }
 
   async #processWithFallback(texts) {
@@ -428,7 +517,9 @@ export class Embedder {
 
   #normalizeVector(vector) {
     const magnitude = Math.sqrt(vector.reduce((sum, val) => sum + val * val, 0));
-    if (magnitude === 0) return vector;
+    if (magnitude === 0) {
+      return vector;
+    }
     return vector.map((val) => val / magnitude);
   }
 
