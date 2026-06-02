@@ -5568,8 +5568,16 @@ newFeaturesTests.test('Embedder - prepareModel downloads missing model before ru
   const originalFetch = globalThis.fetch;
   const downloadedBytes = Buffer.from('fake-onnx-model');
   const requestedUrls = [];
-  globalThis.fetch = async (url) => {
-    requestedUrls.push(String(url));
+  globalThis.fetch = async (url, init = {}) => {
+    requestedUrls.push({ url: String(url), method: init.method || 'GET' });
+    if (init.method === 'HEAD') {
+      return new globalThis.Response(null, {
+        status: 200,
+        headers: {
+          'content-length': String(downloadedBytes.length),
+        },
+      });
+    }
     return new globalThis.Response(downloadedBytes, {
       status: 200,
       headers: {
@@ -5601,8 +5609,9 @@ newFeaturesTests.test('Embedder - prepareModel downloads missing model before ru
     if (readFileSync(modelPath, 'utf-8') !== downloadedBytes.toString('utf-8')) {
       throw new Error('Downloaded model contents did not match mocked response');
     }
-    if (requestedUrls.length !== 1 || !requestedUrls[0].startsWith('https://huggingface.co/')) {
-      throw new Error(`Expected prepareModel to try official HuggingFace first, got ${JSON.stringify(requestedUrls)}`);
+    const downloadRequests = requestedUrls.filter(request => request.method === 'GET');
+    if (downloadRequests.length !== 1 || !downloadRequests[0].url.startsWith('https://huggingface.co/')) {
+      throw new Error(`Expected prepareModel to download once from official HuggingFace, got ${JSON.stringify(requestedUrls)}`);
     }
     if (!downloadEvents.some(([type]) => type === 'start')) {
       throw new Error(`Expected download start callback, got ${JSON.stringify(downloadEvents)}`);
@@ -5619,6 +5628,89 @@ newFeaturesTests.test('Embedder - prepareModel downloads missing model before ru
   }
 
   console.log('     Embedder prepareModel downloads missing model before runtime init');
+});
+
+newFeaturesTests.test('Embedder - prepareModel probes mirrors and downloads only selected source', async () => {
+  const { Embedder } = await import('./src/core/embedder.js');
+  const modelPath = join(TEST_CONFIG.testDir, 'selected-mirror-model.onnx');
+  const originalFetch = globalThis.fetch;
+  const oldEndpoint = process.env.HF_ENDPOINT;
+  const oldUrl = process.env.EMBEDDING_MODEL_URL;
+  const downloadedBytes = Buffer.from('mirror-onnx-model');
+  const requests = [];
+  rmSync(modelPath, { force: true });
+
+  process.env.HF_ENDPOINT = 'https://fast-mirror.example.test';
+  delete process.env.EMBEDDING_MODEL_URL;
+
+  globalThis.fetch = async (url, init = {}) => {
+    const href = String(url);
+    const method = init.method || 'GET';
+    requests.push({ url: href, method });
+
+    if (method === 'HEAD') {
+      if (href.startsWith('https://huggingface.co/')) {
+        return new globalThis.Response(null, { status: 504 });
+      }
+      return new globalThis.Response(null, {
+        status: 200,
+        headers: {
+          'content-length': String(downloadedBytes.length),
+        },
+      });
+    }
+
+    return new globalThis.Response(downloadedBytes, {
+      status: 200,
+      headers: {
+        'content-length': String(downloadedBytes.length),
+      },
+    });
+  };
+
+  try {
+    const selectedEvents = [];
+    const embedder = new Embedder({
+      modelPath,
+      autoDownload: true,
+      downloadTimeoutMs: 1000,
+      probeTimeoutMs: 1000,
+    });
+
+    await embedder.prepareModel({
+      onDownloadSelected: (event) => selectedEvents.push(event),
+    });
+
+    const probeRequests = requests.filter(request => request.method === 'HEAD');
+    const downloadRequests = requests.filter(request => request.method === 'GET');
+    if (probeRequests.length < 2) {
+      throw new Error(`Expected mirror probes before download, got ${JSON.stringify(requests)}`);
+    }
+    if (downloadRequests.length !== 1) {
+      throw new Error(`Expected exactly one full model download, got ${JSON.stringify(requests)}`);
+    }
+    if (!downloadRequests[0].url.startsWith('https://fast-mirror.example.test/')) {
+      throw new Error(`Expected download from selected mirror, got ${JSON.stringify(downloadRequests)}`);
+    }
+    if (!selectedEvents[0]?.url.startsWith('https://fast-mirror.example.test/')) {
+      throw new Error(`Expected selected mirror event, got ${JSON.stringify(selectedEvents)}`);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (oldEndpoint === undefined) {
+      delete process.env.HF_ENDPOINT;
+    } else {
+      process.env.HF_ENDPOINT = oldEndpoint;
+    }
+    if (oldUrl === undefined) {
+      delete process.env.EMBEDDING_MODEL_URL;
+    } else {
+      process.env.EMBEDDING_MODEL_URL = oldUrl;
+    }
+    rmSync(modelPath, { force: true });
+  }
+
+  console.log('     Embedder prepareModel probes mirrors and downloads only selected source');
 });
 
 newFeaturesTests.test('Embedder - prepareModel reports readable download timeout errors', async () => {

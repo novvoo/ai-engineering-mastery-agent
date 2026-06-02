@@ -20,6 +20,7 @@ const DEFAULT_EMBEDDING_FILE = 'onnx/model.onnx';
 const DEFAULT_HF_ENDPOINT = 'https://huggingface.co';
 const DEFAULT_HF_MIRROR = 'https://hf-mirror.com';
 const DEFAULT_DOWNLOAD_TIMEOUT_MS = 600000;
+const DEFAULT_PROBE_TIMEOUT_MS = 10000;
 
 export function getDefaultEmbeddingModelPath() {
   return join(
@@ -61,6 +62,7 @@ export class Embedder {
   #onnxRuntime;
   #autoDownload;
   #downloadTimeoutMs;
+  #probeTimeoutMs;
   #fallbackReason;
 
   constructor(options = {}) {
@@ -74,6 +76,9 @@ export class Embedder {
     this.#autoDownload = options.autoDownload ?? process.env.EMBEDDING_MODEL_AUTO_DOWNLOAD !== 'false';
     this.#downloadTimeoutMs = Number(
       options.downloadTimeoutMs || process.env.EMBEDDING_MODEL_DOWNLOAD_TIMEOUT_MS || DEFAULT_DOWNLOAD_TIMEOUT_MS
+    );
+    this.#probeTimeoutMs = Number(
+      options.probeTimeoutMs || process.env.EMBEDDING_MODEL_PROBE_TIMEOUT_MS || DEFAULT_PROBE_TIMEOUT_MS
     );
     this.#fallbackReason = null;
   }
@@ -105,6 +110,7 @@ export class Embedder {
       modelFile,
       autoDownload: this.#autoDownload,
       downloadTimeoutMs: this.#downloadTimeoutMs,
+      probeTimeoutMs: this.#probeTimeoutMs,
       downloadCandidates: resolveEmbeddingModelDownloadCandidates(),
       dimension: this.#dimension,
       batchSize: this.#batchSize,
@@ -169,18 +175,99 @@ export class Embedder {
 
     await mkdir(dirname(this.#modelPath), { recursive: true });
     const candidates = resolveEmbeddingModelDownloadCandidates();
-    const errors = [];
+    const rankedCandidates = await this.#rankDownloadCandidates(candidates, options);
+    const selected = rankedCandidates[0];
 
-    for (const url of candidates) {
-      try {
-        await this.#downloadModel(url, options);
-        return;
-      } catch (error) {
-        errors.push(`${url}: ${error.message}`);
-      }
+    if (!selected) {
+      throw new Error('Embedding model is missing and no download candidates are configured.');
     }
 
-    throw new Error(`Embedding model is missing and download failed. Tried: ${errors.join('; ')}`);
+    try {
+      options.onDownloadSelected?.(selected);
+      await this.#downloadModel(selected.url, options);
+    } catch (error) {
+      const probeSummary = rankedCandidates
+        .map(candidate => `${candidate.url}: ${candidate.available ? 'available' : candidate.error || 'unavailable'}`)
+        .join('; ');
+      throw new Error(`Embedding model is missing and selected download failed. Selected: ${selected.url}: ${error.message}. Probes: ${probeSummary}`);
+    }
+  }
+
+  async #rankDownloadCandidates(candidates, options = {}) {
+    if (candidates.length <= 1 || options.probeCandidates === false) {
+      return candidates.map((url, index) => ({ url, index, available: true, durationMs: 0, totalBytes: null }));
+    }
+
+    options.onDownloadProbeStart?.({ candidates, timeoutMs: this.#probeTimeoutMs });
+    const probes = await Promise.all(candidates.map((url, index) => this.#probeDownloadCandidate(url, index)));
+
+    for (const probe of probes) {
+      options.onDownloadProbeResult?.(probe);
+    }
+
+    const available = probes
+      .filter(probe => probe.available)
+      .sort((a, b) => a.durationMs - b.durationMs || a.index - b.index);
+
+    if (available.length > 0) {
+      return available;
+    }
+
+    return probes.sort((a, b) => a.index - b.index);
+  }
+
+  async #probeDownloadCandidate(url, index) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.#probeTimeoutMs);
+    const startedAt = Date.now();
+
+    try {
+      const response = await fetch(url, {
+        method: 'HEAD',
+        signal: controller.signal,
+      });
+      const durationMs = Date.now() - startedAt;
+      const totalBytes = Number(
+        response.headers?.get?.('content-length') ||
+        response.headers?.get?.('x-linked-size')
+      ) || null;
+
+      if (!response.ok) {
+        return {
+          url,
+          index,
+          available: false,
+          status: response.status,
+          durationMs,
+          totalBytes,
+          error: `HTTP ${response.status}`,
+        };
+      }
+
+      return {
+        url,
+        index,
+        available: true,
+        status: response.status,
+        durationMs,
+        totalBytes,
+        error: null,
+      };
+    } catch (error) {
+      return {
+        url,
+        index,
+        available: false,
+        status: null,
+        durationMs: Date.now() - startedAt,
+        totalBytes: null,
+        error: error?.name === 'AbortError'
+          ? `probe timed out after ${this.#probeTimeoutMs}ms`
+          : error.message,
+      };
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   async #downloadModel(url, options = {}) {

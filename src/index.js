@@ -1235,6 +1235,7 @@ class AIEngineeringAgent {
       console.log(`  modified: ${before.modelFile.modifiedAt}`);
     }
     console.log(`  auto download: ${before.autoDownload ? 'enabled' : 'disabled'}`);
+    console.log(`  probe timeout: ${before.probeTimeoutMs}ms`);
     console.log(`  download timeout: ${before.downloadTimeoutMs}ms`);
     console.log('');
     console.log('Download Candidates');
@@ -1250,6 +1251,20 @@ class AIEngineeringAgent {
       let lastProgressAt = 0;
       try {
         prepared = await embedder.prepareModel({
+          onDownloadProbeStart: ({ candidates, timeoutMs }) => {
+            console.log(`  checking ${candidates.length} download candidate${candidates.length === 1 ? '' : 's'}...`);
+            console.log(`  probe timeout: ${timeoutMs}ms`);
+          },
+          onDownloadProbeResult: ({ url, available, durationMs, totalBytes, error }) => {
+            const sizeText = totalBytes ? `, size ${this.#formatBytes(totalBytes)}` : '';
+            const statusText = available ? 'available' : `unavailable: ${error}`;
+            console.log(`  candidate: ${statusText} in ${durationMs}ms${sizeText}`);
+            console.log(`    ${url}`);
+          },
+          onDownloadSelected: ({ url, durationMs, totalBytes }) => {
+            const sizeText = totalBytes ? `, ${this.#formatBytes(totalBytes)}` : '';
+            console.log(`  selected: ${url} (${durationMs}ms${sizeText})`);
+          },
           onDownloadStart: ({ url, timeoutMs }) => {
             console.log(`  downloading from: ${url}`);
             console.log(`  timeout: ${timeoutMs}ms`);
