@@ -2,6 +2,8 @@
  * Session Manager - manages conversation history and context window
  */
 
+import { Tokenizer } from './tokenizer.js';
+
 export class SessionManager {
   /** @type {Array<{role: string, content: string, toolCalls?: Array, toolCallId?: string}>} */
   #messages = [];
@@ -9,9 +11,15 @@ export class SessionManager {
   #systemPrompt = '';
 
   #tokenCounter;
+  #usesCustomTokenCounter;
+  #tokenizerModel;
 
   constructor(options = {}) {
-    this.#tokenCounter = options.tokenCounter || defaultTokenCounter;
+    this.#usesCustomTokenCounter = typeof options.tokenCounter === 'function';
+    this.#tokenizerModel = options.model || options.modelName || process.env.MODEL || 'gpt-4o';
+    this.#tokenCounter = this.#usesCustomTokenCounter
+      ? options.tokenCounter
+      : Tokenizer.createTokenCounter({ model: this.#tokenizerModel });
   }
 
   /** @param {string} prompt */
@@ -80,6 +88,16 @@ export class SessionManager {
       total += this.#countTokens(msg.content);
     }
     return Math.ceil(total);
+  }
+
+  setTokenizerModel(model) {
+    if (this.#usesCustomTokenCounter) return;
+    this.#tokenizerModel = model || 'gpt-4o';
+    this.#tokenCounter = Tokenizer.createTokenCounter({ model: this.#tokenizerModel });
+  }
+
+  getTokenizerModel() {
+    return Tokenizer.normalizeModelName(this.#tokenizerModel);
   }
 
   /** Trim old messages to fit within context window, keeping system prompt */
@@ -168,11 +186,4 @@ export class SessionManager {
   #countTokens(content) {
     return this.#tokenCounter(String(content || ''));
   }
-}
-
-function defaultTokenCounter(text) {
-  if (!text) return 0;
-  const chineseChars = (text.match(/[\u4e00-\u9fff]/g) || []).length;
-  const otherChars = text.length - chineseChars;
-  return Math.ceil(chineseChars * 0.67 + otherChars / 4);
 }

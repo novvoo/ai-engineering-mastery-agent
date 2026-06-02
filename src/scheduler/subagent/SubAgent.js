@@ -85,7 +85,10 @@ export class SubAgent {
     }
 
     // 创建独立的ReActAgent实例
-    this.#agent = new ReActAgent(modelProvider, toolRegistry, memoryManager, config);
+    this.#agent = new ReActAgent(modelProvider, toolRegistry, memoryManager, {
+      ...config,
+      subAgent: this,
+    });
   }
 
   /**
@@ -248,6 +251,7 @@ export class SubAgent {
       this.#resolveExecution = resolve;
       this.#rejectExecution = reject;
     });
+    this.#executionPromise.catch(() => {});
 
     // 通知父代理任务开始
     this.#notifyParent('task:started', {
@@ -292,6 +296,9 @@ export class SubAgent {
 
       // 运行代理
       const agentResult = await this.#agent.run(prompt);
+      if (agentResult?.success === false) {
+        throw new Error(agentResult.answer || agentResult.reason || 'SubAgent task failed');
+      }
 
       // 检查是否被中止
       if (this.#abortController?.signal.aborted) {

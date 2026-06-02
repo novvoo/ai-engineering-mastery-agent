@@ -7,6 +7,49 @@
  * - 语义相似度计算
  */
 
+import { createWriteStream, existsSync } from 'fs';
+import { mkdir, rename, rm, stat } from 'fs/promises';
+import { dirname, join } from 'path';
+import { Readable } from 'stream';
+import { pipeline } from 'stream/promises';
+import { homedir } from 'os';
+
+const DEFAULT_EMBEDDING_REPO = 'Alibaba-NLP/gte-modernbert-base';
+const DEFAULT_EMBEDDING_REVISION = 'main';
+const DEFAULT_EMBEDDING_FILE = 'onnx/model.onnx';
+const DEFAULT_HF_ENDPOINT = 'https://huggingface.co';
+const DEFAULT_HF_MIRROR = 'https://hf-mirror.com';
+
+export function getDefaultEmbeddingModelPath() {
+  return join(
+    process.env.AEMA_MODEL_CACHE_DIR || join(homedir(), '.cache', 'ai-engineering-mastery-agent'),
+    'models',
+    DEFAULT_EMBEDDING_REPO,
+    DEFAULT_EMBEDDING_REVISION,
+    DEFAULT_EMBEDDING_FILE
+  );
+}
+
+export function resolveEmbeddingModelDownloadCandidates(options = {}) {
+  if (options.modelUrl || process.env.EMBEDDING_MODEL_URL) {
+    return [options.modelUrl || process.env.EMBEDDING_MODEL_URL];
+  }
+
+  const repo = options.repo || process.env.EMBEDDING_MODEL_REPO || DEFAULT_EMBEDDING_REPO;
+  const revision = options.revision || process.env.EMBEDDING_MODEL_REVISION || DEFAULT_EMBEDDING_REVISION;
+  const file = options.file || process.env.EMBEDDING_MODEL_FILE || DEFAULT_EMBEDDING_FILE;
+  const extraMirrors = [
+    options.hfEndpoint || process.env.HF_ENDPOINT,
+    ...(options.mirrors || splitEnvList(process.env.EMBEDDING_MODEL_MIRRORS)),
+    DEFAULT_HF_MIRROR,
+  ];
+  const endpoints = uniqueStrings([DEFAULT_HF_ENDPOINT, ...extraMirrors])
+    .filter(Boolean)
+    .map(endpoint => endpoint.replace(/\/+$/, ''));
+
+  return endpoints.map(endpoint => `${endpoint}/${repo}/resolve/${revision}/${file}`);
+}
+
 export class Embedder {
   #model;
   #tokenizer;
@@ -15,15 +58,19 @@ export class Embedder {
   #batchSize;
   #initialized;
   #onnxRuntime;
+  #autoDownload;
+  #downloadTimeoutMs;
 
   constructor(options = {}) {
-    this.#modelPath = options.modelPath || './models/gte-modernbert-base.onnx';
+    this.#modelPath = options.modelPath || process.env.EMBEDDING_MODEL_PATH || getDefaultEmbeddingModelPath();
     this.#dimension = options.dimension || 768;
     this.#batchSize = options.batchSize || 32;
     this.#initialized = false;
     this.#onnxRuntime = null;
     this.#model = null;
     this.#tokenizer = null;
+    this.#autoDownload = options.autoDownload ?? process.env.EMBEDDING_MODEL_AUTO_DOWNLOAD !== 'false';
+    this.#downloadTimeoutMs = Number(options.downloadTimeoutMs || process.env.EMBEDDING_MODEL_DOWNLOAD_TIMEOUT_MS || 120000);
   }
 
   async initialize() {
@@ -52,7 +99,7 @@ export class Embedder {
   async #loadTokenizer() {
     try {
       const { Tokenizer } = await import('@huggingface/tokenizers');
-      const tokenizer = await Tokenizer.frompretrained('sentence-transformers/gte-modernbert-base');
+      const tokenizer = await Tokenizer.frompretrained(process.env.EMBEDDING_MODEL_REPO || DEFAULT_EMBEDDING_REPO);
       return tokenizer;
     } catch (error) {
       throw new Error('Failed to load tokenizer:', error.message);
@@ -61,10 +108,57 @@ export class Embedder {
 
   async #loadModel() {
     try {
+      await this.#ensureModelAvailable();
       const session = await this.#onnxRuntime.InferenceSession.create(this.#modelPath);
       return session;
     } catch (error) {
       throw new Error('Failed to load ONNX model:', error.message);
+    }
+  }
+
+  async #ensureModelAvailable() {
+    if (existsSync(this.#modelPath) || !this.#autoDownload) {
+      return;
+    }
+
+    await mkdir(dirname(this.#modelPath), { recursive: true });
+    const candidates = resolveEmbeddingModelDownloadCandidates();
+    const errors = [];
+
+    for (const url of candidates) {
+      try {
+        await this.#downloadModel(url);
+        return;
+      } catch (error) {
+        errors.push(`${url}: ${error.message}`);
+      }
+    }
+
+    throw new Error(`Embedding model is missing and download failed. Tried: ${errors.join('; ')}`);
+  }
+
+  async #downloadModel(url) {
+    const tmpPath = `${this.#modelPath}.download`;
+    await rm(tmpPath, { force: true });
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.#downloadTimeoutMs);
+    try {
+      console.warn(`Downloading embedding model from ${url}`);
+      const response = await fetch(url, { signal: controller.signal });
+      if (!response.ok || !response.body) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      await pipeline(Readable.fromWeb(response.body), createWriteStream(tmpPath));
+      const fileStat = await stat(tmpPath);
+      if (fileStat.size === 0) {
+        throw new Error('Downloaded model file is empty');
+      }
+      await rename(tmpPath, this.#modelPath);
+    } finally {
+      clearTimeout(timeout);
+      await rm(tmpPath, { force: true });
     }
   }
 
@@ -274,6 +368,26 @@ export class Embedder {
       onnxRuntime: !!this.#onnxRuntime,
     };
   }
+}
+
+function splitEnvList(value) {
+  return String(value || '')
+    .split(',')
+    .map(item => item.trim())
+    .filter(Boolean);
+}
+
+function uniqueStrings(values) {
+  const seen = new Set();
+  const unique = [];
+  for (const value of values) {
+    if (!value || seen.has(value)) {
+      continue;
+    }
+    seen.add(value);
+    unique.push(value);
+  }
+  return unique;
 }
 
 export default Embedder;

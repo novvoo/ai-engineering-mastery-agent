@@ -138,9 +138,10 @@ export function createSubAgentTools(schedulerEngine) {
 
               // 启动子代理执行
               setImmediate(async () => {
+                let subAgent = null;
                 try {
                   // 创建子代理（传递共享上下文）
-                  const subAgent = subAgentPool.create({
+                  subAgent = subAgentPool.create({
                     parentId: 'scheduler',
                     sharedContext: sharedContext
                   });
@@ -161,6 +162,9 @@ export function createSubAgentTools(schedulerEngine) {
                     result: result
                   });
                 } catch (error) {
+                  if (subAgent) {
+                    await subAgentPool.remove(subAgent.id);
+                  }
                   // 更新任务状态为失败
                   await taskQueue.update(task.id, {
                     status: 'failed',
@@ -173,9 +177,10 @@ export function createSubAgentTools(schedulerEngine) {
 
           // 异步模式：立即返回任务信息
           setImmediate(async () => {
+            let subAgent = null;
             try {
               // 创建子代理（传递共享上下文）
-              const subAgent = subAgentPool.create({
+              subAgent = subAgentPool.create({
                 parentId: 'scheduler',
                 sharedContext: sharedContext
               });
@@ -205,6 +210,9 @@ export function createSubAgentTools(schedulerEngine) {
                 });
               }
             } catch (error) {
+              if (subAgent) {
+                await subAgentPool.remove(subAgent.id);
+              }
               // 更新任务状态为失败
               await taskQueue.update(task.id, {
                 status: 'failed',
@@ -459,11 +467,13 @@ export function createSubAgentTools(schedulerEngine) {
             try {
               await taskQueue.update(task.id, { status: 'running' });
               const result = await nestedSubAgent.run(task, { maxIterations });
+              await subAgentPool.remove(nestedSubAgent.id);
               await taskQueue.update(task.id, {
                 status: 'completed',
                 result: result
               });
             } catch (error) {
+              await subAgentPool.remove(nestedSubAgent.id);
               await taskQueue.update(task.id, {
                 status: 'failed',
                 error: error instanceof Error ? error.message : String(error)

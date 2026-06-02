@@ -8,14 +8,29 @@
  */
 
 const MODEL_CONFIGS = {
-  'gpt-4': { vocab_size: 100256, model_type: 'cl100k_base' },
-  'gpt-4o': { vocab_size: 100256, model_type: 'cl100k_base' },
-  'gpt-4o-mini': { vocab_size: 100256, model_type: 'cl100k_base' },
-  'gpt-4-turbo': { vocab_size: 100256, model_type: 'cl100k_base' },
-  'claude': { vocab_size: 32000, model_type: 'o200k_base' },
-  'claude-3': { vocab_size: 32000, model_type: 'o200k_base' },
-  'gemini': { vocab_size: 256000, model_type: 'tiktoken' },
-  'default': { vocab_size: 100256, model_type: 'cl100k_base' },
+  'gpt-4': { vocab_size: 100256, model_type: 'cl100k_base', fallback_chars_per_token: 4 },
+  'gpt-4o': { vocab_size: 100256, model_type: 'cl100k_base', fallback_chars_per_token: 4 },
+  'gpt-4o-mini': { vocab_size: 100256, model_type: 'cl100k_base', fallback_chars_per_token: 4 },
+  'gpt-4-turbo': { vocab_size: 100256, model_type: 'cl100k_base', fallback_chars_per_token: 4 },
+  'gpt-3.5-turbo': { vocab_size: 100256, model_type: 'cl100k_base', fallback_chars_per_token: 4 },
+  'claude': { vocab_size: 32000, model_type: 'o200k_base', fallback_chars_per_token: 3.5 },
+  'claude-3': { vocab_size: 32000, model_type: 'o200k_base', fallback_chars_per_token: 3.5 },
+  'claude-3.5': { vocab_size: 32000, model_type: 'o200k_base', fallback_chars_per_token: 3.5 },
+  'gemini': { vocab_size: 256000, model_type: 'tiktoken', fallback_chars_per_token: 4 },
+  'gemini-1.5-pro': { vocab_size: 256000, model_type: 'tiktoken', fallback_chars_per_token: 4 },
+  'gemini-1.5-flash': { vocab_size: 256000, model_type: 'tiktoken', fallback_chars_per_token: 4 },
+  'qwen': { vocab_size: 151936, model_type: 'qwen', fallback_chars_per_token: 3 },
+  'qwen-plus': { vocab_size: 151936, model_type: 'qwen', fallback_chars_per_token: 3 },
+  'qwen-turbo': { vocab_size: 151936, model_type: 'qwen', fallback_chars_per_token: 3 },
+  'qwen2.5': { vocab_size: 151936, model_type: 'qwen', fallback_chars_per_token: 3 },
+  'qwen2.5-plus': { vocab_size: 151936, model_type: 'qwen', fallback_chars_per_token: 3 },
+  'qwen3.5-plus': { vocab_size: 151936, model_type: 'qwen', fallback_chars_per_token: 3 },
+  'glm-4': { vocab_size: 151552, model_type: 'glm', fallback_chars_per_token: 3 },
+  'glm-4-flash': { vocab_size: 151552, model_type: 'glm', fallback_chars_per_token: 3 },
+  'glm-4-plus': { vocab_size: 151552, model_type: 'glm', fallback_chars_per_token: 3 },
+  'deepseek-chat': { vocab_size: 102400, model_type: 'deepseek', fallback_chars_per_token: 3 },
+  'deepseek-coder': { vocab_size: 102400, model_type: 'deepseek', fallback_chars_per_token: 3 },
+  'default': { vocab_size: 100256, model_type: 'cl100k_base', fallback_chars_per_token: 4 },
 };
 
 export class Tokenizer {
@@ -26,7 +41,7 @@ export class Tokenizer {
   #cache;
 
   constructor(options = {}) {
-    this.#modelName = options.model || 'gpt-4o';
+    this.#modelName = Tokenizer.normalizeModelName(options.model || 'gpt-4o');
     this.#config = MODEL_CONFIGS[this.#modelName] || MODEL_CONFIGS.default;
     this.#initialized = false;
     this.#cache = new Map();
@@ -101,6 +116,11 @@ export class Tokenizer {
     return tokens.length;
   }
 
+  countTokensSync(text) {
+    if (!text) return 0;
+    return this.#fallbackEncode(String(text)).length;
+  }
+
   async countTokensBatch(texts) {
     const results = [];
     for (const text of texts) {
@@ -110,39 +130,29 @@ export class Tokenizer {
   }
 
   #fallbackEncode(text) {
-    const chars = text.split('');
     const tokens = [];
-    let i = 0;
+    const charsPerToken = Math.max(1, Math.ceil(Number(this.#config.fallback_chars_per_token || 4)));
+    let nonCjkRun = '';
 
-    while (i < chars.length) {
-      let len = Math.min(4, chars.length - i);
-
-      while (i + len > chars.length) {
-        len--;
+    const flushNonCjkRun = () => {
+      if (!nonCjkRun) return;
+      for (let i = 0; i < nonCjkRun.length; i += charsPerToken) {
+        tokens.push(this.#hashChunk(nonCjkRun.slice(i, i + charsPerToken)));
       }
+      nonCjkRun = '';
+    };
 
-      const chunk = chars.slice(i, i + len).join('');
-
-      if (this.#isValidUTF8(chunk)) {
-        tokens.push(this.#hashChunk(chunk));
-      } else {
-        tokens.push(this.#hashChunk(chars[i]));
-        i++;
+    for (const char of text) {
+      if (/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(char)) {
+        flushNonCjkRun();
+        tokens.push(this.#hashChunk(char));
         continue;
       }
-
-      i += len;
+      nonCjkRun += char;
     }
 
+    flushNonCjkRun();
     return tokens;
-  }
-
-  #isValidUTF8(str) {
-    try {
-      return decodeURIComponent(encodeURIComponent(str)) === str;
-    } catch {
-      return false;
-    }
   }
 
   #hashChunk(chunk) {
@@ -261,7 +271,42 @@ export class Tokenizer {
   }
 
   static getModelConfig(modelName) {
-    return MODEL_CONFIGS[modelName] || MODEL_CONFIGS.default;
+    return MODEL_CONFIGS[Tokenizer.normalizeModelName(modelName)] || MODEL_CONFIGS.default;
+  }
+
+  static normalizeModelName(modelName) {
+    const normalized = String(modelName || 'default').toLowerCase().trim();
+    const shortName = normalized.includes('/') ? normalized.split('/').pop() : normalized;
+
+    if (MODEL_CONFIGS[shortName]) return shortName;
+    if (shortName.startsWith('claude-3.5')) return 'claude-3.5';
+    if (shortName.startsWith('claude-3')) return 'claude-3';
+    if (shortName.startsWith('claude')) return 'claude';
+    if (shortName.startsWith('gemini-1.5-pro')) return 'gemini-1.5-pro';
+    if (shortName.startsWith('gemini-1.5-flash')) return 'gemini-1.5-flash';
+    if (shortName.startsWith('gemini')) return 'gemini';
+    if (shortName.startsWith('qwen3.5-plus')) return 'qwen3.5-plus';
+    if (shortName.startsWith('qwen2.5-plus')) return 'qwen2.5-plus';
+    if (shortName.startsWith('qwen2.5')) return 'qwen2.5';
+    if (shortName.startsWith('qwen-plus')) return 'qwen-plus';
+    if (shortName.startsWith('qwen-turbo')) return 'qwen-turbo';
+    if (shortName.startsWith('qwen')) return 'qwen';
+    if (shortName.startsWith('glm-4-plus')) return 'glm-4-plus';
+    if (shortName.startsWith('glm-4-flash')) return 'glm-4-flash';
+    if (shortName.startsWith('glm-4')) return 'glm-4';
+    if (shortName.startsWith('deepseek-coder')) return 'deepseek-coder';
+    if (shortName.startsWith('deepseek')) return 'deepseek-chat';
+    if (shortName.startsWith('gpt-4o-mini')) return 'gpt-4o-mini';
+    if (shortName.startsWith('gpt-4o')) return 'gpt-4o';
+    if (shortName.startsWith('gpt-4-turbo')) return 'gpt-4-turbo';
+    if (shortName.startsWith('gpt-4')) return 'gpt-4';
+    if (shortName.startsWith('gpt-3.5')) return 'gpt-3.5-turbo';
+    return shortName;
+  }
+
+  static createTokenCounter(options = {}) {
+    const tokenizer = new Tokenizer(options);
+    return (text) => tokenizer.countTokensSync(text);
   }
 }
 

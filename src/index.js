@@ -7,6 +7,8 @@
 import { clearLine, createInterface, cursorTo, emitKeypressEvents } from 'readline';
 import { resolve } from 'path';
 import { existsSync, mkdirSync, readFileSync } from 'fs';
+import { execFileSync } from 'child_process';
+import { platform } from 'os';
 import { input, password, select } from '@inquirer/prompts';
 
 // Core imports
@@ -49,6 +51,7 @@ import { createShellTool } from './tools/system/shell.js';
 import { createPtyTools, stopAllPtySessions } from './tools/system/pty.js';
 import { shellSandboxConfigFromEnv } from './sandbox/shell-sandbox.js';
 import { createSemanticSearchTool } from './tools/memory/semantic-search.js';
+import { createDocumentRagTools } from './tools/memory/document-rag.js';
 import { createWebTools } from './tools/web/web-tools.js';
 import { createTaskTools } from './tools/scheduler/task-tools.js';
 import { createScheduleTools } from './tools/scheduler/schedule-tools.js';
@@ -165,6 +168,17 @@ const COMMAND_HELP = {
     effects: ['Read-only project memory display.', 'Does not call the LLM and does not modify files.'],
     examples: ['/memory', '/memory full'],
   },
+  doc: {
+    title: '/doc',
+    description: 'Manage user-provided document RAG context for local files, PDFs, DOCX files, URLs, and pasted text.',
+    usage: ['/doc', '/doc add [path-or-url]', '/doc search <query>', '/doc list', '/doc clear [document-id]', 'Ask naturally with @path or @"path with spaces.pdf"'],
+    effects: [
+      'add indexes a document in the current in-memory RAG index.',
+      'search retrieves relevant chunks without calling the LLM.',
+      'clear removes indexed document context for this CLI session.',
+    ],
+    examples: ['/doc add ./docs/spec.pdf', '/doc add https://example.com/runbook', '根据 @./docs/spec.pdf 总结风险', '/doc search "rollback policy"', '/doc clear'],
+  },
   compress: {
     title: '/compress',
     description: 'Compress text with TokenJuice and show token/character savings.',
@@ -229,6 +243,9 @@ const COMMAND_HELP_ALIASES = {
   tasks: 'task',
   schedules: 'schedule',
   subagents: 'subagent',
+  docs: 'doc',
+  document: 'doc',
+  documents: 'doc',
   context: 'memory',
   status: 'stats',
   list: 'tools',
@@ -409,6 +426,9 @@ class AIEngineeringAgent {
       toolRegistry.register(tool);
     }
     toolRegistry.register(createSemanticSearchTool());
+    for (const tool of createDocumentRagTools()) {
+      toolRegistry.register(tool);
+    }
 
     // Register browser-like web search and fetch tools
     for (const tool of createWebTools()) {
@@ -594,6 +614,7 @@ class AIEngineeringAgent {
       {
         maxIterations: this.config.maxIterations,
         temperature: this.config.temperature,
+        model: this.config.model,
         workingDirectory: this.workingDir,
         debug: this.debugMode,
         intentClassification: this.config.intentClassification,
@@ -894,6 +915,12 @@ class AIEngineeringAgent {
       return true;
     }
 
+    // User document RAG commands
+    if (['/doc', '/docs', '/document', '/documents'].includes(commandName)) {
+      await this.handleDocumentCommand(argsText);
+      return true;
+    }
+
     // Compress command
     if (commandName === '/compress') {
       const text = argsText;
@@ -1075,6 +1102,117 @@ class AIEngineeringAgent {
     console.log(`Sessions: ${sessions.length}`);
     console.log(enhancedUI.theme.dim('Use /memory full to print the full CONTEXT.md representation.'));
     console.log('');
+  }
+
+  async handleDocumentCommand(argsText = '') {
+    const raw = String(argsText || '').trim();
+    const [subcommandRaw, ...restParts] = raw.split(/\s+/).filter(Boolean);
+    const subcommand = (subcommandRaw || 'list').toLowerCase();
+    const restText = raw.slice(subcommandRaw?.length || 0).trim();
+
+    if (['help', '--help', '-h'].includes(subcommand)) {
+      this.#showBuiltInCommandHelp('doc');
+      return;
+    }
+
+    const toolRegistry = this.agent?.getTools?.();
+    if (!toolRegistry) {
+      enhancedUI.error('Document tools are not initialized.');
+      return;
+    }
+
+    if (['add', 'index', 'load'].includes(subcommand)) {
+      let source = this.#stripWrappingQuotes(restText);
+      if (!source) {
+        source = await this.#chooseDocumentFile();
+      }
+      if (!source) {
+        enhancedUI.info('Usage: /doc add <path-or-url>');
+        return;
+      }
+
+      const spinner = enhancedUI.spinner('Indexing document...');
+      try {
+        spinner.start();
+        const result = await toolRegistry.execute('document_add', { source }, this.#documentToolContext());
+        spinner.stop();
+        if (!result?.success) {
+          enhancedUI.error(result?.error || 'Document indexing failed.');
+          return;
+        }
+        enhancedUI.success(`Indexed document: ${result.title}`);
+        console.log(`  id: ${result.id}`);
+        console.log(`  kind: ${result.kind}`);
+        console.log(`  chunks: ${result.chunks}`);
+        console.log(`  source: ${result.source}`);
+      } catch (error) {
+        spinner.stop();
+        enhancedUI.error(`Document indexing failed: ${error.message}`);
+      }
+      return;
+    }
+
+    if (['search', 'find', 'query'].includes(subcommand)) {
+      const query = restParts.length > 0 ? restText : '';
+      if (!query) {
+        enhancedUI.info('Usage: /doc search <query>');
+        return;
+      }
+
+      const spinner = enhancedUI.spinner('Searching documents...');
+      try {
+        spinner.start();
+        const result = await toolRegistry.execute('document_search', { query, limit: 5 }, this.#documentToolContext());
+        spinner.stop();
+        console.log(enhancedUI.createHeader('Document Search'));
+        console.log(result);
+      } catch (error) {
+        spinner.stop();
+        enhancedUI.error(`Document search failed: ${error.message}`);
+      }
+      return;
+    }
+
+    if (['list', 'ls', ''].includes(subcommand)) {
+      try {
+        const result = await toolRegistry.execute('document_list', {}, this.#documentToolContext());
+        console.log(enhancedUI.createHeader('Indexed Documents'));
+        if (!result.documents?.length) {
+          enhancedUI.info('No documents are indexed yet. Use /doc add <path-or-url> or reference one with @path.');
+          return;
+        }
+        for (const doc of result.documents) {
+          console.log(`${doc.id}  ${doc.title}`);
+          console.log(`  kind=${doc.kind} chunks=${doc.chunks} chars=${doc.chars}`);
+          console.log(`  source=${doc.source}`);
+        }
+        console.log('');
+      } catch (error) {
+        enhancedUI.error(`Document list failed: ${error.message}`);
+      }
+      return;
+    }
+
+    if (['clear', 'remove', 'rm'].includes(subcommand)) {
+      const documentId = restText ? this.#stripWrappingQuotes(restText) : undefined;
+      try {
+        const result = await toolRegistry.execute('document_clear', {
+          document_id: documentId,
+        }, this.#documentToolContext());
+        const target = documentId ? `document ${documentId}` : 'all documents';
+        if (result?.success) {
+          enhancedUI.success(`Cleared ${target}. Removed: ${result.removed}`);
+        } else {
+          enhancedUI.warning(`No matching document found for ${documentId}.`);
+        }
+      } catch (error) {
+        enhancedUI.error(`Document clear failed: ${error.message}`);
+      }
+      return;
+    }
+
+    enhancedUI.warning(`Unknown /doc command: ${subcommand}`);
+    this.#showBuiltInCommandHelp('doc');
   }
 
   async #processSlashToolCommand(input) {
@@ -1633,7 +1771,7 @@ class AIEngineeringAgent {
       this.config.model = model;
 
       // Update agent's model provider
-      this.agent.setModelProvider(newProvider);
+      this.agent.setModelProvider(newProvider, { model });
 
       // Update scheduler engine's model provider for new subagents
       this.schedulerEngine.modelProvider = newProvider;
@@ -1723,6 +1861,104 @@ class AIEngineeringAgent {
     console.log('');
   }
 
+  #documentToolContext() {
+    return {
+      workingDirectory: this.workingDir,
+      debug: this.debugMode,
+      ui: enhancedUI,
+    };
+  }
+
+  #stripWrappingQuotes(value) {
+    const text = String(value || '').trim();
+    if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) {
+      return text.slice(1, -1);
+    }
+    return text;
+  }
+
+  #stripTrailingReferencePunctuation(value) {
+    return String(value || '').replace(/[.,;:!?，。；：！？、)）\]】]+$/u, '');
+  }
+
+  async #chooseDocumentFile() {
+    if (platform() !== 'darwin') {
+      return '';
+    }
+
+    try {
+      return execFileSync('osascript', [
+        '-e',
+        'POSIX path of (choose file with prompt "Choose a document to add to RAG")',
+      ], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim();
+    } catch {
+      return '';
+    }
+  }
+
+  #extractDocumentReferences(userInput) {
+    const refs = [];
+    const pattern = /(^|\s)@(?:"([^"]+)"|'([^']+)'|([^\s]+))/g;
+    for (const match of userInput.matchAll(pattern)) {
+      const rawRef = match[2] || match[3] || match[4] || '';
+      const source = this.#stripTrailingReferencePunctuation(this.#stripWrappingQuotes(rawRef));
+      if (!source) {
+        continue;
+      }
+
+      const isUrl = /^https?:\/\//i.test(source);
+      const absolutePath = isUrl ? source : resolve(this.workingDir, source);
+      if (!isUrl && !existsSync(absolutePath)) {
+        continue;
+      }
+
+      refs.push(isUrl ? source : absolutePath);
+    }
+
+    return Array.from(new Set(refs));
+  }
+
+  async #prepareDocumentReferences(input) {
+    const refs = this.#extractDocumentReferences(input);
+    if (refs.length === 0) {
+      return input;
+    }
+
+    const toolRegistry = this.agent?.getTools?.();
+    const indexed = [];
+    const spinner = enhancedUI.spinner(`Indexing ${refs.length} referenced document${refs.length === 1 ? '' : 's'}...`);
+    spinner.start();
+    for (const source of refs) {
+      try {
+        const result = await toolRegistry.execute('document_add', { source }, this.#documentToolContext());
+        if (result?.success) {
+          indexed.push(result);
+        }
+      } catch (error) {
+        spinner.stop();
+        enhancedUI.warning(`Could not index @ document ${source}: ${error.message}`);
+        spinner.start();
+      }
+    }
+    spinner.stop();
+
+    if (indexed.length === 0) {
+      return input;
+    }
+
+    for (const doc of indexed) {
+      enhancedUI.info(`Indexed @ document: ${doc.title} (${doc.id})`);
+    }
+
+    const docSummary = indexed
+      .map(doc => `${doc.title} (${doc.id})`)
+      .join(', ');
+    return `${input}\n\n[Document references indexed for this turn: ${docSummary}. Use document_search for questions that need details from them.]`;
+  }
+
   /**
    * Process input through the agent
    */
@@ -1739,9 +1975,10 @@ class AIEngineeringAgent {
       // Since we passed enhancedUI to agent, it will use it directly
       // We'll just handle spinner start/stop
       spinner.stop();
-      await this.agent.run(input);
+      const preparedInput = await this.#prepareDocumentReferences(input);
+      await this.agent.run(preparedInput);
       enhancedUI.debugEvent('Agent input completed', {
-        inputChars: input.length,
+        inputChars: preparedInput.length,
       });
     } catch (error) {
       spinner.stop();

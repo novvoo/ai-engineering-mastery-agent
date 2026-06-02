@@ -4316,6 +4316,17 @@ cliInputLoopTests.test('CLI slash skill command executes local tool without LLM 
       'builtin named help output'
     );
 
+    child.stdin.write('/help doc\n');
+    await waitForOutput(
+      () => output,
+      text => text.includes('Command Help: /doc') &&
+        text.includes('Manage user-provided document RAG context') &&
+        text.includes('/doc add [path-or-url]') &&
+        text.includes('/doc search <query>'),
+      15000,
+      'document RAG help output'
+    );
+
     child.stdin.write('/help skills\n');
     await waitForOutput(
       () => output,
@@ -5202,6 +5213,81 @@ newFeaturesTests.test('Semantic search tool - indexes workspace files with embed
   console.log('     Semantic search indexes files and returns relevant chunks');
 });
 
+newFeaturesTests.test('Document RAG tools - index local documents and URLs', async () => {
+  const { createDocumentRagTools } = await import('./src/tools/memory/document-rag.js');
+
+  const tools = Object.fromEntries(createDocumentRagTools().map(tool => [tool.name, tool]));
+  await tools.document_clear.handler({});
+
+  const docsDir = join(TEST_CONFIG.testDir, 'document-rag');
+  mkdirSync(docsDir, { recursive: true });
+  writeFileSync(
+    join(docsDir, 'policy.md'),
+    [
+      '# Security Policy',
+      'Production secrets must be rotated every 90 days.',
+      'Incident reports require owner review and rollback notes.',
+    ].join('\n')
+  );
+
+  const localAdd = await tools.document_add.handler({
+    source: 'document-rag/policy.md',
+    title: 'Security policy',
+  }, {
+    workingDirectory: TEST_CONFIG.testDir,
+    debug: true,
+    ui: createRecordingUI(true),
+  });
+  if (!localAdd.success || localAdd.kind !== 'markdown' || localAdd.chunks < 1) {
+    throw new Error(`Expected local markdown document to be indexed, got ${JSON.stringify(localAdd)}`);
+  }
+
+  const localSearch = await tools.document_search.handler({
+    query: 'secret rotation rollback owner review',
+    limit: 2,
+  }, {
+    workingDirectory: TEST_CONFIG.testDir,
+  });
+  if (!localSearch.includes('Security policy') || !localSearch.includes('Production secrets')) {
+    throw new Error(`Expected document search to find local policy, got:\n${localSearch}`);
+  }
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new globalThis.Response(
+    '<html><body><main><h1>Runbook</h1><p>Payment webhook retries use exponential backoff and dead letter queues.</p></main></body></html>',
+    { status: 200, headers: { 'content-type': 'text/html' } }
+  );
+  try {
+    const urlAdd = await tools.document_add.handler({
+      source: 'https://docs.example.test/runbook',
+      title: 'Payment runbook',
+    }, {
+      workingDirectory: TEST_CONFIG.testDir,
+    });
+    if (!urlAdd.success || urlAdd.kind !== 'html') {
+      throw new Error(`Expected URL HTML document to be indexed, got ${JSON.stringify(urlAdd)}`);
+    }
+
+    const urlSearch = await tools.document_search.handler({
+      query: 'payment webhook dead letter retry backoff',
+      limit: 2,
+    }, {
+      workingDirectory: TEST_CONFIG.testDir,
+    });
+    if (!urlSearch.includes('Payment runbook') || !urlSearch.includes('dead letter queues')) {
+      throw new Error(`Expected document search to find URL runbook, got:\n${urlSearch}`);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  if (!tools.document_add.description.includes('.pdf') || !tools.document_add.description.includes('.docx')) {
+    throw new Error('document_add should advertise PDF and DOCX support');
+  }
+
+  console.log('     Document RAG indexes local files and URL documents');
+});
+
 newFeaturesTests.test('TokenScope - multiple requests and cost calculation', async () => {
   const { TokenScope } = await import('./src/core/token-scope.js');
 
@@ -5352,6 +5438,58 @@ newFeaturesTests.test('Embedder - basic embedding generation', async () => {
   console.log('     Embedder basic embedding works');
 });
 
+newFeaturesTests.test('Embedder - model download candidates prefer official then mirrors', async () => {
+  const {
+    getDefaultEmbeddingModelPath,
+    resolveEmbeddingModelDownloadCandidates,
+  } = await import('./src/core/embedder.js');
+
+  const oldCacheDir = process.env.AEMA_MODEL_CACHE_DIR;
+  const oldEndpoint = process.env.HF_ENDPOINT;
+  const oldMirrors = process.env.EMBEDDING_MODEL_MIRRORS;
+  const oldUrl = process.env.EMBEDDING_MODEL_URL;
+  const restoreEmbeddingEnv = (name, value) => {
+    if (value === undefined) {
+      delete process.env[name];
+    } else {
+      process.env[name] = value;
+    }
+  };
+
+  try {
+    process.env.AEMA_MODEL_CACHE_DIR = join(TEST_CONFIG.testDir, 'model-cache');
+    process.env.HF_ENDPOINT = 'https://hf.example-mirror.test';
+    process.env.EMBEDDING_MODEL_MIRRORS = 'https://mirror-a.example.test, https://mirror-b.example.test';
+    delete process.env.EMBEDDING_MODEL_URL;
+
+    const defaultPath = getDefaultEmbeddingModelPath();
+    if (!defaultPath.includes(join('model-cache', 'models', 'Alibaba-NLP', 'gte-modernbert-base'))) {
+      throw new Error(`Expected production cache directory, got ${defaultPath}`);
+    }
+
+    const candidates = resolveEmbeddingModelDownloadCandidates();
+    if (!candidates[0].startsWith('https://huggingface.co/Alibaba-NLP/gte-modernbert-base/resolve/main/onnx/model.onnx')) {
+      throw new Error(`Expected official HuggingFace URL first, got ${candidates[0]}`);
+    }
+    if (!candidates.some(url => url.startsWith('https://hf.example-mirror.test/'))) {
+      throw new Error(`Expected HF_ENDPOINT mirror candidate, got ${JSON.stringify(candidates)}`);
+    }
+    if (!candidates.some(url => url.startsWith('https://mirror-a.example.test/'))) {
+      throw new Error(`Expected custom mirror candidate, got ${JSON.stringify(candidates)}`);
+    }
+    if (!candidates.some(url => url.startsWith('https://hf-mirror.com/'))) {
+      throw new Error(`Expected default hf-mirror.com candidate, got ${JSON.stringify(candidates)}`);
+    }
+  } finally {
+    restoreEmbeddingEnv('AEMA_MODEL_CACHE_DIR', oldCacheDir);
+    restoreEmbeddingEnv('HF_ENDPOINT', oldEndpoint);
+    restoreEmbeddingEnv('EMBEDDING_MODEL_MIRRORS', oldMirrors);
+    restoreEmbeddingEnv('EMBEDDING_MODEL_URL', oldUrl);
+  }
+
+  console.log('     Embedder model download candidates prefer official then mirrors');
+});
+
 newFeaturesTests.test('Embedder - batch embedding', async () => {
   const { Embedder } = await import('./src/core/embedder.js');
 
@@ -5487,6 +5625,54 @@ newFeaturesTests.test('Tokenizer - available models', async () => {
   }
 
   console.log('     Tokenizer available models works');
+});
+
+newFeaturesTests.test('Tokenizer - synchronous provider-specific counter', async () => {
+  const { Tokenizer } = await import('./src/core/tokenizer.js');
+
+  const gptCounter = Tokenizer.createTokenCounter({ model: 'openai/gpt-4o' });
+  const qwenCounter = Tokenizer.createTokenCounter({ model: 'qwen3.5-plus' });
+
+  const chineseCount = gptCounter('你好世界');
+  const gptEnglishCount = gptCounter('abcdefghijkl');
+  const qwenEnglishCount = qwenCounter('abcdefghijkl');
+
+  if (chineseCount < 4) {
+    throw new Error(`Expected CJK text to be counted without underestimating, got ${chineseCount}`);
+  }
+  if (qwenEnglishCount <= gptEnglishCount) {
+    throw new Error(`Expected qwen fallback to use a denser provider counter, got qwen=${qwenEnglishCount}, gpt=${gptEnglishCount}`);
+  }
+
+  console.log('     Tokenizer synchronous provider counter works');
+});
+
+newFeaturesTests.test('SessionManager defaults to Tokenizer counter and tracks model switches', async () => {
+  const { SessionManager } = await import('./src/core/session-manager.js');
+
+  const session = new SessionManager({ model: 'openai/gpt-4o' });
+  session.addUserMessage('你好世界');
+
+  if (session.getTokenCount() < 4) {
+    throw new Error(`Expected SessionManager to use Tokenizer counter for CJK text, got ${session.getTokenCount()}`);
+  }
+  if (session.getTokenizerModel() !== 'gpt-4o') {
+    throw new Error(`Expected normalized tokenizer model gpt-4o, got ${session.getTokenizerModel()}`);
+  }
+
+  session.setTokenizerModel('qwen3.5-plus');
+  if (session.getTokenizerModel() !== 'qwen3.5-plus') {
+    throw new Error(`Expected tokenizer model switch to qwen3.5-plus, got ${session.getTokenizerModel()}`);
+  }
+
+  const customSession = new SessionManager({ tokenCounter: () => 42, model: 'gpt-4o' });
+  customSession.addUserMessage('anything');
+  customSession.setTokenizerModel('qwen3.5-plus');
+  if (customSession.getTokenCount() !== 42 || customSession.getTokenizerModel() !== 'gpt-4o') {
+    throw new Error('Expected custom token counter to remain unchanged after model switch');
+  }
+
+  console.log('     SessionManager Tokenizer counter integration works');
 });
 
 // ============ 9. 网络搜索功能测试 ============
@@ -5927,6 +6113,230 @@ productionReadinessTests.test('SubAgent spawn executes, returns answer, and clea
   const list = await listTool.handler({ includeStats: false });
   if (list.count !== 0) {
     throw new Error(`Expected SubAgent cleanup after completion, got ${JSON.stringify(list)}`);
+  }
+
+  await scheduler.stop();
+});
+
+productionReadinessTests.test('SubAgent async spawns run concurrently and clean up', async () => {
+  const { SchedulerEngine } = await import('./src/scheduler/SchedulerEngine.js');
+  const { createSubAgentTools } = await import('./src/tools/scheduler/subagent-tools.js');
+  const { ToolRegistry } = await import('./src/core/tool-registry.js');
+
+  const provider = {
+    async chat(messages) {
+      const prompt = messages.findLast(message => message.role === 'user')?.content || '';
+      const match = prompt.match(/job:\s*"([^"]+)"/);
+      await new Promise(resolve => setTimeout(resolve, 25));
+      return {
+        text: `FINAL_ANSWER: completed ${match?.[1] || 'unknown'}`,
+        toolCalls: [],
+        finishReason: 'stop',
+      };
+    },
+    getMaxContextTokens() { return 4000; },
+    dispose() {},
+  };
+  const registry = new ToolRegistry();
+  const scheduler = new SchedulerEngine(
+    {
+      workingDirectory: TEST_CONFIG.testDir,
+      dataDir: join(TEST_CONFIG.testDir, 'subagent-concurrent-e2e'),
+      checkIntervalMs: 60000,
+      maxAgents: 4,
+      autoCleanup: false,
+    },
+    provider,
+    registry,
+    null
+  );
+  await scheduler.initialize();
+
+  const tools = createSubAgentTools(scheduler);
+  const spawnTool = tools.find(tool => tool.name === 'subagent_spawn');
+  const getResultTool = tools.find(tool => tool.name === 'subagent_get_result');
+  const listTool = tools.find(tool => tool.name === 'subagent_list');
+
+  const first = await spawnTool.handler({
+    taskType: 'worker',
+    taskPayload: { job: 'alpha' },
+    waitForCompletion: false,
+    timeout: 5000,
+  });
+  const second = await spawnTool.handler({
+    taskType: 'worker',
+    taskPayload: { job: 'beta' },
+    waitForCompletion: false,
+    timeout: 5000,
+  });
+
+  const [firstResult, secondResult] = await Promise.all([
+    getResultTool.handler({ taskId: first.task.id, wait: true, timeout: 5000 }),
+    getResultTool.handler({ taskId: second.task.id, wait: true, timeout: 5000 }),
+  ]);
+
+  const outputs = [firstResult.result?.output, secondResult.result?.output].sort();
+  if (outputs.join('|') !== 'completed alpha|completed beta') {
+    throw new Error(`Expected both async SubAgents to complete, got ${JSON.stringify([firstResult, secondResult])}`);
+  }
+
+  const list = await listTool.handler({ includeStats: false });
+  if (list.count !== 0) {
+    throw new Error(`Expected concurrent SubAgents to clean up, got ${JSON.stringify(list)}`);
+  }
+
+  await scheduler.stop();
+});
+
+productionReadinessTests.test('SubAgent failure is observable and later tasks recover', async () => {
+  const { SchedulerEngine } = await import('./src/scheduler/SchedulerEngine.js');
+  const { createSubAgentTools } = await import('./src/tools/scheduler/subagent-tools.js');
+  const { ToolRegistry } = await import('./src/core/tool-registry.js');
+
+  const provider = {
+    async chat(messages) {
+      const prompt = messages.map(message => String(message.content || '')).join('\n');
+      if (prompt.includes('mode: "fail"')) {
+        throw new Error('simulated subagent failure');
+      }
+      return { text: 'FINAL_ANSWER: recovery task completed', toolCalls: [], finishReason: 'stop' };
+    },
+    getMaxContextTokens() { return 4000; },
+    dispose() {},
+  };
+  const registry = new ToolRegistry();
+  const scheduler = new SchedulerEngine(
+    {
+      workingDirectory: TEST_CONFIG.testDir,
+      dataDir: join(TEST_CONFIG.testDir, 'subagent-failure-e2e'),
+      checkIntervalMs: 60000,
+      maxAgents: 2,
+      autoCleanup: false,
+    },
+    provider,
+    registry,
+    null
+  );
+  await scheduler.initialize();
+
+  const tools = createSubAgentTools(scheduler);
+  const spawnTool = tools.find(tool => tool.name === 'subagent_spawn');
+  const getResultTool = tools.find(tool => tool.name === 'subagent_get_result');
+  const listTool = tools.find(tool => tool.name === 'subagent_list');
+
+  const failed = await spawnTool.handler({
+    taskType: 'failure',
+    taskPayload: { mode: 'fail' },
+    waitForCompletion: false,
+    timeout: 100,
+  });
+
+  await new Promise(resolve => setTimeout(resolve, 20));
+  const failedResult = await getResultTool.handler({ taskId: failed.task.id, wait: true, timeout: 5000 })
+    .catch(error => ({ success: false, status: 'failed', error: error.message }));
+  if (failedResult.success || !failedResult.error?.includes('Task execution timeout')) {
+    throw new Error(`Expected failed SubAgent result to be observable, got ${JSON.stringify(failedResult)}`);
+  }
+
+  const recovered = await spawnTool.handler({
+    taskType: 'recovery',
+    taskPayload: { mode: 'success' },
+    waitForCompletion: true,
+    timeout: 5000,
+  });
+  if (!recovered.success || recovered.result?.output !== 'recovery task completed') {
+    throw new Error(`Expected later SubAgent task to recover, got ${JSON.stringify(recovered)}`);
+  }
+
+  const list = await listTool.handler({ includeStats: false });
+  if (list.count !== 0) {
+    throw new Error(`Expected failed and recovered SubAgents to clean up, got ${JSON.stringify(list)}`);
+  }
+
+  await scheduler.stop();
+});
+
+productionReadinessTests.test('Nested SubAgent executes from parent context and cleans up', async () => {
+  const { SchedulerEngine } = await import('./src/scheduler/SchedulerEngine.js');
+  const { createSubAgentTools } = await import('./src/tools/scheduler/subagent-tools.js');
+  const { ToolRegistry } = await import('./src/core/tool-registry.js');
+
+  const provider = {
+    async chat(messages) {
+      const lastUser = messages.findLast(message => message.role === 'user')?.content || '';
+      const hasNestedToolResult = messages.some(message =>
+        message.role === 'tool' &&
+        String(message.content).includes('Nested SubAgent created successfully')
+      );
+
+      if (lastUser.includes('Task: leaf') && lastUser.includes('goal: "nested leaf"')) {
+        return { text: 'FINAL_ANSWER: nested leaf completed', toolCalls: [], finishReason: 'stop' };
+      }
+      if (hasNestedToolResult) {
+        return { text: 'FINAL_ANSWER: parent observed nested completion', toolCalls: [], finishReason: 'stop' };
+      }
+      return {
+        text: 'CALL subagent_create_nested({"taskType":"leaf","taskPayload":{"goal":"nested leaf"},"maxIterations":2})',
+        toolCalls: [{
+          id: 'call_nested',
+          name: 'subagent_create_nested',
+          arguments: {
+            taskType: 'leaf',
+            taskPayload: { goal: 'nested leaf' },
+            maxIterations: 2,
+          },
+        }],
+        finishReason: 'tool_calls',
+      };
+    },
+    getMaxContextTokens() { return 4000; },
+    dispose() {},
+  };
+  const registry = new ToolRegistry();
+  const scheduler = new SchedulerEngine(
+    {
+      workingDirectory: TEST_CONFIG.testDir,
+      dataDir: join(TEST_CONFIG.testDir, 'subagent-nested-e2e'),
+      checkIntervalMs: 60000,
+      maxAgents: 4,
+      autoCleanup: false,
+    },
+    provider,
+    registry,
+    null
+  );
+  await scheduler.initialize();
+
+  const tools = createSubAgentTools(scheduler);
+  for (const tool of tools) {
+    registry.register(tool);
+  }
+  const spawnTool = tools.find(tool => tool.name === 'subagent_spawn');
+  const listTool = tools.find(tool => tool.name === 'subagent_list');
+
+  const result = await spawnTool.handler({
+    taskType: 'parent',
+    taskPayload: { goal: 'create nested agent' },
+    waitForCompletion: true,
+    timeout: 5000,
+  });
+  if (!result.success || result.result?.output !== 'parent observed nested completion') {
+    throw new Error(`Expected parent SubAgent to execute nested tool, got ${JSON.stringify(result)}`);
+  }
+
+  let nestedTask = scheduler.getTaskQueue().list({ type: 'leaf' })[0];
+  const waitStartedAt = Date.now();
+  while (nestedTask?.status !== 'completed' && Date.now() - waitStartedAt < 1000) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+    nestedTask = scheduler.getTaskQueue().list({ type: 'leaf' })[0];
+  }
+  if (nestedTask?.status !== 'completed' || nestedTask.result?.output !== 'nested leaf completed') {
+    throw new Error(`Expected nested leaf task to complete, got ${JSON.stringify(nestedTask?.toJSON?.() || nestedTask)}`);
+  }
+
+  const list = await listTool.handler({ includeStats: false });
+  if (list.count !== 0) {
+    throw new Error(`Expected parent and nested SubAgents to clean up, got ${JSON.stringify(list)}`);
   }
 
   await scheduler.stop();

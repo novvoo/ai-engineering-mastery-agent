@@ -47,8 +47,10 @@
     "glob": "^11.0.0",
     "https-proxy-agent": "^9.0.0",
     "inquirer": "^13.4.3",
+    "mammoth": "^1.12.0",
     "openai": "^4.73.0",
-    "ora": "^8.2.0"
+    "ora": "^8.2.0",
+    "pdf-parse": "^2.4.5"
   },
   "devDependencies": {
     "eslint": "^8.57.1"

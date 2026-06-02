@@ -132,7 +132,10 @@ export class ReActAgent {
       workingDirectory: config.workingDirectory || process.cwd(),
       ...config,
     };
-    this.#sessionManager = new SessionManager(config.session || {});
+    this.#sessionManager = new SessionManager({
+      ...(config.session || {}),
+      model: config.session?.model || config.model,
+    });
     this.#retryStrategy = new RetryStrategy();
     this.#textToolParser = new TextToolParser(toolRegistry);
     this.#intentClassifier = config.intentClassification
@@ -603,6 +606,7 @@ export class ReActAgent {
         debug: this.#isDebugEnabled(),
         ui: this.#ui,
         toolName: name,
+        subAgent: this.#config.subAgent,
       };
 
       const result = await withTimeout(
@@ -1162,8 +1166,11 @@ export class ReActAgent {
   /**
    * Set model provider (for switching models)
    */
-  setModelProvider(modelProvider) {
+  setModelProvider(modelProvider, options = {}) {
     this.#modelProvider = modelProvider;
+    if (options.model) {
+      this.#sessionManager.setTokenizerModel(options.model);
+    }
   }
 
   setDebugMode(enabled) {
