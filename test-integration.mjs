@@ -4963,9 +4963,12 @@ newFeaturesTests.test('Slash command suggestions include skill commands while ty
   const tSuggestions = filterSlashCommandSuggestions(commands, '/t').map(command => command.name);
   const tdSuggestions = filterSlashCommandSuggestions(commands, '/td').map(command => command.name);
   const toSuggestions = filterSlashCommandSuggestions(commands, '/to').map(command => command.name);
+  const docSuggestions = filterSlashCommandSuggestions(commands, '/do').map(command => command.name);
+  const docSubSuggestions = filterSlashCommandSuggestions(commands, '/doc s').map(command => command.name);
   const afterSpaceSuggestions = filterSlashCommandSuggestions(commands, '/tdd ');
   const rendered = formatSlashCommandSuggestions(filterSlashCommandSuggestions(commands, '/t'));
   const [tabHits, tabPrefix] = completeSlashCommand(commands, '/td');
+  const [docTabHits, docTabPrefix] = completeSlashCommand(commands, '/doc s');
 
   if (!tSuggestions.includes('/tdd')) {
     throw new Error(`Expected /t to suggest /tdd, got ${JSON.stringify(tSuggestions)}`);
@@ -4981,6 +4984,15 @@ newFeaturesTests.test('Slash command suggestions include skill commands while ty
   }
   if (!toSuggestions.includes('/to-prd') || !toSuggestions.includes('/to-issues')) {
     throw new Error(`Expected /to to suggest upstream hyphen skill names, got ${JSON.stringify(toSuggestions)}`);
+  }
+  if (!docSuggestions.includes('/doc') || !docSuggestions.includes('/docs') || !docSuggestions.includes('/document')) {
+    throw new Error(`Expected /do to suggest document RAG commands, got ${JSON.stringify(docSuggestions)}`);
+  }
+  if (!docSubSuggestions.includes('/doc search')) {
+    throw new Error(`Expected /doc s to suggest /doc search, got ${JSON.stringify(docSubSuggestions)}`);
+  }
+  if (!docTabHits.includes('/doc search ') || docTabPrefix !== '/doc s') {
+    throw new Error(`Expected Tab completion for /doc s to include /doc search, got hits=${JSON.stringify(docTabHits)} prefix=${docTabPrefix}`);
   }
   if (afterSpaceSuggestions.length !== 0) {
     throw new Error(`Expected suggestions to stop after arguments begin, got ${JSON.stringify(afterSpaceSuggestions)}`);

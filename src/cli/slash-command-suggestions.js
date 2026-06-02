@@ -14,6 +14,15 @@ const BUILTIN_COMMANDS = [
   { name: '/experience', description: 'Show experience stats', source: 'builtin' },
   { name: '/context', description: 'Show project memory context', source: 'builtin' },
   { name: '/memory', description: 'Show project memory context', source: 'builtin' },
+  { name: '/doc', description: 'Manage document RAG context', source: 'builtin' },
+  { name: '/docs', description: 'Manage document RAG context', source: 'builtin' },
+  { name: '/document', description: 'Manage document RAG context', source: 'builtin' },
+  { name: '/documents', description: 'Manage document RAG context', source: 'builtin' },
+  { name: '/doc add', description: 'Index a local document or URL', source: 'builtin_subcommand' },
+  { name: '/doc search', description: 'Search indexed documents', source: 'builtin_subcommand' },
+  { name: '/doc list', description: 'List indexed documents', source: 'builtin_subcommand' },
+  { name: '/doc clear', description: 'Clear indexed document context', source: 'builtin_subcommand' },
+  { name: '/doc help', description: 'Show document RAG help', source: 'builtin_subcommand' },
   { name: '/compress', description: 'Compress text', source: 'builtin' },
   { name: '/reason', description: 'Show reasoning usage', source: 'builtin' },
   { name: '/auto', description: 'Show automation status', source: 'builtin' },
@@ -56,12 +65,19 @@ export function buildSlashCommandSuggestions(skillTools = []) {
 
 export function filterSlashCommandSuggestions(commands, input, limit = 8) {
   const trimmed = input.trimStart();
-  if (!trimmed.startsWith('/') || /\s/.test(trimmed)) {
+  if (!trimmed.startsWith('/')) {
     return [];
   }
 
+  const hasSpace = /\s/.test(trimmed);
+
   return commands
-    .filter(command => command.name.startsWith(trimmed))
+    .filter(command => {
+      if (!command.name.startsWith(trimmed)) {
+        return false;
+      }
+      return hasSpace ? command.source === 'builtin_subcommand' : !command.name.includes(' ');
+    })
     .sort((a, b) => {
       if (a.source !== b.source) {
         return a.source === 'skill' ? -1 : 1;
@@ -73,7 +89,7 @@ export function filterSlashCommandSuggestions(commands, input, limit = 8) {
 
 export function completeSlashCommand(commands, line) {
   const trimmed = String(line || '').trimStart();
-  if (!trimmed.startsWith('/') || /\s/.test(trimmed)) {
+  if (!trimmed.startsWith('/')) {
     return [[], line];
   }
 
