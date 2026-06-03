@@ -22,7 +22,7 @@ const DEFAULT_TOKENIZER_CONFIG_FILE = 'tokenizer_config.json';
 const DEFAULT_POOLING = 'cls';
 const DEFAULT_HF_ENDPOINT = 'https://huggingface.co';
 const DEFAULT_HF_MIRROR = 'https://hf-mirror.com';
-const DEFAULT_DOWNLOAD_TIMEOUT_MS = 600000;
+const DEFAULT_DOWNLOAD_TIMEOUT_MS = 30000;
 const DEFAULT_PROBE_TIMEOUT_MS = 10000;
 
 export function getDefaultEmbeddingModelPath() {

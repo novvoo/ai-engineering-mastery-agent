@@ -145,7 +145,7 @@ export class Tokenizer {
     for (const char of text) {
       if (/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(char)) {
         flushNonCjkRun();
-        tokens.push(this.#hashChunk(char));
+        tokens.push(this.#hashChunk(char + "\x00"), this.#hashChunk(char + "\x01"));
         continue;
       }
       nonCjkRun += char;

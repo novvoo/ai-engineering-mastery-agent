@@ -62,7 +62,7 @@ export class DynamicContextPruning {
     if (!text) return 0;
     const chineseChars = (text.match(/[\u4e00-\u9fff]/g) || []).length;
     const otherChars = text.length - chineseChars;
-    return Math.ceil(chineseChars * 0.67 + otherChars / 4);
+    return Math.ceil(chineseChars * 2.0 + otherChars / 3.5);
   }
 
   prune(messages, options = {}) {
@@ -97,6 +97,7 @@ export class DynamicContextPruning {
     prunedMessages = this.#ensureRecentMessages(prunedMessages, config);
     prunedMessages = this.#ensureConversationFlow(prunedMessages);
     prunedMessages = this.#compressIfNeeded(prunedMessages, config);
+    prunedMessages = this.#injectPruneSummary(scoredMessages, prunedMessages, config);
 
     const endTokens = this.#calculateTotalTokens(prunedMessages, config);
 
@@ -336,6 +337,30 @@ export class DynamicContextPruning {
 
   updateConfig(newConfig) {
     this.#config = { ...this.#config, ...newConfig };
+  }
+  #injectPruneSummary(allMessages, prunedMessages, config) {
+    if (prunedMessages.length === allMessages.length) return prunedMessages;
+
+    const prunedIndices = new Set(prunedMessages.map(m => m.originalIndex));
+    const removed = allMessages.filter(m => !prunedIndices.has(m.originalIndex));
+
+    const userTopics = removed
+      .filter(m => m.role === 'user')
+      .map(m => String(m.content || '').substring(0, 120).split('\n').join(' ').trim())
+      .filter(Boolean);
+
+    if (userTopics.length === 0) return prunedMessages;
+
+    const summaryText = '[Context summary: earlier discussion topics include: ' + userTopics.join('; ') + ']';
+    const summary = {
+      role: 'system',
+      content: summaryText,
+      originalIndex: -10,
+      importance: 100,
+      tokenCount: this.#estimateTokens({ role: 'system', content: summaryText }, config),
+    };
+
+    return [summary, ...prunedMessages];
   }
 }
 
