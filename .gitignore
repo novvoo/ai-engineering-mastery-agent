@@ -37,3 +37,4 @@ test*.json
 *.crt
 *.pfx
 *.cer
+.agent-data/

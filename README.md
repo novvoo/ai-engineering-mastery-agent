@@ -543,7 +543,7 @@ ai-engineering-mastery-agent/
 
 ## 当前限制和 TODO
 
-- **文档索引持久化**：当前文档 RAG 索引是进程内内存态；退出 CLI 后需要重新 `/doc add` 或重新引用 `@路径`。如果要长期知识库，需要后续接入持久向量库。
+- **文档索引持久化**：（已解决）document_add/add 的索引现在自动持久化到 `.agent-data/doc-rag/`，agent 重启后自动加载，无需重新添加。向量索引（semantic_search）持久化到 `.agent-data/vector-index/`。
 - **方法论强制程度**：运行时守门验证“是否有方法论/改动/验证证据”，不保证严格按照 `brainstorm -> tdd -> review -> verify` 的固定顺序执行。
 - **SubAgent / Multi-Agent**：已有 `spawn -> execute -> get_result -> cleanup`、并发、失败恢复、嵌套 SubAgent 的 E2E；下一步可继续补更复杂的跨 agent 共享上下文和权限边界。
 - **Lint 清洁度**：`bun run lint` 已可通过，但仓库仍有较多历史 warning，后续可逐步清理到 warning-free。
