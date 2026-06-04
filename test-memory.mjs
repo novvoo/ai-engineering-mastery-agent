@@ -25,13 +25,13 @@ if (!existsSync(TEST_CONFIG.testDir)) {
 // 测试工具函数
 function assert(condition, message) {
   if (!condition) {
-    throw new Error(`Assertion failed: ${message}`);
+    throw new Error('Assertion failed: ' + message);
   }
 }
 
 function assertEqual(actual, expected, message) {
   if (actual !== expected) {
-    throw new Error(`${message}: expected ${expected}, got ${actual}`);
+    throw new Error(message + ': expected ' + expected + ', got ' + actual);
   }
 }
 
@@ -84,6 +84,7 @@ async function testWorkingContext() {
   console.log('✅ Constraint management works');
 
   // 测试 6: 持久化
+  ctx.flush(); // 强制立即保存
   const ctx2 = new WorkingContext(testDir);
   assertEqual(ctx2.getContext().currentTask, 'Implement user authentication', 'Data should persist');
   assertEqual(ctx2.getContext().constraints.length, 1, 'Constraints should persist');
@@ -97,6 +98,7 @@ async function testWorkingContext() {
 
   // 测试 8: 清除
   ctx.clear();
+  ctx.flush();
   assertEqual(ctx.getContext().activeFiles.length, 0, 'Should clear all data');
   console.log('✅ Clear works');
 
@@ -166,6 +168,7 @@ async function testProjectMemory() {
   console.log('✅ API endpoints work');
 
   // 测试 7: 持久化
+  memory.flush(); // 强制立即保存
   const memory2 = new ProjectMemory(testDir);
   assertEqual(memory2.getMemory().structure.framework, 'react', 'Structure should persist');
   assertEqual(memory2.getMemory().conventions.length, 2, 'Conventions should persist');
@@ -291,13 +294,13 @@ async function testAgentMemory() {
   // 测试 7: 记录成功
   memory.recordSuccess('Use JWT with refresh tokens', 'Secure and scalable');
   const stats = memory.getPatternStats();
-  assert(stats.successes === 1, 'Should record success');
+  assertEqual(stats.successes, 1, 'Should record success');
   console.log('✅ Success recording works');
 
   // 测试 8: 记录失败
   memory.recordFailure('Store passwords in plain text', 'Security vulnerability');
   const failStats = memory.getPatternStats();
-  assert(failStats.failures === 1, 'Should record failure');
+  assertEqual(failStats.failures, 1, 'Should record failure');
   console.log('✅ Failure recording works');
 
   // 测试 9: 编码规范
@@ -347,6 +350,7 @@ async function testMemoryPersistence() {
   memory1.recordFailure('Expose node APIs to renderer', 'Security risk');
   memory1.addConvention('Use ES modules');
   memory1.addApiEndpoint('GET', '/api/status', 'Check app status');
+  memory1.flush(); // 强制立即保存
   
   // 读取阶段（模拟新实例）
   const memory2 = new AgentMemory(testDir);
@@ -401,7 +405,7 @@ async function runAllTests() {
       await test.fn();
       passed++;
     } catch (error) {
-      console.error(`❌ ${test.name} failed:`, error.message);
+      console.error('❌ ' + test.name + ' failed:', error.message);
       failed++;
     }
   }
@@ -409,7 +413,7 @@ async function runAllTests() {
   const duration = ((Date.now() - startTime) / 1000).toFixed(2);
   
   console.log('═'.repeat(60));
-  console.log(`   Test Summary: ${passed} passed, ${failed} failed (${duration}s)`);
+  console.log('   Test Summary: ' + passed + ' passed, ' + failed + ' failed (' + duration + 's)');
   console.log('═'.repeat(60));
 
   // 清理测试目录

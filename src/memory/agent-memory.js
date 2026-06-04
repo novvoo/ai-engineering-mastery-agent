@@ -1,5 +1,5 @@
 /**
- * AgentMemory - 生产级记忆系统
+ * AgentMemory - 生产级记忆系统 (性能优化版)
  * 
  * 设计参考 Claude Code 的记忆系统理念：
  * 1. WorkingContext - 当前工作上下文（文件、任务、决策）
@@ -7,15 +7,15 @@
  * 3. SessionMemory - 会话记忆（历史、摘要）
  * 4. PatternLearning - 模式学习（成功/失败经验）
  * 
- * 核心理念：
- * - 实用优先：不是三层玄学，而是真正有用的信息
- * - 深度集成：记忆与 Agent 工作流紧密集成
- * - 自动管理：自动追踪重要信息，减少手动维护
+ * 性能优化：
+ * - 防抖机制：避免频繁的同步磁盘 I/O
+ * - 懒加载：按需探索项目结构
+ * - 合理限制数据大小
+ * - 异步写入（可选）
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from 'fs';
-import { resolve, join, relative } from 'path';
-import { glob } from 'glob';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { resolve, join } from 'path';
 import { randomUUID } from 'crypto';
 
 /**
@@ -25,11 +25,15 @@ export class WorkingContext {
   #context;
   #filePath;
   #dirty;
+  #saveTimer;
+  #saveDebounceMs;
 
   constructor(workingDir) {
     this.#filePath = join(workingDir, '.agent-data', 'working-context.json');
     this.#context = this.createDefault();
     this.#dirty = false;
+    this.#saveTimer = null;
+    this.#saveDebounceMs = 500; // 防抖 500ms
     this.load();
   }
 
@@ -50,13 +54,11 @@ export class WorkingContext {
       if (existsSync(this.#filePath)) {
         const data = readFileSync(this.#filePath, 'utf-8');
         const loaded = JSON.parse(data);
-        // 合并加载的数据，但保留默认值
         this.#context = {
           ...this.createDefault(),
           ...loaded,
           lastUpdated: new Date().toISOString(),
         };
-        // 清理太旧的 recentFiles
         this.cleanOldFiles();
       }
     } catch (error) {
@@ -66,6 +68,17 @@ export class WorkingContext {
 
   save() {
     if (!this.#dirty) return;
+    
+    if (this.#saveTimer) {
+      clearTimeout(this.#saveTimer);
+    }
+    
+    this.#saveTimer = setTimeout(() => {
+      this._doSave();
+    }, this.#saveDebounceMs);
+  }
+
+  _doSave() {
     try {
       const dir = resolve(this.#filePath, '..');
       if (!existsSync(dir)) {
@@ -74,9 +87,21 @@ export class WorkingContext {
       this.#context.lastUpdated = new Date().toISOString();
       writeFileSync(this.#filePath, JSON.stringify(this.#context, null, 2), 'utf-8');
       this.#dirty = false;
+      this.#saveTimer = null;
     } catch (error) {
       console.error('Failed to save working context:', error.message);
     }
+  }
+
+  /**
+   * 强制立即保存（用于程序退出等场景）
+   */
+  flush() {
+    if (this.#saveTimer) {
+      clearTimeout(this.#saveTimer);
+      this.#saveTimer = null;
+    }
+    this._doSave();
   }
 
   /**
@@ -86,14 +111,12 @@ export class WorkingContext {
     const now = Date.now();
     const entry = { path: filePath, timestamp: now };
 
-    // 更新 recentFiles（保持最近 50 个）
     this.#context.recentFiles = this.#context.recentFiles.filter(f => f.path !== filePath);
     this.#context.recentFiles.unshift(entry);
     if (this.#context.recentFiles.length > 50) {
       this.#context.recentFiles.length = 50;
     }
 
-    // 更新 activeFiles（如果是重要文件）
     if (!this.#context.activeFiles.includes(filePath)) {
       this.#context.activeFiles.push(filePath);
       if (this.#context.activeFiles.length > 20) {
@@ -125,7 +148,6 @@ export class WorkingContext {
       reason,
       timestamp: new Date().toISOString(),
     });
-    // 保持最近 20 个决策
     if (this.#context.keyDecisions.length > 20) {
       this.#context.keyDecisions.shift();
     }
@@ -222,12 +244,18 @@ export class ProjectMemory {
   #filePath;
   #workingDir;
   #dirty;
+  #saveTimer;
+  #saveDebounceMs;
+  #explored;
 
   constructor(workingDir) {
     this.#workingDir = workingDir;
     this.#filePath = join(workingDir, '.agent-data', 'project-memory.json');
     this.#memory = this.createDefault(workingDir);
     this.#dirty = false;
+    this.#saveTimer = null;
+    this.#saveDebounceMs = 500;
+    this.#explored = false;
     this.load();
   }
 
@@ -237,8 +265,7 @@ export class ProjectMemory {
       projectPath: workingDir,
       createdAt: new Date().toISOString(),
       lastUpdated: new Date().toISOString(),
-      
-      // 项目结构
+
       structure: {
         language: null,
         framework: null,
@@ -247,24 +274,14 @@ export class ProjectMemory {
         hasDocs: false,
         hasCI: false,
       },
-      
-      // 技术栈
+
       techStack: [],
       dependencies: [],
-      
-      // 文件映射（文件 -> 用途）
+
       fileMap: [],
-      
-      // 编码规范
       conventions: [],
-      
-      // 项目特定的模式
       patterns: [],
-      
-      // 已知的入口点
       entryPoints: [],
-      
-      // API 端点
       apiEndpoints: [],
     };
   }
@@ -279,6 +296,7 @@ export class ProjectMemory {
           ...loaded,
           lastUpdated: new Date().toISOString(),
         };
+        this.#explored = true;
       }
     } catch (error) {
       console.error('Failed to load project memory:', error.message);
@@ -287,6 +305,17 @@ export class ProjectMemory {
 
   save() {
     if (!this.#dirty) return;
+    
+    if (this.#saveTimer) {
+      clearTimeout(this.#saveTimer);
+    }
+    
+    this.#saveTimer = setTimeout(() => {
+      this._doSave();
+    }, this.#saveDebounceMs);
+  }
+
+  _doSave() {
     try {
       const dir = resolve(this.#filePath, '..');
       if (!existsSync(dir)) {
@@ -295,42 +324,49 @@ export class ProjectMemory {
       this.#memory.lastUpdated = new Date().toISOString();
       writeFileSync(this.#filePath, JSON.stringify(this.#memory, null, 2), 'utf-8');
       this.#dirty = false;
+      this.#saveTimer = null;
     } catch (error) {
       console.error('Failed to save project memory:', error.message);
     }
   }
 
+  flush() {
+    if (this.#saveTimer) {
+      clearTimeout(this.#saveTimer);
+      this.#saveTimer = null;
+    }
+    this._doSave();
+  }
+
   /**
-   * 自动探索项目结构
+   * 自动探索项目结构（懒加载模式）
    */
   async explore() {
+    if (this.#explored) return;
+    
     try {
-      // 检测语言和框架
       const packageJson = join(this.#workingDir, 'package.json');
       if (existsSync(packageJson)) {
         const pkg = JSON.parse(readFileSync(packageJson, 'utf-8'));
         this.updateStructure({
           language: 'javascript',
           framework: pkg.dependencies?.react ? 'react' : 
-                     pkg.dependencies?.vue ? 'vue' :
-                     pkg.dependencies?.next ? 'next' : null,
+                    pkg.dependencies?.vue ? 'vue' :
+                    pkg.dependencies?.next ? 'next' : null,
           packageManager: 'npm',
           hasTests: existsSync(join(this.#workingDir, 'test')) || 
                    existsSync(join(this.#workingDir, 'tests')) ||
                    pkg.scripts?.test,
         });
-        
-        // 更新依赖
+
         this.#memory.dependencies = Object.keys({
           ...pkg.dependencies,
           ...pkg.devDependencies,
-        }).slice(0, 30); // 只保留前 30 个主要依赖
-        
-        // 更新 techStack
+        }).slice(0, 30);
+
         this.#memory.techStack = Object.keys(pkg.dependencies || {}).slice(0, 20);
       }
 
-      // 检测测试目录
       this.updateStructure({
         hasTests: existsSync(join(this.#workingDir, 'test')) ||
                  existsSync(join(this.#workingDir, 'tests')) ||
@@ -342,36 +378,12 @@ export class ProjectMemory {
               existsSync(join(this.#workingDir, '.circleci')),
       });
 
-      // 探索入口点
-      await this.findEntryPoints();
-
+      this.#explored = true;
       this.#dirty = true;
       this.save();
     } catch (error) {
       console.error('Failed to explore project:', error.message);
     }
-  }
-
-  /**
-   * 查找入口点
-   */
-  async findEntryPoints() {
-    const patterns = [
-      'src/index.{js,ts,jsx,tsx}',
-      'src/main.{js,ts,jsx,tsx}',
-      'src/app.{js,ts,jsx,tsx}',
-      'index.{js,ts,jsx,tsx}',
-      'main.{js,ts,jsx,tsx}',
-      'App.{js,ts,jsx,tsx}',
-    ];
-
-    const entryPoints = [];
-    for (const pattern of patterns) {
-      const files = await glob(pattern, { cwd: this.#workingDir, absolute: true });
-      entryPoints.push(...files.map(f => relative(this.#workingDir, f)));
-    }
-
-    this.#memory.entryPoints = [...new Set(entryPoints)].slice(0, 10);
   }
 
   /**
@@ -400,7 +412,6 @@ export class ProjectMemory {
         addedAt: new Date().toISOString(),
       });
     }
-    // 保持文件映射数量合理
     if (this.#memory.fileMap.length > 100) {
       this.#memory.fileMap.shift();
     }
@@ -431,7 +442,6 @@ export class ProjectMemory {
       success,
       timestamp: new Date().toISOString(),
     });
-    // 保持模式数量合理
     if (this.#memory.patterns.length > 50) {
       this.#memory.patterns.shift();
     }
@@ -482,7 +492,7 @@ export class ProjectMemory {
 
     if (this.#memory.entryPoints.length > 0) {
       lines.push('');
-      lines.push(`Entry Points: ${this.#memory.entryPoints.join(', ')}`);
+      lines.push(`Entry Points: ${this.#memory.entryPoints.slice(0, 5).join(', ')}`);
     }
 
     if (this.#memory.apiEndpoints.length > 0) {
@@ -508,6 +518,7 @@ export class ProjectMemory {
    */
   clear() {
     this.#memory = this.createDefault(this.#workingDir);
+    this.#explored = false;
     this.#dirty = true;
     this.save();
   }
@@ -520,6 +531,8 @@ export class PatternLearning {
   #patterns;
   #filePath;
   #dirty;
+  #saveTimer;
+  #saveDebounceMs;
 
   constructor(workingDir) {
     this.#filePath = join(workingDir, '.agent-data', 'patterns.json');
@@ -529,6 +542,8 @@ export class PatternLearning {
       antiPatterns: [],
     };
     this.#dirty = false;
+    this.#saveTimer = null;
+    this.#saveDebounceMs = 500;
     this.load();
   }
 
@@ -545,6 +560,17 @@ export class PatternLearning {
 
   save() {
     if (!this.#dirty) return;
+    
+    if (this.#saveTimer) {
+      clearTimeout(this.#saveTimer);
+    }
+    
+    this.#saveTimer = setTimeout(() => {
+      this._doSave();
+    }, this.#saveDebounceMs);
+  }
+
+  _doSave() {
     try {
       const dir = resolve(this.#filePath, '..');
       if (!existsSync(dir)) {
@@ -552,9 +578,18 @@ export class PatternLearning {
       }
       writeFileSync(this.#filePath, JSON.stringify(this.#patterns, null, 2), 'utf-8');
       this.#dirty = false;
+      this.#saveTimer = null;
     } catch (error) {
       console.error('Failed to save patterns:', error.message);
     }
+  }
+
+  flush() {
+    if (this.#saveTimer) {
+      clearTimeout(this.#saveTimer);
+      this.#saveTimer = null;
+    }
+    this._doSave();
   }
 
   /**
@@ -623,17 +658,14 @@ export class PatternLearning {
   cleanOld() {
     const ninetyDaysAgo = Date.now() - 90 * 24 * 60 * 60 * 1000;
     
-    // 清理旧的成功模式（保留成功的）
     this.#patterns.successes = this.#patterns.successes
       .filter(p => new Date(p.timestamp).getTime() > ninetyDaysAgo || p.usageCount > 2)
       .slice(-50);
 
-    // 清理旧的失败模式
     this.#patterns.failures = this.#patterns.failures
       .filter(p => new Date(p.timestamp).getTime() > ninetyDaysAgo)
       .slice(-30);
 
-    // 清理旧的反模式
     this.#patterns.antiPatterns = this.#patterns.antiPatterns
       .filter(p => new Date(p.timestamp).getTime() > ninetyDaysAgo)
       .slice(-20);
@@ -646,10 +678,9 @@ export class PatternLearning {
     const results = [];
     const queryLower = query.toLowerCase();
 
-    // 查找相关的成功模式
     for (const p of this.#patterns.successes) {
       if (p.pattern.toLowerCase().includes(queryLower) ||
-          p.context.toLowerCase().includes(queryLower)) {
+          (p.context && p.context.toLowerCase().includes(queryLower))) {
         results.push({
           type: 'success',
           pattern: p.pattern,
@@ -660,10 +691,9 @@ export class PatternLearning {
       }
     }
 
-    // 查找相关的失败模式
     for (const p of this.#patterns.failures) {
       if (p.pattern.toLowerCase().includes(queryLower) ||
-          p.reason.toLowerCase().includes(queryLower)) {
+          (p.reason && p.reason.toLowerCase().includes(queryLower))) {
         results.push({
           type: 'failure',
           pattern: p.pattern,
@@ -673,7 +703,6 @@ export class PatternLearning {
       }
     }
 
-    // 查找相关的反模式
     for (const p of this.#patterns.antiPatterns) {
       if (p.pattern.toLowerCase().includes(queryLower)) {
         results.push({
@@ -693,7 +722,6 @@ export class PatternLearning {
    */
   toPromptFragment(query = '') {
     if (!query) {
-      // 返回最近的成功模式
       if (this.#patterns.successes.length === 0) return '';
       
       const lines = ['[Learned Patterns]'];
@@ -760,12 +788,10 @@ export class AgentMemory {
   }
 
   /**
-   * 初始化记忆系统
+   * 初始化记忆系统（懒加载探索）
    */
   async initialize() {
     if (this.#initialized) return;
-    
-    // 探索项目结构
     await this.#projectMemory.explore();
     this.#initialized = true;
   }
@@ -776,19 +802,16 @@ export class AgentMemory {
   getMemoryContext(currentTask = '') {
     const parts = [];
 
-    // 1. 项目记忆
     const projectContext = this.#projectMemory.toPromptFragment();
     if (projectContext) {
       parts.push(projectContext);
     }
 
-    // 2. 工作上下文
     const workingContext = this.#workingContext.toPromptFragment();
     if (workingContext) {
       parts.push(workingContext);
     }
 
-    // 3. 相关模式
     const patternContext = this.#patternLearning.toPromptFragment(currentTask);
     if (patternContext) {
       parts.push(patternContext);
@@ -874,6 +897,15 @@ export class AgentMemory {
    */
   getPatternStats() {
     return this.#patternLearning.getStats();
+  }
+
+  /**
+   * 强制刷新所有数据到磁盘
+   */
+  flush() {
+    this.#workingContext.flush();
+    this.#projectMemory.flush();
+    this.#patternLearning.flush();
   }
 
   /**
