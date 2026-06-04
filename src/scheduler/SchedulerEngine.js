@@ -1,12 +1,14 @@
 /**
  * SchedulerEngine.js
  * 调度引擎主类 - 整合任务队列、Cron调度器和子代理池
+ * 增强版：支持并发协调器
  */
 
 import { TaskQueue, TaskStore, TaskStatus } from './task-queue/index.js';
 import { CronScheduler, ScheduleStore } from './cron/index.js';
 import { SubAgentPool } from './subagent/SubAgentPool.js';
 import { MessageBus } from './subagent/MessageBus.js';
+import { ConcurrencyCoordinator, TaskGroup, ExecutionStrategy } from './concurrency/index.js';
 import { join } from 'path';
 
 /**
@@ -26,6 +28,8 @@ export class SchedulerEngine {
   #isRunning;
   #checkInterval;
   #checkIntervalMs;
+  #concurrencyCoordinator;
+  #taskResourceLocks; // 任务资源锁映射
 
   /**
    * 创建调度引擎实例
@@ -47,11 +51,15 @@ export class SchedulerEngine {
     this.#checkInterval = null;
     this.#checkIntervalMs = config.checkIntervalMs || 60000; // 默认1分钟
 
+    // 初始化资源锁映射
+    this.#taskResourceLocks = new Map();
+
     // 子模块将在initialize中创建
     this.#taskQueue = null;
     this.#cronScheduler = null;
     this.#subAgentPool = null;
     this.#messageBus = null;
+    this.#concurrencyCoordinator = null;
   }
 
   /**
@@ -90,6 +98,11 @@ export class SchedulerEngine {
         enableMemoryShare: this.#config.enableMemoryShare,
       }
     );
+
+    // 创建并发协调器
+    this.#concurrencyCoordinator = new ConcurrencyCoordinator({
+      globalConcurrencyLimit: this.#config.globalConcurrencyLimit || 5
+    });
 
     // 设置事件监听
     this.#setupEventListeners();
@@ -176,6 +189,45 @@ export class SchedulerEngine {
   }
 
   /**
+   * 获取并发协调器
+   * @returns {ConcurrencyCoordinator}
+   */
+  getConcurrencyCoordinator() {
+    return this.#concurrencyCoordinator;
+  }
+
+  /**
+   * 创建任务组
+   * @param {Object} groupConfig - 组配置
+   * @returns {TaskGroup}
+   */
+  createTaskGroup(groupConfig) {
+    return this.#concurrencyCoordinator.createGroup(groupConfig);
+  }
+
+  /**
+   * 添加任务并指定组和资源锁
+   * @param {Object} taskData - 任务数据
+   * @param {Object} [options] - 选项
+   * @param {string} [options.groupId] - 组ID
+   * @param {string[]} [options.resourceLocks] - 资源锁
+   * @returns {Promise<Object>} 任务对象
+   */
+  async addTaskWithOptions(taskData, options = {}) {
+    const task = await this.#taskQueue.add(taskData);
+
+    if (options.groupId || options.resourceLocks) {
+      this.#concurrencyCoordinator.registerTask(task, { groupId: options.groupId });
+
+      if (options.resourceLocks) {
+        this.#taskResourceLocks.set(task.id, options.resourceLocks);
+      }
+    }
+
+    return task;
+  }
+
+  /**
    * 检查并执行到期的调度计划
    * @private
    * @returns {Promise<void>}
@@ -213,29 +265,54 @@ export class SchedulerEngine {
   }
 
   /**
-   * 处理待执行的任务
+   * 处理待执行的任务 - 支持并发
    * @private
    * @returns {Promise<void>}
    */
   async #processPendingTasks() {
-    // 获取下一个待处理任务
-    const task = this.#taskQueue.getNextPending();
+    // 获取所有待处理任务
+    const allTasks = this.#taskQueue.list({ status: TaskStatus.PENDING });
 
-    if (!task) {
+    if (allTasks.length === 0) {
       return;
     }
 
-    // 执行任务
-    await this.#executeTask(task);
+    // 注册所有新任务到协调器
+    for (const task of allTasks) {
+      if (!this.#concurrencyCoordinator.getGroup('default').taskIds.has(task.id)) {
+        this.#concurrencyCoordinator.registerTask(task);
+      }
+    }
+
+    // 获取可运行的任务
+    const runnableTasks = this.#concurrencyCoordinator.getRunnableTasks(allTasks, {
+      taskResourceLocks: this.#taskResourceLocks
+    });
+
+    if (runnableTasks.length === 0) {
+      console.log(`No tasks ready to run. Total pending: ${allTasks.length}`);
+      return;
+    }
+
+    console.log(`Ready to run ${runnableTasks.length} tasks`);
+
+    // 并发执行所有可运行的任务
+    const executionPromises = runnableTasks.map(task => this.#executeTask(task));
+    await Promise.all(executionPromises);
   }
 
   /**
-   * 执行任务
+   * 执行单个任务
    * @private
    * @param {Object} task - 任务对象
    * @returns {Promise<void>}
    */
   async #executeTask(task) {
+    const resourceLocks = this.#taskResourceLocks.get(task.id) || [];
+
+    // 标记任务为运行中
+    this.#concurrencyCoordinator.markTaskStarted(task, resourceLocks);
+
     // 更新任务状态为运行中
     await this.#taskQueue.update(task.id, {
       status: TaskStatus.RUNNING
@@ -269,8 +346,10 @@ export class SchedulerEngine {
       console.error(`Task ${task.id} failed:`, error);
 
     } finally {
-      // 清理子代理
+      // 清理资源
+      this.#concurrencyCoordinator.markTaskCompleted(task, resourceLocks);
       await this.#subAgentPool.remove(subAgent.id);
+      this.#taskResourceLocks.delete(task.id);
     }
   }
 
@@ -347,7 +426,8 @@ export class SchedulerEngine {
         totalSchedules: this.#cronScheduler.list().length
       } : null,
       subAgentPool: this.#subAgentPool ? this.#subAgentPool.getStats() : null,
-      messageBus: this.#messageBus ? this.#messageBus.getStats() : null
+      messageBus: this.#messageBus ? this.#messageBus.getStats() : null,
+      concurrencyCoordinator: this.#concurrencyCoordinator ? this.#concurrencyCoordinator.getStats() : null
     };
   }
 

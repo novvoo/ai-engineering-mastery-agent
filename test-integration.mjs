@@ -7059,6 +7059,184 @@ productionReadinessTests.test('Release packages declare stable upgrade and repla
   }
 });
 
+// ============ Task Grouping & Concurrency Coordinator Tests ============
+const taskGroupingTests = new TestRunner('Task Grouping & Concurrency Coordinator');
+
+taskGroupingTests.test('TaskGroup - basic creation and methods', async () => {
+  const { TaskGroup, ExecutionStrategy } = await import('./src/scheduler/concurrency/index.js');
+
+  const group = new TaskGroup({
+    id: 'test_group',
+    name: 'Test Group',
+    strategy: ExecutionStrategy.PARALLEL,
+    priority: 2,
+    concurrencyLimit: 3
+  });
+
+  if (group.id !== 'test_group') {
+    throw new Error('TaskGroup id should be test_group');
+  }
+
+  // 测试添加任务
+  group.addTask('task_1');
+  group.addTask('task_2');
+  if (!group.taskIds.has('task_1')) {
+    throw new Error('Task 1 should be in group');
+  }
+
+  // 测试 canStartNewTask (无运行中任务)
+  if (!group.canStartNewTask()) {
+    throw new Error('Should be able to start task with no running tasks');
+  }
+
+  // 标记任务为运行中
+  group.markTaskRunning('task_1');
+  if (group.getRunningCount() !== 1) {
+    throw new Error('Running count should be 1');
+  }
+
+  // 标记任务为完成
+  group.markTaskCompleted('task_1');
+  if (group.getRunningCount() !== 0) {
+    throw new Error('Running count should be 0 after completion');
+  }
+
+  console.log('     TaskGroup basic methods work');
+});
+
+taskGroupingTests.test('TaskGroup - SERIAL strategy blocks concurrent tasks', async () => {
+  const { TaskGroup, ExecutionStrategy } = await import('./src/scheduler/concurrency/index.js');
+
+  const group = new TaskGroup({
+    id: 'serial_group',
+    name: 'Serial Test Group',
+    strategy: ExecutionStrategy.SERIAL
+  });
+
+  group.addTask('task_1');
+  group.addTask('task_2');
+
+  if (!group.canStartNewTask()) {
+    throw new Error('Should be able to start first task in serial group');
+  }
+
+  group.markTaskRunning('task_1');
+
+  // 串行模式下，有任务运行时不能启动新任务
+  if (group.canStartNewTask()) {
+    throw new Error('Should not start new task while another is running in serial mode');
+  }
+
+  group.markTaskCompleted('task_1');
+
+  // 任务完成后应该可以启动新任务
+  if (!group.canStartNewTask()) {
+    throw new Error('Should be able to start new task after previous completes');
+  }
+
+  console.log('     TaskGroup SERIAL strategy works');
+});
+
+taskGroupingTests.test('ConcurrencyCoordinator - basic registration and canStartTask', async () => {
+  const { ConcurrencyCoordinator, Task } = await import('./src/scheduler/concurrency/index.js');
+  const { Task: QueueTask, TaskStatus } = await import('./src/scheduler/task-queue/index.js');
+
+  const coordinator = new ConcurrencyCoordinator({ globalConcurrencyLimit: 2 });
+
+  // 创建一个测试任务
+  const task = new QueueTask({
+    id: 'test_task',
+    type: 'test',
+    status: TaskStatus.PENDING,
+    priority: 2
+  });
+
+  coordinator.registerTask(task);
+
+  // 检查任务是否可以启动
+  const result = coordinator.canStartTask(task);
+  if (!result.canStart) {
+    throw new Error(`Task should be able to start: ${result.reason}`);
+  }
+
+  console.log('     ConcurrencyCoordinator basic canStartTask works');
+});
+
+taskGroupingTests.test('ConcurrencyCoordinator - resource locks prevent conflicts', async () => {
+  const { ConcurrencyCoordinator } = await import('./src/scheduler/concurrency/index.js');
+  const { Task, TaskStatus } = await import('./src/scheduler/task-queue/index.js');
+
+  const coordinator = new ConcurrencyCoordinator({ globalConcurrencyLimit: 10 });
+
+  const task1 = new Task({ id: 'task_1', type: 'test', status: TaskStatus.PENDING });
+  const task2 = new Task({ id: 'task_2', type: 'test', status: TaskStatus.PENDING });
+
+  coordinator.registerTask(task1);
+  coordinator.registerTask(task2);
+
+  const resourceLocks = ['file:test.txt'];
+
+  // Task1 可以启动
+  const result1 = coordinator.canStartTask(task1, { resourceLocks });
+  if (!result1.canStart) {
+    throw new Error('Task1 should be able to start');
+  }
+
+  // 启动 Task1
+  coordinator.markTaskStarted(task1, resourceLocks);
+
+  // Task2 应该不能启动，因为资源被锁定
+  const result2 = coordinator.canStartTask(task2, { resourceLocks });
+  if (result2.canStart) {
+    throw new Error('Task2 should not start due to resource lock');
+  }
+
+  // 完成 Task1
+  coordinator.markTaskCompleted(task1, resourceLocks);
+
+  // 现在 Task2 应该可以启动了
+  const result3 = coordinator.canStartTask(task2, { resourceLocks });
+  if (!result3.canStart) {
+    throw new Error('Task2 should start after resource is released');
+  }
+
+  console.log('     ConcurrencyCoordinator resource locks work');
+});
+
+taskGroupingTests.test('ConcurrencyCoordinator - getRunnableTasks respects priority', async () => {
+  const { ConcurrencyCoordinator } = await import('./src/scheduler/concurrency/index.js');
+  const { Task, TaskStatus, TaskPriority } = await import('./src/scheduler/task-queue/index.js');
+
+  const coordinator = new ConcurrencyCoordinator({ globalConcurrencyLimit: 5 });
+
+  // 创建不同优先级的任务
+  const lowPriorityTask = new Task({
+    id: 'low', type: 'test', status: TaskStatus.PENDING, priority: TaskPriority.LOW
+  });
+  const highPriorityTask = new Task({
+    id: 'high', type: 'test', status: TaskStatus.PENDING, priority: TaskPriority.HIGH
+  });
+  const criticalTask = new Task({
+    id: 'critical', type: 'test', status: TaskStatus.PENDING, priority: TaskPriority.CRITICAL
+  });
+
+  coordinator.registerTask(lowPriorityTask);
+  coordinator.registerTask(highPriorityTask);
+  coordinator.registerTask(criticalTask);
+
+  const runnable = coordinator.getRunnableTasks([lowPriorityTask, highPriorityTask, criticalTask]);
+
+  // 验证顺序：critical 应该在第一个
+  if (runnable.length !== 3) {
+    throw new Error('Expected 3 runnable tasks');
+  }
+  if (runnable[0].id !== 'critical') {
+    throw new Error('Critical task should be first');
+  }
+
+  console.log('     ConcurrencyCoordinator getRunnableTasks prioritizes correctly');
+});
+
 // ============ 运行所有测试 ============
 
 
@@ -7441,6 +7619,7 @@ async function runAllTests() {
   try {
     await agentE2ETests.run();
     await concurrencyTests.run();
+    await taskGroupingTests.run();
     await recoveryTests.run();
     await platformTests.run();
     await timeoutAndInteractionTests.run();
