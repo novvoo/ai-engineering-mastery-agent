@@ -493,35 +493,40 @@ function searchWithEmbeddings(queryEmbedding, queryText, scopedChunks, limit) {
 }
 
 function extractRelevantSnippet(text, query, maxLen) {
-  // Use the same CJK-aware term extraction as the lexical ranker
+  // Score each paragraph/line by query term density; return only relevant units.
   const terms = extractSearchTerms(query || '');
   if (terms.length === 0 || !text) return (text || '').slice(0, maxLen);
 
-  let bestIdx = 0;
-  let bestScore = 0;
-  const step = Math.max(1, Math.floor(text.length / 20));
-
-  for (let i = 0; i < text.length; i += step) {
-    const window = text.substring(i, Math.min(i + 200, text.length));
-    let score = 0;
-    for (const term of terms) {
-      if (window.includes(term.value)) score += term.weight * 10;
-    }
-    if (score > bestScore) {
-      bestScore = score;
-      bestIdx = Math.max(0, Math.min(i, text.length - 1));
-    }
+  // Split by blank lines (paragraphs); fall back to single lines for dense docs.
+  let units = text.split(/\n{2,}/).filter(Boolean);
+  if (units.length <= 1) {
+    units = text.split('\n').filter(Boolean);
   }
 
-  const half = Math.floor(maxLen / 2);
-  const start = Math.max(0, bestIdx - half);
-  const end = Math.min(text.length, start + maxLen);
-  let snippet = text.substring(start, end);
+  // Score each unit by weighted term frequency
+  const scored = units.map((unit) => {
+    const lower = unit.toLowerCase();
+    let score = 0;
+    for (const term of terms) {
+      const count = lower.split(term.value).length - 1;
+      score += count * term.weight * 10;
+    }
+    // Moderate length bonus (substantial paragraphs are better than one-liners)
+    score += Math.min(unit.length / 200, 2);
+    return { text: unit, score };
+  });
 
-  if (start > 0) snippet = '...' + snippet;
-  if (end < text.length) snippet += '...';
+  // Keep top-scoring units that fit within maxLen
+  scored.sort((a, b) => b.score - a.score);
+  let result = '';
+  for (const match of scored) {
+    if (match.score <= 0.5) continue;
+    const nextLen = result.length + (result ? 1 : 0) + match.text.length;
+    if (nextLen > maxLen) break;
+    result += (result ? '\n' : '') + match.text;
+  }
 
-  return snippet.replace(/\n{3,}/g, '\n\n').trim();
+  return result.trim() || (text || '').slice(0, maxLen);
 }
 
 function formatSearchResults(results) {
@@ -532,10 +537,11 @@ function formatSearchResults(results) {
   return results.map((result, index) => {
     const metadata = result.metadata || {};
     const preview = extractRelevantSnippet(result.text, result.query || '', 300);
+    const display = preview.length > 400 ? preview.slice(0, 397) + '...' : preview;
     const pct = Math.round((result.score + 1) / 2 * 100);
     return [
       `[${metadata.title || 'Untitled'}] \u2192 ${pct}% match`,
-      preview,
+      display,
       `Source: ${metadata.source}`,
     ].join('\n');
   }).join('\n\n');
