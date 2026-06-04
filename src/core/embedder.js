@@ -24,6 +24,8 @@ const DEFAULT_HF_ENDPOINT = 'https://huggingface.co';
 const DEFAULT_HF_MIRROR = 'https://hf-mirror.com';
 const DEFAULT_DOWNLOAD_TIMEOUT_MS = 30000;
 const DEFAULT_PROBE_TIMEOUT_MS = 10000;
+const MAX_INPUT_TEXT_CHARS = 100000; // 单个输入最大字符数
+const EMBEDDING_BATCH_TIMEOUT_MS = 60000; // 嵌入处理超时
 
 export function getDefaultEmbeddingModelPath() {
   return join(
@@ -377,9 +379,32 @@ export class Embedder {
     }
 
     const texts = Array.isArray(text) ? text : [text];
-    const embeddings = await this.#generateEmbeddings(texts, options);
+    
+    // 限制输入大小
+    const normalizedTexts = texts.map(t => {
+      if (typeof t === 'string' && t.length > MAX_INPUT_TEXT_CHARS) {
+        console.warn(`Embedder: truncating input from ${t.length} to ${MAX_INPUT_TEXT_CHARS} chars`);
+        return t.substring(0, MAX_INPUT_TEXT_CHARS);
+      }
+      return t;
+    });
 
-    return Array.isArray(text) ? embeddings : embeddings[0];
+    // 超时控制
+    const timeoutMs = options.timeoutMs || EMBEDDING_BATCH_TIMEOUT_MS;
+    let timer;
+    
+    try {
+      const embeddings = await Promise.race([
+        this.#generateEmbeddings(normalizedTexts, options),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error('Embedding generation timed out')), timeoutMs);
+        })
+      ]);
+
+      return Array.isArray(text) ? embeddings : embeddings[0];
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 
   async #generateEmbeddings(texts, options = {}) {

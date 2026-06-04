@@ -6,6 +6,10 @@
 
 import { SubAgent, SubAgentStatus } from './SubAgent.js';
 import { MemoryManager } from '../../memory/memory-manager.js';
+import { rm, readdir, existsSync } from 'fs/promises';
+import { join } from 'path';
+
+const TEMP_DIR_CLEANUP_THRESHOLD_MS = 24 * 60 * 60 * 1000; // 24小时后清理旧临时目录
 
 /**
  * 子代理池类
@@ -14,6 +18,7 @@ import { MemoryManager } from '../../memory/memory-manager.js';
  * 1. 自动定时清理已完成代理
  * 2. 支持记忆共享配置
  * 3. 支持SubAgent嵌套创建
+ * 4. 自动清理过期临时目录
  */
 export class SubAgentPool {
   // 私有字段
@@ -28,6 +33,7 @@ export class SubAgentPool {
   #autoCleanupEnabled;     // 是否启用自动清理
   #autoCleanupIntervalMs;  // 自动清理间隔
   #enableMemoryShare;      // 是否启用记忆共享
+  #tempDirs;               // 跟踪创建的临时目录
 
   /**
    * 创建子代理池实例
@@ -54,6 +60,7 @@ export class SubAgentPool {
     this.#autoCleanupIntervalMs = options.autoCleanupIntervalMs || 30000; // 默认30秒
     this.#enableMemoryShare = options.enableMemoryShare !== false; // 默认启用
     this.#autoCleanupInterval = null;
+    this.#tempDirs = new Map(); // 跟踪临时目录: dirPath -> creationTimestamp
 
     // 如果启用自动清理，启动定时器
     if (this.#autoCleanupEnabled) {
@@ -263,6 +270,9 @@ export class SubAgentPool {
       await this.remove(id);
     }
 
+    // 同时清理过期临时目录
+    await this.#cleanupExpiredTempDirs();
+
     return toRemove.length;
   }
 
@@ -333,7 +343,37 @@ export class SubAgentPool {
     // 创建子目录用于隔离
     const subDir = `${dir}/.subagents/${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     
+    // 跟踪临时目录
+    this.#tempDirs.set(subDir, Date.now());
+    
     return new MemoryManager(subDir);
+  }
+
+  /**
+   * 清理过期的临时目录
+   * @private
+   */
+  async #cleanupExpiredTempDirs() {
+    const now = Date.now();
+    const toRemove = [];
+    
+    for (const [dirPath, createdAt] of this.#tempDirs) {
+      if (now - createdAt > TEMP_DIR_CLEANUP_THRESHOLD_MS) {
+        toRemove.push(dirPath);
+      }
+    }
+    
+    for (const dirPath of toRemove) {
+      try {
+        if (existsSync(dirPath)) {
+          await rm(dirPath, { recursive: true, force: true });
+          console.log(`SubAgentPool: cleaned up expired temp dir ${dirPath}`);
+        }
+        this.#tempDirs.delete(dirPath);
+      } catch (error) {
+        console.warn(`SubAgentPool: failed to clean up temp dir ${dirPath}:`, error);
+      }
+    }
   }
 
   /**

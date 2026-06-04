@@ -2,9 +2,13 @@
  * Memory Manager - CONTEXT.md based persistent memory
  */
 
-import { readFile, writeFile, mkdir } from 'fs/promises';
+import { readFile, writeFile, mkdir, stat } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
+
+const MAX_CONTEXT_FILE_SIZE = 500 * 1024; // 500KB max CONTEXT.md size
+const MAX_SESSION_HISTORY = 50; // 最多保留50个历史会话
+const MAX_KEY_DECISIONS = 100; // 最多保留100个关键决策
 
 export class MemoryManager {
   /** @type {string} */
@@ -55,13 +59,42 @@ export class MemoryManager {
   }
 
   async save() {
+    // 修剪过长的历史数据
+    this.#pruneContext();
+    
     const content = this.toMarkdown();
+    
+    // 检查文件大小
+    if (content.length > MAX_CONTEXT_FILE_SIZE) {
+      console.warn(`MemoryManager: CONTEXT.md too large (${content.length} chars), forcing additional pruning`);
+      // 进一步修剪
+      this.#context.sessionHistory = this.#context.sessionHistory.slice(-10);
+      this.#context.keyDecisions = this.#context.keyDecisions.slice(-20);
+    }
+    
     const dir = this.#contextPath.substring(0, this.#contextPath.lastIndexOf('/'));
     if (!existsSync(dir)) {
       await mkdir(dir, { recursive: true });
     }
-    await writeFile(this.#contextPath, content, 'utf-8');
+    await writeFile(this.#contextPath, this.toMarkdown(), 'utf-8');
     this.#context.projectInfo.lastUpdated = new Date().toISOString().split('T')[0];
+  }
+
+  /**
+   * 修剪上下文数据以保持合理大小
+   */
+  #pruneContext() {
+    if (this.#context.sessionHistory.length > MAX_SESSION_HISTORY) {
+      const removed = this.#context.sessionHistory.length - MAX_SESSION_HISTORY;
+      this.#context.sessionHistory = this.#context.sessionHistory.slice(-MAX_SESSION_HISTORY);
+      console.warn(`MemoryManager: pruned ${removed} old sessions from history`);
+    }
+    
+    if (this.#context.keyDecisions.length > MAX_KEY_DECISIONS) {
+      const removed = this.#context.keyDecisions.length - MAX_KEY_DECISIONS;
+      this.#context.keyDecisions = this.#context.keyDecisions.slice(-MAX_KEY_DECISIONS);
+      console.warn(`MemoryManager: pruned ${removed} old key decisions`);
+    }
   }
 
   /** @param {string} description @param {string} phase */

@@ -5,6 +5,10 @@
 
 import { getLocalModelCapabilities, isLongContextCapabilities } from './model-capabilities.js';
 
+const DEFAULT_API_TIMEOUT_MS = 5 * 60 * 1000; // 默认5分钟超时
+const MAX_RETRIES = 3; // 最多重试3次
+const RETRY_DELAY_MS = 1000; // 重试延迟
+
 export class OpenAIModelProvider {
   #apiKey;
   #baseURL;
@@ -30,57 +34,101 @@ export class OpenAIModelProvider {
     const url = `${this.#baseURL}/chat/completions`;
     const traceEnabled = process.env.AGENT_TRACE === 'true' || process.env.DEBUG === 'true';
     const requestId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-    const startedAt = Date.now();
-    let heartbeat;
-
-    if (traceEnabled) {
-      console.log(`🔍 [model:${requestId}] request start url=${url} model=${this.#model} messages=${messages.length} maxTokens=${options.maxTokens ?? 'default'}`);
-      heartbeat = setInterval(() => {
-        const elapsedSeconds = ((Date.now() - startedAt) / 1000).toFixed(1);
-        console.log(`🔍 [model:${requestId}] waiting for response ${elapsedSeconds}s`);
-      }, 5000);
-    }
-
-    try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.#apiKey}`,
-        },
-        body: JSON.stringify({
-          model: this.#model,
-          messages,
-          ...options,
-        }),
-      });
+    const timeoutMs = options.timeoutMs || DEFAULT_API_TIMEOUT_MS;
+    
+    let lastError;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      const startedAt = Date.now();
+      let heartbeat;
 
       if (traceEnabled) {
-        const elapsedSeconds = ((Date.now() - startedAt) / 1000).toFixed(1);
-        console.log(`🔍 [model:${requestId}] response status=${response.status} ${response.statusText} after=${elapsedSeconds}s`);
+        console.log(`🔍 [model:${requestId}] request attempt=${attempt}/${MAX_RETRIES} url=${url} model=${this.#model} messages=${messages.length} maxTokens=${options.maxTokens ?? 'default'}`);
+        heartbeat = setInterval(() => {
+          const elapsedSeconds = ((Date.now() - startedAt) / 1000).toFixed(1);
+          console.log(`🔍 [model:${requestId}] waiting for response ${elapsedSeconds}s`);
+        }, 5000);
       }
 
-      if (!response.ok) {
-        throw new Error(`API request failed: ${response.status} ${response.statusText}`);
-      }
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+        
+        try {
+          const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${this.#apiKey}`,
+            },
+            body: JSON.stringify({
+              model: this.#model,
+              messages,
+              ...options,
+            }),
+            signal: controller.signal,
+          });
 
-      const data = await response.json();
+          if (traceEnabled) {
+            const elapsedSeconds = ((Date.now() - startedAt) / 1000).toFixed(1);
+            console.log(`🔍 [model:${requestId}] response status=${response.status} ${response.statusText} after=${elapsedSeconds}s`);
+          }
 
-      if (traceEnabled) {
-        const choice = data.choices?.[0];
-        console.log(`🔍 [model:${requestId}] parsed finishReason=${choice?.finish_reason ?? 'none'} contentChars=${choice?.message?.content?.length ?? 0} toolCalls=${choice?.message?.tool_calls?.length ?? 0}`);
-      }
+          if (!response.ok) {
+            throw new Error(`API request failed: ${response.status} ${response.statusText}`);
+          }
 
-      return {
-        text: data.choices[0]?.message?.content || '',
-        toolCalls: data.choices[0]?.message?.tool_calls || [],
-        finishReason: data.choices[0]?.finish_reason,
-      };
-    } finally {
-      if (heartbeat) {
-        clearInterval(heartbeat);
+          const data = await response.json();
+
+          if (traceEnabled) {
+            const choice = data.choices?.[0];
+            console.log(`🔍 [model:${requestId}] parsed finishReason=${choice?.finish_reason ?? 'none'} contentChars=${choice?.message?.content?.length ?? 0} toolCalls=${choice?.message?.tool_calls?.length ?? 0}`);
+          }
+
+          return {
+            text: data.choices[0]?.message?.content || '',
+            toolCalls: data.choices[0]?.message?.tool_calls || [],
+            finishReason: data.choices[0]?.finish_reason,
+          };
+        } finally {
+          clearTimeout(timeoutId);
+        }
+      } catch (error) {
+        lastError = error;
+        
+        // 判断是否可以重试
+        const isRetryable = this.#isRetryableError(error);
+        if (!isRetryable || attempt >= MAX_RETRIES) {
+          throw error;
+        }
+        
+        console.warn(`🔍 [model:${requestId}] request failed, retrying in ${RETRY_DELAY_MS}ms... (attempt ${attempt}/${MAX_RETRIES})`);
+        await this.#sleep(RETRY_DELAY_MS * attempt);
+      } finally {
+        if (heartbeat) {
+          clearInterval(heartbeat);
+        }
       }
     }
+    
+    throw lastError;
+  }
+
+  /**
+   * 判断错误是否可重试
+   */
+  #isRetryableError(error) {
+    if (error.name === 'AbortError') return false; // 超时不重试
+    if (error.message?.includes('401') || error.message?.includes('403')) return false; // 认证错误不重试
+    if (error.message?.includes('429')) return true; // 速率限制可重试
+    if (error.message?.includes('5')) return true; // 5xx 服务器错误可重试
+    return true; // 其他网络错误可重试
+  }
+
+  /**
+   * 延迟函数
+   */
+  #sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   getMaxContextTokens() {
