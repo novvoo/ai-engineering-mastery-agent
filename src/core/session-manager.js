@@ -103,7 +103,7 @@ export class SessionManager {
   /** Trim old messages to fit within context window, keeping system prompt */
   trimToContextWindow(maxTokens, options = {}) {
     const systemTokens = this.#countTokens(this.#systemPrompt);
-    const targetTokens = maxTokens * 0.7;
+    const targetTokens = maxTokens * 0.4; // 更激进的目标
     const availableTokens = targetTokens - systemTokens;
     const minRecentMessages = Math.max(0, options.minRecentMessages || 0);
 

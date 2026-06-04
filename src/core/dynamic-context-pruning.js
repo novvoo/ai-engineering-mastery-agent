@@ -24,12 +24,12 @@ export class DynamicContextPruning {
   constructor(options = {}) {
     this.#config = {
       maxTokens: options.maxTokens || 128000,
-      targetTokens: options.targetTokens || 100000,
-      minMessages: options.minMessages || 5,
+      targetTokens: options.targetTokens || 64000, // 更激进的目标
+      minMessages: options.minMessages || 3, // 减少保留的最小消息数
       preserveSystemPrompt: options.preserveSystemPrompt !== false,
-      preserveRecentMessages: options.preserveRecentMessages || 3,
-      importanceThreshold: options.importanceThreshold || 0.3,
-      compressionRatio: options.compressionRatio || 0.7,
+      preserveRecentMessages: options.preserveRecentMessages || 4, // 减少保留的最近消息数
+      importanceThreshold: options.importanceThreshold || 0.4, // 提高重要性阈值，更容易丢弃消息
+      compressionRatio: options.compressionRatio || 0.5, // 更激进的压缩
     };
 
     this.#importanceScorer = options.importanceScorer || this.#defaultImportanceScorer;

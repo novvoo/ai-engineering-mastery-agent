@@ -11,7 +11,7 @@
  * - Token 估算与压缩统计
  */
 
-const DEFAULT_MAX_CHARS = 8000;
+const DEFAULT_MAX_CHARS = 4000; // 更激进的默认字符限制
 const CJK_CHAR_REGEX = /[\u3000-\u9fff\uac00-\ud7af\uff00-\uffef]/g;
 
 /**

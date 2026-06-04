@@ -1123,7 +1123,7 @@ export class ReActAgent {
   #manageContextWindow() {
     const maxTokens = this.#modelProvider.getMaxContextTokens();
     const currentTokens = this.#sessionManager.getTokenCount();
-    const threshold = maxTokens * 0.8;
+    const threshold = maxTokens * 0.5; // 更早触发裁剪
 
     if (currentTokens > threshold) {
       this.#ui.warn(`Context window at ${Math.round(currentTokens / maxTokens * 100)}%. Trimming old messages.`);
@@ -1137,17 +1137,17 @@ export class ReActAgent {
       if (this.#contextPruner) {
         this.#contextPruner.updateConfig?.({
           maxTokens,
-          targetTokens: Math.floor(maxTokens * 0.6),
-          preserveRecentMessages: 6,
+          targetTokens: Math.floor(maxTokens * 0.4), // 更激进的目标
+          preserveRecentMessages: 4,
         });
         stats = this.#sessionManager.trimWithPruner(this.#contextPruner, {
           maxTokens,
-          targetTokens: Math.floor(maxTokens * 0.6),
-          preserveRecentMessages: 6,
-          minMessages: 6,
+          targetTokens: Math.floor(maxTokens * 0.4),
+          preserveRecentMessages: 4,
+          minMessages: 3,
         });
       } else {
-        this.#sessionManager.trimToContextWindow(maxTokens * 0.6, { minRecentMessages: 6 });
+        this.#sessionManager.trimToContextWindow(maxTokens * 0.4, { minRecentMessages: 4 });
       }
       this.#debugEvent('Context window trimmed', {
         estimatedTokens: this.#sessionManager.getTokenCount(),

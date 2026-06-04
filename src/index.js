@@ -574,7 +574,7 @@ class AIEngineeringAgent {
 
     // Initialize TokenJuice for output compression
     this.tokenJuice = new TokenJuice({
-      maxChars: parseInt(process.env.MAX_RESULT_CHARS || '8000'),
+      maxChars: parseInt(process.env.MAX_RESULT_CHARS || '4000'), // 更激进的默认字符限制
     });
 
     // Initialize Experience Memory
