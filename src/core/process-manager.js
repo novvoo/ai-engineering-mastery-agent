@@ -451,6 +451,7 @@ export class ProcessManager extends EventEmitter {
    */
   #performHealthCheck() {
     const now = Date.now();
+    const staleProcessIds = [];
     
     for (const [processId, info] of this.#activeProcesses) {
       const duration = now - info.startTime;
@@ -468,10 +469,72 @@ export class ProcessManager extends EventEmitter {
           process.kill(info.process.pid, 0);
         } catch {
           // 进程已死但未触发 close 事件
-          console.warn(`Process ${processId} died unexpectedly`);
-          this.#activeProcesses.delete(processId);
+          console.warn(`Process ${processId} died unexpectedly, cleaning up`);
+          staleProcessIds.push(processId);
         }
       }
+    }
+    
+    // 清理已死的进程记录
+    for (const processId of staleProcessIds) {
+      this.#activeProcesses.delete(processId);
+    }
+    
+    // 清理过期锁文件
+    this.#cleanupStaleLocks();
+  }
+  
+  /**
+   * 清理过期的锁文件
+   */
+  #cleanupStaleLocks() {
+    try {
+      if (!existsSync(LOCK_DIR)) return;
+      
+      const { readdirSync, statSync, unlinkSync } = require('fs');
+      const files = readdirSync(LOCK_DIR);
+      const now = Date.now();
+      const LOCK_TTL_MS = 30 * 60 * 1000; // 30分钟后锁过期
+      
+      for (const file of files) {
+        if (!file.endsWith('.lock')) continue;
+        
+        try {
+          const filePath = join(LOCK_DIR, file);
+          const stats = statSync(filePath);
+          const age = now - stats.mtimeMs;
+          
+          if (age > LOCK_TTL_MS) {
+            // 检查持有锁的进程是否还活着
+            let lockData;
+            try {
+              lockData = JSON.parse(readFileSync(filePath, 'utf-8'));
+            } catch {
+              // 无法解析锁文件，直接删除
+            }
+            
+            let shouldDelete = true;
+            if (lockData && lockData.pid) {
+              try {
+                // 检查进程是否还活着
+                process.kill(lockData.pid, 0);
+                shouldDelete = false; // 进程还在，不删除
+              } catch {
+                // 进程不在了，可以删除
+              }
+            }
+            
+            if (shouldDelete) {
+              unlinkSync(filePath);
+              console.log(`process-manager: cleaned up stale lock ${file}`);
+            }
+          }
+        } catch {
+          // 忽略单个锁文件的错误
+        }
+      }
+    } catch {
+      // 清理失败不影响正常使用
     }
   }
 

@@ -111,20 +111,42 @@ export function createFileSystemTools() {
       params: {
         pattern: { type: 'string', description: 'Search pattern (text or regex)' },
         file_pattern: { type: 'string', description: 'File glob pattern to filter files (e.g., "*.ts")' },
-        max_results: { type: 'number', description: 'Maximum number of results to return (default 20)' },
+        max_results: { type: 'number', description: 'Maximum number of results to return (default 20, max 100)' },
       },
       required: ['pattern'],
       handler: async ({ pattern, file_pattern, max_results }, ctx) => {
         try {
           const { execSync } = await import('child_process');
-          const max = (max_results) || 20;
+          const HARD_MAX_RESULTS = 100;
+          const SEARCH_TIMEOUT_MS = 30000;
+          
+          const max = Math.max(1, Math.min((max_results || 20), HARD_MAX_RESULTS));
           const fileFilter = file_pattern ? `--include="${file_pattern}"` : '';
-          const cmd = `grep -rn --color=never ${fileFilter} -m ${max} "${pattern}" ${ctx.workingDirectory} 2>/dev/null || true`;
+          
+          const excludeDirs = [
+            '.git', 'node_modules', '.agent-data', '.automation',
+            '.test-temp', 'dist', 'build', 'coverage', '.next', '.cache'
+          ];
+          const excludeArgs = excludeDirs.map(dir => `--exclude-dir="${dir}"`).join(' ');
+          
+          const cmd = `grep -rn --color=never ${excludeArgs} ${fileFilter} -m ${max} "${pattern}" ${ctx.workingDirectory} 2>/dev/null || true`;
 
-          const result = execSync(cmd, { encoding: 'utf-8', maxBuffer: 1024 * 1024 });
+          const result = execSync(cmd, { 
+            encoding: 'utf-8', 
+            maxBuffer: 5 * 1024 * 1024,
+            timeout: SEARCH_TIMEOUT_MS
+          });
+          
           if (!result.trim()) return `No matches found for pattern: ${pattern}`;
-          return result.trim();
+          
+          const lines = result.trim().split('\n');
+          const limitedLines = lines.slice(0, HARD_MAX_RESULTS);
+          
+          return limitedLines.join('\n');
         } catch (error) {
+          if (error.message && error.message.includes('timeout')) {
+            return `Search timed out after 30 seconds. Try a more specific pattern or smaller scope.`;
+          }
           return `Error searching: ${error instanceof Error ? error.message : error}`;
         }
       },

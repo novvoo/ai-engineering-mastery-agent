@@ -13,6 +13,8 @@ const DEFAULT_PATTERN = '**/*.{js,mjs,cjs,ts,tsx,jsx,json,md,txt,yml,yaml,css,ht
 const MAX_FILE_BYTES = 256 * 1024;
 const CHUNK_LINES = 80;
 const OVERLAP_LINES = 12;
+const BUILD_TIMEOUT_MS = 60000; // 60秒构建超时
+const MAX_INDEX_SIZE_MB = 50; // 索引最大50MB
 
 const indexCache = new Map();
 let embedderPromise = null;
@@ -179,41 +181,75 @@ async function buildIndex(workingDirectory, scopePath, pattern) {
     return persisted.chunks;
   }
 
-  const files = await glob(pattern, {
-    cwd: root,
-    absolute: true,
-    nodir: true,
-    ignore: [
-      '**/node_modules/**',
-      '**/.git/**',
-      '**/.agent-data/**',
-      '**/.automation/**',
-      '**/.test-temp/**',
-      '**/dist/**',
-      '**/build/**',
-      '**/coverage/**',
-      '**/bun.lock',
-    ],
+  // 带超时的索引构建
+  const startTime = Date.now();
+  let timedOut = false;
+
+  const timeoutPromise = new Promise((_, reject) => {
+    setTimeout(() => {
+      timedOut = true;
+      reject(new Error('Index build timed out after ' + BUILD_TIMEOUT_MS + 'ms'));
+    }, BUILD_TIMEOUT_MS);
   });
 
-  // Read files concurrently (max 20 at a time)
-  const fileEntries = [];
-  const slice = files.slice(0, 500);
-  const CONCURRENCY = 20;
-  for (let i = 0; i < slice.length; i += CONCURRENCY) {
-    const batch = await Promise.all(slice.slice(i, i + CONCURRENCY).map(async (file) => {
-      try {
-        const fileStat = await stat(file);
-        if (fileStat.size > MAX_FILE_BYTES) return [];
-        const text = await readFile(file, 'utf-8');
-        if (text.includes('\0')) return [];
-        const relPath = relative(workingDirectory, file);
-        return chunkFile(relPath, text);
-      } catch { return []; }
-    }));
-    for (const result of batch) fileEntries.push(...result);
+  const buildPromise = (async () => {
+    const files = await glob(pattern, {
+      cwd: root,
+      absolute: true,
+      nodir: true,
+      ignore: [
+        '**/node_modules/**',
+        '**/.git/**',
+        '**/.agent-data/**',
+        '**/.automation/**',
+        '**/.test-temp/**',
+        '**/dist/**',
+        '**/build/**',
+        '**/coverage/**',
+        '**/bun.lock',
+      ],
+    });
+
+    // 限制文件数量，避免超大项目卡死
+    const MAX_FILES = 500;
+    const slice = files.slice(0, MAX_FILES);
+    
+    // Read files concurrently (max 20 at a time)
+    const fileEntries = [];
+    const CONCURRENCY = 20;
+    
+    for (let i = 0; i < slice.length; i += CONCURRENCY) {
+      if (timedOut) break;
+      
+      const batch = await Promise.all(slice.slice(i, i + CONCURRENCY).map(async (file) => {
+        try {
+          const fileStat = await stat(file);
+          if (fileStat.size > MAX_FILE_BYTES) return [];
+          const text = await readFile(file, 'utf-8');
+          if (text.includes('\0')) return [];
+          const relPath = relative(workingDirectory, file);
+          return chunkFile(relPath, text);
+        } catch { return []; }
+      }));
+      for (const result of batch) fileEntries.push(...result);
+    }
+    
+    return fileEntries;
+  })();
+
+  let chunks;
+  try {
+    chunks = await Promise.race([buildPromise, timeoutPromise]);
+  } catch (error) {
+    if (error.message.includes('timed out')) {
+      console.warn('semantic_search: index build timed out, returning partial index');
+      // 如果有部分构建结果，返回部分结果
+      chunks = [];
+    } else {
+      throw error;
+    }
   }
-  const chunks = fileEntries;
+
   const MAX_CHUNKS = 2000;
   if (chunks.length > MAX_CHUNKS) {
     if (typeof process !== "undefined" && process.emitWarning) {
@@ -222,9 +258,23 @@ async function buildIndex(workingDirectory, scopePath, pattern) {
     chunks.length = MAX_CHUNKS;
   }
 
+  // 检查索引大小
+  const estimatedSize = JSON.stringify(chunks).length;
+  const MAX_INDEX_BYTES = MAX_INDEX_SIZE_MB * 1024 * 1024;
+  if (estimatedSize > MAX_INDEX_BYTES) {
+    const keepRatio = MAX_INDEX_BYTES / estimatedSize;
+    const keepCount = Math.floor(chunks.length * keepRatio);
+    if (typeof process !== "undefined" && process.emitWarning) {
+      process.emitWarning("semantic_search: index too large (" + Math.round(estimatedSize / 1024 / 1024) + "MB), keeping " + keepCount + " of " + chunks.length + " chunks");
+    }
+    chunks.length = keepCount;
+  }
+
   // Save to persistent and memory caches
-  await vIndex.save(cacheKey, chunks);
-  indexCache.set(cacheKey, { chunks });
+  if (chunks.length > 0) {
+    await vIndex.save(cacheKey, chunks);
+  }
+  indexCache.set(cacheKey, { chunks, builtAt: Date.now() });
 
   return chunks;
 }

@@ -11,6 +11,8 @@ import { MessageBus } from './subagent/MessageBus.js';
 import { ConcurrencyCoordinator, TaskGroup, ExecutionStrategy } from './concurrency/index.js';
 import { join } from 'path';
 
+const DEFAULT_TASK_TIMEOUT_MS = 5 * 60 * 1000; // 默认5分钟任务超时
+
 /**
  * 调度引擎类
  * 协调任务队列、Cron调度和子代理执行的中央控制器
@@ -309,13 +311,15 @@ export class SchedulerEngine {
    */
   async #executeTask(task) {
     const resourceLocks = this.#taskResourceLocks.get(task.id) || [];
+    const taskTimeout = task.timeoutMs || DEFAULT_TASK_TIMEOUT_MS;
 
     // 标记任务为运行中
     this.#concurrencyCoordinator.markTaskStarted(task, resourceLocks);
 
     // 更新任务状态为运行中
     await this.#taskQueue.update(task.id, {
-      status: TaskStatus.RUNNING
+      status: TaskStatus.RUNNING,
+      startedAt: Date.now()
     });
 
     // 创建子代理
@@ -324,28 +328,59 @@ export class SchedulerEngine {
       workingDir: this.#config.workingDirectory
     });
 
+    // 超时控制器
+    let timeoutId;
+    let taskTimedOut = false;
+    
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => {
+        taskTimedOut = true;
+        reject(new Error(`Task timed out after ${taskTimeout}ms`));
+      }, taskTimeout);
+    });
+
     try {
-      // 运行任务
-      const result = await subAgent.run(task);
+      // 带超时运行任务
+      const result = await Promise.race([
+        subAgent.run(task),
+        timeoutPromise
+      ]);
 
       // 更新任务状态为完成
       await this.#taskQueue.update(task.id, {
         status: TaskStatus.COMPLETED,
-        result: result
+        result: result,
+        completedAt: Date.now()
       });
 
       console.log(`Task ${task.id} completed successfully`);
 
     } catch (error) {
-      // 更新任务状态为失败
+      // 更新任务状态为失败或超时
+      const status = taskTimedOut ? 'TIMED_OUT' : TaskStatus.FAILED;
       await this.#taskQueue.update(task.id, {
-        status: TaskStatus.FAILED,
-        error: error instanceof Error ? error.message : String(error)
+        status,
+        error: error instanceof Error ? error.message : String(error),
+        failedAt: Date.now()
       });
 
-      console.error(`Task ${task.id} failed:`, error);
+      console.error(`Task ${task.id} ${taskTimedOut ? 'timed out' : 'failed'}:`, error);
+
+      // 如果超时，尝试强制终止子代理
+      if (taskTimedOut) {
+        try {
+          await subAgent.terminate?.();
+        } catch (terminateError) {
+          console.warn('Failed to terminate timed out sub-agent:', terminateError);
+        }
+      }
 
     } finally {
+      // 清理超时定时器
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      
       // 清理资源
       this.#concurrencyCoordinator.markTaskCompleted(task, resourceLocks);
       await this.#subAgentPool.remove(subAgent.id);

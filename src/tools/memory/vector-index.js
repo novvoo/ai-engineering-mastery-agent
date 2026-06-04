@@ -4,10 +4,12 @@
  * 支持检测索引过期，自动重建变更文件的索引
  */
 
-import { readFile, writeFile, mkdir, stat } from 'fs/promises';
+import { readFile, writeFile, mkdir, stat, unlink, readdir } from 'fs/promises';
 import { join, relative } from 'path';
 
 const INDEX_VERSION = 2; // 版本升级以支持过期检测
+const MAX_TOTAL_INDEX_SIZE_MB = 200; // 总索引大小最大200MB
+const MAX_SINGLE_INDEX_SIZE_MB = 50; // 单个索引最大50MB
 
 export class VectorIndex {
   #indexDir;
@@ -16,6 +18,52 @@ export class VectorIndex {
   constructor(baseDir) {
     this.#baseDir = baseDir;
     this.#indexDir = join(baseDir, '.agent-data', 'vector-index');
+  }
+
+  /**
+   * 清理过期和过大的索引
+   */
+  async cleanup() {
+    try {
+      await mkdir(this.#indexDir, { recursive: true });
+      const files = await readdir(this.#indexDir);
+      const indexFiles = files.filter(f => f.endsWith('.json'));
+      
+      let totalSize = 0;
+      const fileInfo = [];
+      
+      for (const file of indexFiles) {
+        try {
+          const filePath = join(this.#indexDir, file);
+          const stats = await stat(filePath);
+          totalSize += stats.size;
+          fileInfo.push({ path: filePath, size: stats.size, mtime: stats.mtimeMs });
+        } catch {
+          // 忽略无法访问的文件
+        }
+      }
+      
+      // 检查总大小是否超限
+      const MAX_TOTAL_BYTES = MAX_TOTAL_INDEX_SIZE_MB * 1024 * 1024;
+      if (totalSize > MAX_TOTAL_BYTES) {
+        // 按修改时间排序，删除最旧的
+        fileInfo.sort((a, b) => a.mtime - b.mtime);
+        
+        let bytesToDelete = totalSize - MAX_TOTAL_BYTES;
+        for (const info of fileInfo) {
+          if (bytesToDelete <= 0) break;
+          try {
+            await unlink(info.path);
+            bytesToDelete -= info.size;
+            console.log('vector-index: cleaned up old index', info.path);
+          } catch {
+            // 忽略删除失败
+          }
+        }
+      }
+    } catch {
+      // 清理失败不影响正常使用
+    }
   }
 
   /**
@@ -45,10 +93,26 @@ export class VectorIndex {
     const indexPath = this.#getIndexPath(cacheKey);
     await mkdir(this.#indexDir, { recursive: true });
     
+    // 先尝试清理旧索引
+    await this.cleanup();
+    
+    // 检查单个索引大小
+    const MAX_SINGLE_BYTES = MAX_SINGLE_INDEX_SIZE_MB * 1024 * 1024;
+    let trimmedChunks = chunks;
+    
+    // 如果预估大小超限，裁剪 chunks
+    let estimatedSize = JSON.stringify(chunks).length;
+    if (estimatedSize > MAX_SINGLE_BYTES) {
+      const keepRatio = MAX_SINGLE_BYTES / estimatedSize;
+      const keepCount = Math.floor(chunks.length * keepRatio);
+      trimmedChunks = chunks.slice(0, keepCount);
+      console.warn('vector-index: index too large, trimmed from', chunks.length, 'to', keepCount, 'chunks');
+    }
+    
     // 收集文件元数据用于过期检测
     const fileMeta = {};
     const paths = new Set();
-    for (const chunk of chunks) {
+    for (const chunk of trimmedChunks) {
       if (chunk.metadata?.path) {
         paths.add(chunk.metadata.path);
       }
@@ -69,10 +133,17 @@ export class VectorIndex {
     const data = {
       version: INDEX_VERSION,
       createdAt: new Date().toISOString(),
-      chunks,
+      chunks: trimmedChunks,
       fileMeta,
     };
-    await writeFile(indexPath, JSON.stringify(data), 'utf-8');
+    
+    const jsonData = JSON.stringify(data);
+    if (jsonData.length > MAX_SINGLE_BYTES) {
+      console.warn('vector-index: index still too large after trimming, skipping save');
+      return;
+    }
+    
+    await writeFile(indexPath, jsonData, 'utf-8');
   }
 
   /**
