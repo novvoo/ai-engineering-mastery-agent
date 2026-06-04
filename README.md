@@ -529,6 +529,12 @@ ai-engineering-mastery-agent/
 └── README.md
 ```
 
+## What's New in v1.0.14
+
+- **Vector Index Staleness Detection**: `VectorIndex` now tracks file mtime/size metadata. On load, it checks if any indexed file has changed and automatically rebuilds stale indexes. This ensures semantic search results stay current after project file changes.
+- **Context Pruning Summary Enhancement**: `DynamicContextPruning` now generates richer summaries with full user message sentences (up to 200 chars), tool execution counts, and completion keywords. Provides better context continuity after pruning.
+- **Testing**: 158 integration tests including vector index staleness, enhanced pruning summary, and all previous features.
+
 ## What's New in v1.0.13
 
 - **Centralized Regex Library**: `src/utils/regex-patterns.js` with 26 named patterns (email, URL, phone, IP, UUID, semver, credit card, HTML/Markdown, dates, etc.). Each exports both base and global-flag variants. Replaces inline regex in business logic.
@@ -570,11 +576,11 @@ The following improvements focus on large-project support and retrieval quality:
 
 ### Planned
 
-- **持久化索引过期检测** — `.agent-data/vector-index/` 只写不验，项目文件变更后索引不会自动失效。需加增量校验机制：启动时采样检查文件 mtime 或监听 git diff，只对变更文件重新索引。
+- **持久化索引过期检测** ✅ **[已完成]** — `VectorIndex` 现在跟踪文件 mtime/size 元数据，加载时自动检测变更并重建过期索引。
+- **上下文剪枝摘要增强** ✅ **[已完成]** — `DynamicContextPruning` 增强摘要生成，提取完整用户消息句子、记录工具执行数量、识别完成关键词。
 - **Embedder 容错与模型分发** — ONNX 模型（~440MB）依赖 HuggingFace 下载，国内环境不稳定。fallback 伪 embedding 语义质量接近随机。需提供轻量捆绑模型或 BM25 离线兜底。
 - **Token 计数精度** — fallback 计数对中英文混排仍是估算，需要接入真实 tokenizer（如 `tiktoken`）确保上下文剪枝时机准确。
 - **ReAct 串行循环** — `agent.js` 的 `run()` 是 Think→Act→Observe 串行循环，每轮需要完整 LLM 调用。改进方向：DAG 任务执行引擎、中间结果流式返回、探索阶段自动批量化读文件。
-- **上下文剪枝摘要增强** — 当前摘要只保留用户消息前 120 字符，信息损失显著。需要 LLM 驱动的上下文压缩：在剪枝时调用模型对丢弃的对话做摘要。
 - **LLM 调用流式输出** — `modelProvider.chat()` 阻塞等待完整响应，大上下文时可能数十秒无反馈。需流式输出 token 配合进度指示。
 - **沙箱扩展** — Shell 已支持可选沙箱和策略预检，但文件工具和 PTY 尚未纳入同一沙箱边界。需叠加容器/VM 做完整生产级隔离。
 
