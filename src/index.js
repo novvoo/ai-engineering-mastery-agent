@@ -1209,6 +1209,7 @@ class AIEngineeringAgent {
 
         // Show raw search result as source
         const firstResultLine = (result || '').split('\n')[0];
+        const firstResultBlock = result ? result.split('\n\n')[0] : '';
         console.log(enhancedUI.theme.dim(firstResultLine));
 
         // If a model provider is available, refine the answer via LLM
@@ -1218,7 +1219,7 @@ class AIEngineeringAgent {
             refineSpinner.start();
             const refineMessages = [
               { role: 'system', content: 'You are a precise document analyst. Based on the user question and search results, extract a concise answer. Use the user\'s language. If insufficient info, say so.' },
-              { role: 'user', content: 'Question: ' + query + '\n\nSearch results:\n' + result }
+              { role: 'user', content: 'Question: ' + query + '\n\nSearch results:\n' + firstResultBlock }
             ];
             const refineResponse = await this.modelProvider.chat(refineMessages, { maxTokens: 500 });
             refineSpinner.stop();
