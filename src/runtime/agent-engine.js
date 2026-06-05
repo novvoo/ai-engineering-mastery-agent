@@ -1,6 +1,6 @@
 /**
- * Agent Engine - Core runtime for AI agent
- * Platform-agnostic, can be used by both CLI and Desktop
+ * Enhanced AgentEngine - Full-featured version
+ * 完善的 AgentEngine 版本
  */
 
 import { RuntimeConfig, AgentState, RuntimeEvent } from './types.js';
@@ -14,11 +14,24 @@ import { MemoryManager } from '../memory/memory-manager.js';
 import { SecurityPolicy } from '../core/security-policy.js';
 import { ExperienceMemory } from '../core/experience-memory.js';
 import { TokenJuice } from '../core/token-juice.js';
+import { SessionManager } from '../core/session-manager.js';
 
 // Import tools
 import { createFileSystemTools } from '../tools/filesystem/filesystem-tools.js';
 import { createShellTool } from '../tools/system/shell.js';
 import { createSemanticSearchTool } from '../tools/memory/semantic-search.js';
+import { createGitTools } from '../tools/git/git-tools.js';
+
+// Import skill tools (those that don't need dependencies)
+import createBrainstormTool from '../tools/skills/brainstorm.js';
+import createGrillTool from '../tools/skills/grill.js';
+import createTddTool from '../tools/skills/tdd.js';
+import createReviewTool from '../tools/skills/review.js';
+import createArchitectTool from '../tools/skills/architect.js';
+import createZoomOutTool from '../tools/skills/zoom_out.js';
+import createToPrdTool from '../tools/skills/to_prd.js';
+import createToIssuesTool from '../tools/skills/to_issues.js';
+import createSetupTool from '../tools/skills/setup.js';
 
 export class AgentEngine {
   #config;
@@ -28,10 +41,12 @@ export class AgentEngine {
   #memoryManager;
   #securityPolicy;
   #experienceMemory;
+  #sessionManager;
+  #tokenJuice;
   #state;
   #isInitialized;
   #pluginManager;
-  #tokenJuice;
+  #modelProvider;
 
   constructor(config) {
     this.#config = config instanceof RuntimeConfig ? config : new RuntimeConfig(config);
@@ -39,6 +54,7 @@ export class AgentEngine {
     this.#pluginManager = new PluginManager(this.#eventBus);
     this.#state = new AgentState();
     this.#isInitialized = false;
+    this.#modelProvider = null;
   }
 
   /**
@@ -61,6 +77,7 @@ export class AgentEngine {
     this.#toolRegistry = new ToolRegistry();
     this.#memoryManager = new MemoryManager(this.#config.workingDirectory);
     this.#securityPolicy = new SecurityPolicy();
+    this.#sessionManager = new SessionManager();
     
     // Load memory
     await this.#memoryManager.load();
@@ -77,8 +94,8 @@ export class AgentEngine {
       maxChars: parseInt(process.env.MAX_RESULT_CHARS || '4000')
     });
 
-    // Register default tools
-    await this.#registerDefaultTools();
+    // Register tools
+    await this.#registerBasicTools();
     
     // Register security policies
     this.#securityPolicy.registerDefaultPolicies(this.#toolRegistry.getAll());
@@ -95,9 +112,9 @@ export class AgentEngine {
   }
 
   /**
-   * Register the default built-in tools
+   * Register basic tools that don't need complex dependencies
    */
-  async #registerDefaultTools() {
+  async #registerBasicTools() {
     // File system tools
     const fsTools = createFileSystemTools();
     for (const tool of fsTools) {
@@ -109,89 +126,42 @@ export class AgentEngine {
 
     // Semantic search
     this.#toolRegistry.register(createSemanticSearchTool());
-  }
-
-  /**
-   * Register additional tools
-   */
-  registerTool(tool) {
-    this.#toolRegistry.register(tool);
-  }
-
-  /**
-   * Register multiple tools
-   */
-  registerTools(tools) {
-    for (const tool of tools) {
+    
+    // Git tools
+    const gitTools = createGitTools();
+    for (const tool of gitTools) {
       this.#toolRegistry.register(tool);
     }
-  }
-
-  /**
-   * Get all registered tools
-   */
-  getTools() {
-    return this.#toolRegistry.getAll();
+    
+    // Skill tools (basic ones)
+    this.#toolRegistry.register(createBrainstormTool());
+    this.#toolRegistry.register(createGrillTool());
+    this.#toolRegistry.register(createTddTool());
+    this.#toolRegistry.register(createReviewTool());
+    this.#toolRegistry.register(createArchitectTool());
+    this.#toolRegistry.register(createZoomOutTool());
+    this.#toolRegistry.register(createToPrdTool());
+    this.#toolRegistry.register(createToIssuesTool());
+    this.#toolRegistry.register(createSetupTool());
   }
 
   /**
    * Attach a model provider
    */
   attachModelProvider(modelProvider) {
+    this.#modelProvider = modelProvider;
     this.#config.modelProvider = modelProvider;
-  }
-
-  /**
-   * Get the current state
-   */
-  getState() {
-    return { ...this.#state };
-  }
-
-  /**
-   * Get the tool registry
-   */
-  getToolRegistry() {
-    return this.#toolRegistry;
-  }
-
-  /**
-   * Get the memory manager
-   */
-  getMemoryManager() {
-    return this.#memoryManager;
-  }
-
-  /**
-   * Get the security policy
-   */
-  getSecurityPolicy() {
-    return this.#securityPolicy;
-  }
-
-  /**
-   * Get the experience memory
-   */
-  getExperienceMemory() {
-    return this.#experienceMemory;
-  }
-
-  /**
-   * Get the plugin manager
-   */
-  getPluginManager() {
-    return this.#pluginManager;
   }
 
   /**
    * Process user input and run the agent
    */
-  async processInput(input) {
+  async processInput(input, options = {}) {
     if (!this.#isInitialized) {
       await this.initialize();
     }
 
-    if (!this.#config.modelProvider) {
+    if (!this.#modelProvider) {
       throw new Error('Model provider not attached. Use attachModelProvider() first.');
     }
 
@@ -208,9 +178,12 @@ export class AgentEngine {
       timestamp: this.#state.startTime
     });
 
+    // Create UI facade for the agent
+    const uiFacade = this.#createUIFacade();
+
     // Create agent instance
     this.#agent = new ReActAgent(
-      this.#config.modelProvider,
+      this.#modelProvider,
       this.#toolRegistry,
       this.#memoryManager,
       {
@@ -220,7 +193,7 @@ export class AgentEngine {
         securityPolicy: this.#securityPolicy,
         tokenJuice: this.#tokenJuice
       },
-      this.#createUIFacade()
+      uiFacade
     );
 
     let result;
@@ -252,11 +225,12 @@ export class AgentEngine {
   }
 
   /**
-   * Create a UI facade for the agent (minimal, event-based)
+   * Create a UI facade for the agent - compatibility layer
    */
   #createUIFacade() {
     const eventBus = this.#eventBus;
-    const pluginManager = this.#pluginManager;
+    
+    // Create a simple facade that forwards events
     return {
       info: (message) => {
         eventBus.emit(RuntimeEvent.STATUS_UPDATE, { message, level: 'info' });
@@ -268,10 +242,13 @@ export class AgentEngine {
         eventBus.emit(RuntimeEvent.STATUS_UPDATE, { message, level: 'error' });
       },
       debugEvent: (eventName, data) => {
-        eventBus.emit(RuntimeEvent.STATUS_UPDATE, { eventName, data, level: 'debug' });
+        eventBus.emit(RuntimeEvent.STATUS_UPDATE, { 
+          message: `[${eventName}]`, 
+          level: 'debug', 
+          data 
+        });
       },
       theme: {
-        // Minimal theme for compatibility
         dim: (text) => text,
         success: (text) => text,
         error: (text) => text,
@@ -311,6 +288,32 @@ export class AgentEngine {
         throw error;
       }
     };
+  }
+
+  // Getters for compatibility
+  getState() { return { ...this.#state }; }
+  getToolRegistry() { return this.#toolRegistry; }
+  getMemoryManager() { return this.#memoryManager; }
+  getSecurityPolicy() { return this.#securityPolicy; }
+  getExperienceMemory() { return this.#experienceMemory; }
+  getPluginManager() { return this.#pluginManager; }
+  getSessionManager() { return this.#sessionManager; }
+  getTokenJuice() { return this.#tokenJuice; }
+  isInitialized() { return this.#isInitialized; }
+
+  // API methods for tests and usage
+  registerTool(tool) {
+    this.#toolRegistry.register(tool);
+  }
+
+  registerTools(tools) {
+    for (const tool of tools) {
+      this.#toolRegistry.register(tool);
+    }
+  }
+
+  getTools() {
+    return this.#toolRegistry.getAll();
   }
 
   /**
