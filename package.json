@@ -18,6 +18,9 @@
     "test:debug": "bun --inspect-brk test-integration.mjs",
     "test:integration": "bun test-integration.mjs",
     "test:watch": "bun --watch test-integration.mjs",
+    "test:runtime": "bun test tests/runtime/integration.test.js",
+    "test:adapters": "bun test tests/adapters/cli.test.js",
+    "test:all": "bun test tests/",
     "lint": "eslint src test-integration.mjs",
     "package:release": "bun scripts/prepare-release-package.mjs",
     "format": "prettier --write \"src/**/*.js\"",
@@ -55,6 +58,7 @@
     "pdf-parse": "^2.4.5"
   },
   "devDependencies": {
+    "bun-test": "^1.0.0",
     "eslint": "^8.57.1"
   }
 }
