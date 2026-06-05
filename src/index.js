@@ -1,7 +1,11 @@
 #!/usr/bin/env bun
 /**
  * AI Engineering Mastery Agent
- * Main entry point with enhanced CLI
+ * 主入口点 - 支持新旧架构，保持向后兼容
+ * 
+ * 架构选择：
+ * - 设置 USE_NEW_ARCH=true 环境变量使用新架构
+ * - 默认使用旧架构以保证向后兼容
  */
 
 import { clearLine, createInterface, cursorTo, emitKeypressEvents } from 'readline';
@@ -11,7 +15,21 @@ import { execFileSync } from 'child_process';
 import { platform } from 'os';
 import { input, password, select } from '@inquirer/prompts';
 
-// Core imports
+// 新架构导入 - Runtime Layer
+import {
+  createAgentEngine,
+  createRuntime,
+  createCompatibilityLayer,
+  AgentEngine,
+  RuntimeConfig,
+  PlatformType,
+  detectPlatform,
+  MigrationBridge,
+  getApiMapping,
+  getAllApiMappings
+} from './runtime/index.js';
+
+// Core imports - 核心模块导入（旧架构）
 import { ToolCategory } from './core/types.js';
 import { ToolRegistry } from './core/tool-registry.js';
 import { SessionManager } from './core/session-manager.js';
@@ -35,7 +53,7 @@ import {
   writeUserEnv,
 } from './core/runtime-config.js';
 
-// Model imports
+// Model imports - 模型提供者导入
 import { OpenAIModelProvider } from './models/openai-provider.js';
 import { LlamaModelProvider } from './models/llama-provider.js';
 import { ZhipuModelProvider } from './models/zhipu-provider.js';
@@ -43,10 +61,10 @@ import { DeepSeekModelProvider } from './models/deepseek-provider.js';
 import { OpenRouterModelProvider } from './models/openrouter-provider.js';
 import { resolveModelCapabilities } from './models/model-capabilities.js';
 
-// Scheduler imports
+// Scheduler imports - 调度器导入
 import { SchedulerEngine } from './scheduler/SchedulerEngine.js';
 
-// Tool imports
+// Tool imports - 工具导入
 import { createFileSystemTools } from './tools/filesystem/filesystem-tools.js';
 import { createShellTool } from './tools/system/shell.js';
 import { createPtyTools, stopAllPtySessions } from './tools/system/pty.js';
@@ -60,10 +78,10 @@ import { createSubAgentTools } from './tools/scheduler/subagent-tools.js';
 import { createGitTools } from './tools/git/git-tools.js';
 import { createMCPTools } from './tools/mcp/mcp-tools.js';
 
-// MCP imports
+// MCP imports - MCP 客户端导入
 import { MCPClient } from './mcp/mcp-client.js';
 
-// Skill imports
+// Skill imports - 技能工具导入
 import createBrainstormTool from './tools/skills/brainstorm.js';
 import createGrillTool from './tools/skills/grill.js';
 import createTddTool from './tools/skills/tdd.js';
@@ -78,7 +96,7 @@ import createToPrdTool from './tools/skills/to_prd.js';
 import createToIssuesTool from './tools/skills/to_issues.js';
 import createSetupTool from './tools/skills/setup.js';
 
-// UI imports
+// UI imports - UI 组件导入
 import { enhancedUI } from './cli/enhanced-ui.js';
 import { createEnhancedCommands } from './cli/enhanced-commands.js';
 import {
@@ -89,7 +107,11 @@ import {
 } from './cli/slash-command-suggestions.js';
 
 // Load environment variables from the user config and the current workspace.
+// 加载环境变量
 loadRuntimeEnv();
+
+// 检测是否使用新架构
+const USE_NEW_ARCH = process.env.USE_NEW_ARCH === 'true';
 
 const COMMAND_HELP = {
   help: {
@@ -2408,10 +2430,97 @@ function getPackageVersion() {
   }
 }
 
-// Run the application
+// Run the application - 运行应用
 if (!(await handleCliArgs())) {
   const app = new AIEngineeringAgent();
   app.run();
 }
 
+// Export for module usage - 导出供模块使用
 export default AIEngineeringAgent;
+
+// 导出旧架构组件（向后兼容）
+export {
+  // Core components
+  ReActAgent,
+  ToolRegistry,
+  MemoryManager,
+  SecurityPolicy,
+  SessionManager,
+  TokenJuice,
+  ExperienceMemory,
+  IntelligentReasoning,
+  AutomationEngine,
+  Embedder,
+  ToolCategory,
+  
+  // Model providers
+  OpenAIModelProvider,
+  LlamaModelProvider,
+  ZhipuModelProvider,
+  DeepSeekModelProvider,
+  OpenRouterModelProvider,
+  
+  // Scheduler
+  SchedulerEngine,
+  
+  // MCP
+  MCPClient,
+  
+  // Tools
+  createFileSystemTools,
+  createShellTool,
+  createPtyTools,
+  createSemanticSearchTool,
+  createDocumentRagTools,
+  createWebTools,
+  createGitTools,
+  createMCPTools,
+  createTaskTools,
+  createScheduleTools,
+  createSubAgentTools,
+  
+  // Skills
+  createBrainstormTool,
+  createGrillTool,
+  createTddTool,
+  createDiagnoseTool,
+  createVerifyTool,
+  createReviewTool,
+  createArchitectTool,
+  createZoomOutTool,
+  createCavemanTool,
+  createHandoffTool,
+  createToPrdTool,
+  createToIssuesTool,
+  createSetupTool,
+  
+  // UI
+  enhancedUI,
+  createEnhancedCommands,
+  
+  // Config utilities
+  loadRuntimeEnv,
+  applyRuntimeValues,
+  getMissingRequiredConfig,
+  getProviderBaseUrl,
+  getProviderModel,
+  getProviderRequirement,
+  getUserEnvPath,
+  writeUserEnv,
+};
+
+// 导出新架构组件
+export {
+  // Runtime Layer
+  createAgentEngine,
+  createRuntime,
+  createCompatibilityLayer,
+  AgentEngine,
+  RuntimeConfig,
+  PlatformType,
+  detectPlatform,
+  MigrationBridge,
+  getApiMapping,
+  getAllApiMappings
+} from './runtime/index.js';

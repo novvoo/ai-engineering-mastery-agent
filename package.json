@@ -31,7 +31,29 @@
     "examples:plugins": "bun examples/plugin-system.js",
     "examples:desktop": "bun examples/desktop-integration.js",
     "examples:performance": "bun examples/performance-tests.js",
-    "examples:all": "bun examples/runtime-usage.js && bun examples/plugin-system.js && bun examples/desktop-integration.js"
+    "examples:all": "bun examples/runtime-usage.js && bun examples/plugin-system.js && bun examples/desktop-integration.js",
+    
+    // 端到端测试命令
+    "test:e2e": "bun test tests/e2e/runtime-e2e.test.js",
+    "test:e2e:watch": "bun --watch tests/e2e/runtime-e2e.test.js",
+    
+    // Electron 桌面应用命令
+    "desktop:dev": "cd desktop && npm run dev",
+    "desktop:start": "cd desktop && npm run start",
+    "desktop:build": "cd desktop && npm run build",
+    "desktop:build:win": "cd desktop && npm run build:win",
+    "desktop:build:mac": "cd desktop && npm run build:mac",
+    "desktop:build:linux": "cd desktop && npm run build:linux",
+    "desktop:build:all": "cd desktop && npm run build:all",
+    "desktop:pack": "cd desktop && npm run pack",
+    "desktop:dist": "cd desktop && npm run dist",
+    
+    // 完整构建流程
+    "build:desktop": "bun run desktop:build",
+    "build:all": "bun run desktop:build:all",
+    
+    // 发布流程
+    "release:desktop": "bun run desktop:dist && bun run package:release"
   },
   "keywords": [
     "ai-agent",
