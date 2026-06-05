@@ -74,7 +74,7 @@ async function buildDesktop() {
     
     // 添加额外参数
     if (args.includes('--dir')) cmd += ' --dir';
-    if (args.includes('--publish')) cmd += ' --publish always';
+    cmd += args.includes('--publish') ? ' --publish always' : ' --publish never';
     
     execSync(cmd, { 
       cwd: rootDir, 

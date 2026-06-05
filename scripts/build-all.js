@@ -94,6 +94,7 @@ async function buildDesktop() {
     if (platforms.win) cmd += ' --win';
     if (platforms.mac) cmd += ' --mac';
     if (platforms.linux) cmd += ' --linux';
+    cmd += ' --publish never';
     
     execSync(cmd, { 
       cwd: rootDir, 
