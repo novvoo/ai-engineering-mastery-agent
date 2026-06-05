@@ -4,8 +4,8 @@
  */
 
 import { describe, it, beforeEach, afterEach, expect } from 'bun:test';
-import { runCLIRuntime, CLIUIAdapter } from '../src/adapters/cli/index.js';
-import { getEventBus, RuntimeEvent } from '../src/runtime/index.js';
+import { runCLIRuntime, CLIUIAdapter } from '../../src/adapters/cli/index.js';
+import { getEventBus, RuntimeEvent } from '../../src/runtime/index.js';
 
 describe('CLI Adapter Integration Tests', () => {
   let eventBus;

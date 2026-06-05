@@ -43,8 +43,8 @@ export class CLIUIAdapter {
    * Handle agent start
    */
   #onAgentStart(event) {
-    if (this.#ui && this.#ui.showBanner) {
-      // Banner is typically shown at startup
+    if (this.#ui && typeof this.#ui.showBanner === 'function') {
+      this.#ui.showBanner();
     }
   }
 

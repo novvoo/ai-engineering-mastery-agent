@@ -8,10 +8,16 @@ import { getEventBus } from '../../runtime/event-bus.js';
 import { CLIUIAdapter } from './ui-adapter.js';
 
 // Import original CLI components for backward compatibility
-import { cliUI } from '../../cli/ui.js';
-import { EnhancedUI } from '../../cli/enhanced-ui.js';
-import { createModelProvider } from '../../models/index.js';
-import { registerSecurityPolicies } from '../../core/security-policy.js';
+import { ui as cliUI } from '../../cli/ui.js';
+import EnhancedUI from '../../cli/enhanced-ui.js';
+
+// Import model providers
+import { OpenAIModelProvider } from '../../models/openai-provider.js';
+import { LlamaModelProvider } from '../../models/llama-provider.js';
+import { ZhipuModelProvider } from '../../models/zhipu-provider.js';
+import { DeepSeekModelProvider } from '../../models/deepseek-provider.js';
+import { OpenRouterModelProvider } from '../../models/openrouter-provider.js';
+import { resolveModelCapabilities } from '../../models/model-capabilities.js';
 
 // Import all tool creators
 import { createFileSystemTools } from '../../tools/filesystem/filesystem-tools.js';
@@ -41,6 +47,82 @@ import createHandoffTool from '../../tools/skills/handoff.js';
 import createToPrdTool from '../../tools/skills/to_prd.js';
 import createToIssuesTool from '../../tools/skills/to_issues.js';
 import createSetupTool from '../../tools/skills/setup.js';
+
+// Import runtime config utilities
+import { getProviderBaseUrl, getProviderModel, getProviderRequirement } from '../../core/runtime-config.js';
+
+/**
+ * Create model provider based on environment configuration
+ */
+async function createModelProvider(workingDirectory, autoDownloadModels, ui) {
+  const provider = process.env.MODEL_PROVIDER || 'openai';
+  const model = getProviderModel(provider);
+  const baseURL = getProviderBaseUrl(provider);
+  
+  const modelCapabilities = await resolveModelCapabilities({
+    provider,
+    model,
+    baseURL,
+    apiKey: getProviderApiKey(provider)
+  });
+
+  let modelProvider;
+  if (provider === 'openai') {
+    modelProvider = new OpenAIModelProvider(
+      getProviderApiKey(provider),
+      baseURL,
+      model,
+      false,
+      { capabilities: modelCapabilities }
+    );
+  } else if (provider === 'llama') {
+    modelProvider = new LlamaModelProvider(model, {
+      temperature: parseFloat(process.env.TEMPERATURE || '0.7'),
+      debug: false,
+      capabilities: modelCapabilities,
+      autoDownload: autoDownloadModels,
+      workingDirectory
+    });
+  } else if (provider === 'zhipu') {
+    modelProvider = new ZhipuModelProvider(
+      getProviderApiKey(provider),
+      process.env.ZHIPU_BASE_URL,
+      model,
+      { capabilities: modelCapabilities }
+    );
+  } else if (provider === 'deepseek') {
+    modelProvider = new DeepSeekModelProvider(
+      getProviderApiKey(provider),
+      process.env.DEEPSEEK_BASE_URL,
+      model,
+      { capabilities: modelCapabilities }
+    );
+  } else if (provider === 'openrouter') {
+    modelProvider = new OpenRouterModelProvider(
+      getProviderApiKey(provider),
+      process.env.OPENROUTER_BASE_URL,
+      model,
+      { capabilities: modelCapabilities }
+    );
+  } else {
+    throw new Error(`Unknown provider: ${provider}`);
+  }
+
+  return modelProvider;
+}
+
+function getProviderApiKey(provider) {
+  if (provider === 'zhipu') {
+    return process.env.ZHIPU_API_KEY;
+  }
+  if (provider === 'deepseek') {
+    return process.env.DEEPSEEK_API_KEY;
+  }
+  if (provider === 'openrouter') {
+    return process.env.OPENROUTER_API_KEY;
+  }
+  return process.env.OPENAI_API_KEY;
+}
 
 /**
  * Register all built-in tools with the engine
@@ -156,9 +238,9 @@ export async function runCLIRuntime(options = {}) {
     engine.attachModelProvider(modelProvider);
 
     // Register security policies (backward compatibility)
+    const securityPolicy = engine.getSecurityPolicy();
     const toolRegistry = engine.getToolRegistry();
-    const allTools = toolRegistry.getAll();
-    registerSecurityPolicies(allTools);
+    securityPolicy.registerDefaultPolicies(toolRegistry.getAll());
 
     // Return engine and adapter for use in main
     return {

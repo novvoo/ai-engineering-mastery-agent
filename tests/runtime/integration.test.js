@@ -4,8 +4,8 @@
  */
 
 import { describe, it, beforeEach, afterEach, expect } from 'bun:test';
-import { createAgentEngine, RuntimeConfig, RuntimeEvent, getEventBus } from '../src/runtime/index.js';
-import { PlatformType } from '../src/runtime/types.js';
+import { createAgentEngine, RuntimeConfig, RuntimeEvent, getEventBus } from '../../src/runtime/index.js';
+import { PlatformType } from '../../src/runtime/types.js';
 
 describe('Runtime Layer Integration Tests', () => {
   let engine;
