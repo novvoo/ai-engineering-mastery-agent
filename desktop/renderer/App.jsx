@@ -8,8 +8,10 @@ import AgentControl from './components/AgentControl.jsx';
 import ToolPanel from './components/ToolPanel.jsx';
 import MessageLog from './components/MessageLog.jsx';
 import StatusBar from './components/StatusBar.jsx';
+import Toolbar from './components/Toolbar.jsx';
 import { useRuntime } from './hooks/useRuntime.js';
 import { useIPC } from './hooks/useIPC.js';
+import './index.css';
 
 // 样式定义
 const styles = {
@@ -19,7 +21,8 @@ const styles = {
     height: '100vh',
     backgroundColor: '#1a1a2e',
     color: '#eaeaea',
-    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif'
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif',
+    overflow: 'hidden'
   },
   
   header: {
@@ -36,7 +39,10 @@ const styles = {
     fontSize: '18px',
     fontWeight: '600',
     color: '#e94560',
-    letterSpacing: '0.5px'
+    letterSpacing: '0.5px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px'
   },
   
   headerButtons: {
@@ -52,7 +58,10 @@ const styles = {
     color: '#eaeaea',
     cursor: 'pointer',
     fontSize: '13px',
-    transition: 'background-color 0.2s'
+    transition: 'all 0.2s',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px'
   },
   
   main: {
@@ -82,6 +91,10 @@ const styles = {
     padding: '8px 20px',
     backgroundColor: '#16213e',
     borderTop: '1px solid #0f3460'
+  },
+  
+  logoIcon: {
+    fontSize: '20px'
   }
 };
 
@@ -160,6 +173,30 @@ function App() {
     ipc.closeWindow();
   }, [ipc]);
   
+  // 处理加载任务
+  const handleLoadTask = useCallback(() => {
+    console.log('[App] 加载任务');
+    // TODO: 实现加载任务功能
+  }, []);
+  
+  // 处理保存任务
+  const handleSaveTask = useCallback(() => {
+    console.log('[App] 保存任务');
+    // TODO: 实现保存任务功能
+  }, []);
+  
+  // 处理导出
+  const handleExport = useCallback(() => {
+    console.log('[App] 导出');
+    // TODO: 实现导出功能
+  }, []);
+  
+  // 处理帮助
+  const handleHelp = useCallback(() => {
+    console.log('[App] 帮助');
+    // TODO: 实现帮助功能
+  }, []);
+  
   // 渲染侧边栏内容
   const renderSidebarContent = () => {
     switch (activeTab) {
@@ -190,26 +227,11 @@ function App() {
       {/* 头部 */}
       <header style={styles.header}>
         <div style={styles.title}>
+          <span style={styles.logoIcon}>🤖</span>
           AI Agent Desktop
         </div>
         
         <div style={styles.headerButtons}>
-          <button 
-            style={styles.headerButton}
-            onClick={handleNewTask}
-            title="新建任务"
-          >
-            📝 新建
-          </button>
-          
-          <button 
-            style={styles.headerButton}
-            onClick={() => setShowSettings(!showSettings)}
-            title="设置"
-          >
-            ⚙️ 设置
-          </button>
-          
           <button 
             style={styles.headerButton}
             onClick={handleMinimize}
@@ -235,6 +257,18 @@ function App() {
           </button>
         </div>
       </header>
+      
+      {/* 工具栏 */}
+      <Toolbar
+        status={runtime.status}
+        taskCount={runtime.messages.length}
+        onNewTask={handleNewTask}
+        onLoadTask={handleLoadTask}
+        onSaveTask={handleSaveTask}
+        onExport={handleExport}
+        onSettings={() => setShowSettings(true)}
+        onHelp={handleHelp}
+      />
       
       {/* 主体内容 */}
       <main style={styles.main}>
