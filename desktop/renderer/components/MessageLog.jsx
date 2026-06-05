@@ -1,9 +1,17 @@
 /**
- * 消息日志组件
+ * 消息日志组件（增强版）
  * 显示 Agent 执行过程中的消息和结果
+ * 
+ * 新增功能：
+ * - 消息折叠/展开
+ * - 复制消息内容
+ * - 时间线视图
+ * - 消息详情查看
+ * - 消息搜索过滤
+ * - 消息分组
  */
 
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 
 // 样式定义
 const styles = {
@@ -13,7 +21,8 @@ const styles = {
     flexDirection: 'column',
     overflow: 'hidden',
     backgroundColor: '#1a1a2e',
-    borderRadius: '8px'
+    borderRadius: '8px',
+    border: '1px solid #0f3460'
   },
   
   header: {
@@ -21,48 +30,149 @@ const styles = {
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: '12px 16px',
-    borderBottom: '1px solid #0f3460'
+    borderBottom: '1px solid #0f3460',
+    backgroundColor: '#16213e'
   },
   
   title: {
     fontSize: '14px',
     fontWeight: '600',
-    color: '#e94560'
+    color: '#e94560',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px'
   },
   
   headerButtons: {
     display: 'flex',
-    gap: '8px'
+    gap: '8px',
+    alignItems: 'center'
+  },
+  
+  searchContainer: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
+    marginRight: '8px'
+  },
+  
+  searchInput: {
+    width: '150px',
+    padding: '4px 8px',
+    borderRadius: '4px',
+    border: '1px solid #0f3460',
+    backgroundColor: '#1a1a2e',
+    color: '#eaeaea',
+    fontSize: '12px',
+    transition: 'width 0.2s ease'
+  },
+  
+  searchInputExpanded: {
+    width: '200px'
   },
   
   button: {
-    padding: '4px 12px',
+    padding: '4px 8px',
     borderRadius: '4px',
     border: 'none',
     backgroundColor: '#0f3460',
     color: '#eaeaea',
     cursor: 'pointer',
-    fontSize: '12px'
+    fontSize: '12px',
+    transition: 'all 0.2s',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px'
+  },
+  
+  buttonActive: {
+    backgroundColor: '#e94560'
+  },
+  
+  viewToggle: {
+    display: 'flex',
+    gap: '2px',
+    padding: '2px',
+    borderRadius: '4px',
+    backgroundColor: '#1a1a2e'
+  },
+  
+  viewButton: {
+    padding: '4px 8px',
+    borderRadius: '3px',
+    border: 'none',
+    backgroundColor: 'transparent',
+    color: '#888888',
+    cursor: 'pointer',
+    fontSize: '11px',
+    transition: 'all 0.15s'
+  },
+  
+  viewButtonActive: {
+    backgroundColor: '#e94560',
+    color: '#ffffff'
   },
   
   messageList: {
     flex: 1,
     overflowY: 'auto',
-    padding: '16px'
+    padding: '16px',
+    scrollBehavior: 'smooth'
   },
   
+  // 时间线视图样式
+  timelineView: {
+    position: 'relative',
+    paddingLeft: '24px'
+  },
+  
+  timelineLine: {
+    position: 'absolute',
+    left: '8px',
+    top: '0',
+    bottom: '0',
+    width: '2px',
+    backgroundColor: '#0f3460'
+  },
+  
+  timelineDot: {
+    position: 'absolute',
+    left: '4px',
+    width: '10px',
+    height: '10px',
+    borderRadius: '50%',
+    backgroundColor: '#e94560',
+    border: '2px solid #16213e',
+    transition: 'all 0.2s'
+  },
+  
+  // 消息项样式
   messageItem: {
     marginBottom: '12px',
-    borderRadius: '6px',
+    borderRadius: '8px',
     padding: '12px',
-    backgroundColor: '#16213e'
+    backgroundColor: '#16213e',
+    border: '1px solid transparent',
+    transition: 'all 0.2s ease',
+    position: 'relative',
+    cursor: 'pointer'
+  },
+  
+  messageItemHover: {
+    border: '1px solid #e94560',
+    transform: 'translateX(2px)'
+  },
+  
+  messageItemCollapsed: {
+    padding: '8px 12px'
   },
   
   messageHeader: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: '8px'
+    marginBottom: '8px',
+    cursor: 'pointer'
   },
   
   messageType: {
@@ -71,55 +181,82 @@ const styles = {
     padding: '2px 8px',
     borderRadius: '4px',
     fontSize: '11px',
-    fontWeight: '500'
+    fontWeight: '500',
+    gap: '4px'
   },
   
   typeInfo: {
-    backgroundColor: '#17a2b8',
-    color: '#ffffff'
+    backgroundColor: 'rgba(23, 162, 184, 0.2)',
+    color: '#17a2b8',
+    border: '1px solid #17a2b8'
   },
   
   typeSuccess: {
-    backgroundColor: '#28a745',
-    color: '#ffffff'
+    backgroundColor: 'rgba(40, 167, 69, 0.2)',
+    color: '#28a745',
+    border: '1px solid #28a745'
   },
   
   typeError: {
-    backgroundColor: '#dc3545',
-    color: '#ffffff'
+    backgroundColor: 'rgba(220, 53, 69, 0.2)',
+    color: '#dc3545',
+    border: '1px solid #dc3545'
   },
   
   typeWarning: {
-    backgroundColor: '#ffc107',
-    color: '#000000'
+    backgroundColor: 'rgba(255, 193, 7, 0.2)',
+    color: '#ffc107',
+    border: '1px solid #ffc107'
   },
   
   typeDebug: {
-    backgroundColor: '#6c757d',
-    color: '#ffffff'
+    backgroundColor: 'rgba(108, 117, 125, 0.2)',
+    color: '#6c757d',
+    border: '1px solid #6c757d'
   },
   
   typeTool: {
-    backgroundColor: '#e94560',
-    color: '#ffffff'
+    backgroundColor: 'rgba(233, 69, 96, 0.2)',
+    color: '#e94560',
+    border: '1px solid #e94560'
   },
   
   typeResult: {
-    backgroundColor: '#007bff',
-    color: '#ffffff'
+    backgroundColor: 'rgba(0, 123, 255, 0.2)',
+    color: '#007bff',
+    border: '1px solid #007bff'
+  },
+  
+  typeUser: {
+    backgroundColor: 'rgba(111, 66, 193, 0.2)',
+    color: '#6f42c1',
+    border: '1px solid #6f42c1'
   },
   
   messageTime: {
     fontSize: '11px',
-    color: '#888888'
+    color: '#888888',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px'
   },
   
   messageContent: {
     fontSize: '13px',
     color: '#eaeaea',
-    lineHeight: '1.5',
+    lineHeight: '1.6',
     whiteSpace: 'pre-wrap',
-    wordBreak: 'break-word'
+    wordBreak: 'break-word',
+    maxHeight: '300px',
+    overflowY: 'auto',
+    transition: 'max-height 0.3s ease'
+  },
+  
+  messageContentCollapsed: {
+    maxHeight: '40px',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap'
   },
   
   messageMeta: {
@@ -127,9 +264,67 @@ const styles = {
     fontSize: '11px',
     color: '#888888',
     display: 'flex',
-    gap: '12px'
+    gap: '12px',
+    flexWrap: 'wrap'
   },
   
+  messageActions: {
+    display: 'flex',
+    gap: '4px',
+    marginTop: '8px',
+    opacity: '0',
+    transition: 'opacity 0.2s'
+  },
+  
+  messageActionsVisible: {
+    opacity: '1'
+  },
+  
+  actionButton: {
+    padding: '2px 6px',
+    borderRadius: '3px',
+    border: 'none',
+    backgroundColor: '#0f3460',
+    color: '#888888',
+    cursor: 'pointer',
+    fontSize: '11px',
+    transition: 'all 0.15s'
+  },
+  
+  // 详情面板
+  detailPanel: {
+    marginTop: '8px',
+    padding: '12px',
+    backgroundColor: '#1a1a2e',
+    borderRadius: '6px',
+    border: '1px solid #0f3460',
+    fontSize: '12px',
+    maxHeight: '200px',
+    overflowY: 'auto'
+  },
+  
+  detailTitle: {
+    color: '#e94560',
+    fontWeight: '600',
+    marginBottom: '8px'
+  },
+  
+  detailRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    marginBottom: '4px',
+    color: '#888888'
+  },
+  
+  detailValue: {
+    color: '#eaeaea',
+    textAlign: 'right',
+    maxWidth: '60%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis'
+  },
+  
+  // 空状态
   emptyContainer: {
     display: 'flex',
     flexDirection: 'column',
@@ -137,46 +332,115 @@ const styles = {
     alignItems: 'center',
     height: '100%',
     color: '#888888',
-    textAlign: 'center'
+    textAlign: 'center',
+    padding: '32px'
   },
   
   emptyIcon: {
-    fontSize: '48px',
-    marginBottom: '16px'
+    fontSize: '64px',
+    marginBottom: '16px',
+    opacity: '0.5'
   },
   
   emptyText: {
     fontSize: '16px',
-    marginBottom: '8px'
+    marginBottom: '8px',
+    color: '#eaeaea'
   },
   
   emptyHint: {
-    fontSize: '12px',
-    color: '#666666'
+    fontSize: '13px',
+    color: '#666666',
+    maxWidth: '300px'
   },
   
+  // 运行指示器
   runningIndicator: {
     display: 'flex',
     alignItems: 'center',
-    gap: '8px',
-    padding: '12px',
+    gap: '12px',
+    padding: '16px',
     backgroundColor: '#16213e',
-    borderRadius: '6px',
-    marginBottom: '12px'
+    borderRadius: '8px',
+    marginBottom: '12px',
+    border: '1px solid #ffc107',
+    animation: 'pulse 2s ease-in-out infinite'
   },
   
   spinner: {
-    width: '16px',
-    height: '16px',
-    border: '2px solid #0f3460',
-    borderTopColor: '#e94560',
+    width: '20px',
+    height: '20px',
+    border: '3px solid #0f3460',
+    borderTopColor: '#ffc107',
     borderRadius: '50%',
     animation: 'spin 1s linear infinite'
   },
   
   runningText: {
-    fontSize: '13px',
-    color: '#ffc107'
+    fontSize: '14px',
+    color: '#ffc107',
+    fontWeight: '500'
+  },
+  
+  progressBar: {
+    width: '100%',
+    height: '4px',
+    backgroundColor: '#0f3460',
+    borderRadius: '2px',
+    marginTop: '8px',
+    overflow: 'hidden'
+  },
+  
+  progressFill: {
+    height: '100%',
+    backgroundColor: '#ffc107',
+    borderRadius: '2px',
+    transition: 'width 0.3s ease',
+    animation: 'progressPulse 1.5s ease-in-out infinite'
+  },
+  
+  // 分组样式
+  groupHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '8px 12px',
+    backgroundColor: '#0f3460',
+    borderRadius: '4px',
+    marginBottom: '8px',
+    marginTop: '16px',
+    cursor: 'pointer'
+  },
+  
+  groupIcon: {
+    fontSize: '12px',
+    color: '#888888'
+  },
+  
+  groupTitle: {
+    fontSize: '12px',
+    color: '#888888',
+    fontWeight: '500'
+  },
+  
+  groupCount: {
+    fontSize: '11px',
+    color: '#666666'
+  },
+  
+  // 复制成功提示
+  copyToast: {
+    position: 'fixed',
+    bottom: '20px',
+    right: '20px',
+    padding: '8px 16px',
+    backgroundColor: '#28a745',
+    color: '#ffffff',
+    borderRadius: '4px',
+    fontSize: '12px',
+    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.2)',
+    animation: 'fadeIn 0.2s ease-out',
+    zIndex: 1000
   }
 };
 
@@ -191,9 +455,34 @@ function MessageLog({ messages, status, onClear }) {
   // 状态
   const [filter, setFilter] = useState('all');
   const [autoScroll, setAutoScroll] = useState(true);
+  const [viewMode, setViewMode] = useState('list'); // 'list' | 'timeline'
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchExpanded, setSearchExpanded] = useState(false);
+  const [collapsedMessages, setCollapsedMessages] = useState(new Set());
+  const [selectedMessage, setSelectedMessage] = useState(null);
+  const [showDetails, setShowDetails] = useState(new Set());
+  const [copiedMessage, setCopiedMessage] = useState(null);
+  const [progress, setProgress] = useState(0);
   
   // 引用
   const listRef = useRef(null);
+  const searchRef = useRef(null);
+  
+  // 模拟进度更新（运行时）
+  useEffect(() => {
+    if (status === 'running') {
+      const interval = setInterval(() => {
+        setProgress(prev => {
+          if (prev >= 90) return prev;
+          return prev + Math.random() * 10;
+        });
+      }, 1000);
+      
+      return () => clearInterval(interval);
+    } else {
+      setProgress(0);
+    }
+  }, [status]);
   
   // 自动滚动到底部
   useEffect(() => {
@@ -202,30 +491,142 @@ function MessageLog({ messages, status, onClear }) {
     }
   }, [messages, autoScroll]);
   
-  // 过滤消息
-  const filteredMessages = React.useMemo(() => {
-    if (filter === 'all') {
-      return messages;
+  // 搜索焦点
+  useEffect(() => {
+    if (searchExpanded && searchRef.current) {
+      searchRef.current.focus();
     }
-    return messages.filter(msg => msg.type === filter);
-  }, [messages, filter]);
+  }, [searchExpanded]);
+  
+  // 过滤和搜索消息
+  const filteredMessages = useMemo(() => {
+    let result = messages;
+    
+    // 类型过滤
+    if (filter !== 'all') {
+      result = result.filter(msg => msg.type === filter);
+    }
+    
+    // 搜索过滤
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      result = result.filter(msg => 
+        (msg.content || msg.message || '').toLowerCase().includes(query) ||
+        (msg.toolName || '').toLowerCase().includes(query)
+      );
+    }
+    
+    return result;
+  }, [messages, filter, searchQuery]);
+  
+  // 按时间分组消息（时间线视图）
+  const groupedMessages = useMemo(() => {
+    if (viewMode !== 'timeline') return null;
+    
+    const groups = {};
+    filteredMessages.forEach(msg => {
+      const timestamp = msg.timestamp || Date.now();
+      const minute = Math.floor(timestamp / 60000);
+      const groupKey = new Date(minute * 60000).toLocaleTimeString();
+      
+      if (!groups[groupKey]) {
+        groups[groupKey] = [];
+      }
+      groups[groupKey].push(msg);
+    });
+    
+    return groups;
+  }, [filteredMessages, viewMode]);
   
   // 处理过滤变更
   const handleFilterChange = useCallback((newFilter) => {
     setFilter(newFilter);
   }, []);
   
+  // 处理搜索
+  const handleSearch = useCallback((e) => {
+    setSearchQuery(e.target.value);
+  }, []);
+  
+  // 处理搜索展开/收起
+  const handleSearchToggle = useCallback(() => {
+    setSearchExpanded(!searchExpanded);
+    if (searchExpanded) {
+      setSearchQuery('');
+    }
+  }, [searchExpanded]);
+  
   // 处理自动滚动变更
   const handleAutoScrollChange = useCallback(() => {
     setAutoScroll(!autoScroll);
   }, [autoScroll]);
+  
+  // 处理视图切换
+  const handleViewChange = useCallback((mode) => {
+    setViewMode(mode);
+  }, []);
   
   // 处理清空
   const handleClear = useCallback(() => {
     if (onClear) {
       onClear();
     }
+    setCollapsedMessages(new Set());
+    setShowDetails(new Set());
+    setSelectedMessage(null);
   }, [onClear]);
+  
+  // 处理消息折叠/展开
+  const handleToggleCollapse = useCallback((msgId) => {
+    setCollapsedMessages(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(msgId)) {
+        newSet.delete(msgId);
+      } else {
+        newSet.add(msgId);
+      }
+      return newSet;
+    });
+  }, []);
+  
+  // 处理消息详情显示/隐藏
+  const handleToggleDetails = useCallback((msgId) => {
+    setShowDetails(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(msgId)) {
+        newSet.delete(msgId);
+      } else {
+        newSet.add(msgId);
+      }
+      return newSet;
+    });
+  }, []);
+  
+  // 处理复制消息
+  const handleCopyMessage = useCallback(async (msg) => {
+    const content = msg.content || msg.message || '';
+    
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopiedMessage(msg.id);
+      
+      // 3秒后清除提示
+      setTimeout(() => {
+        setCopiedMessage(null);
+      }, 3000);
+    } catch (error) {
+      console.error('[MessageLog] 复制失败:', error);
+    }
+  }, []);
+  
+  // 处理消息悬停
+  const handleMouseEnter = useCallback((msgId) => {
+    setSelectedMessage(msgId);
+  }, []);
+  
+  const handleMouseLeave = useCallback(() => {
+    setSelectedMessage(null);
+  }, []);
   
   // 获取消息类型样式
   const getTypeStyle = (type) => {
@@ -244,55 +645,172 @@ function MessageLog({ messages, status, onClear }) {
         return { ...styles.messageType, ...styles.typeTool };
       case 'result':
         return { ...styles.messageType, ...styles.typeResult };
+      case 'user':
+        return { ...styles.messageType, ...styles.typeUser };
       default:
         return styles.messageType;
     }
   };
   
-  // 获取消息类型文本
-  const getTypeText = (type) => {
+  // 获取消息类型图标和文本
+  const getTypeDisplay = (type) => {
     switch (type) {
       case 'info':
-        return 'ℹ️ 信息';
+        return { icon: 'ℹ️', text: '信息' };
       case 'success':
-        return '✅ 成功';
+        return { icon: '✅', text: '成功' };
       case 'error':
-        return '❌ 错误';
+        return { icon: '❌', text: '错误' };
       case 'warning':
-        return '⚠️ 警告';
+        return { icon: '⚠️', text: '警告' };
       case 'debug':
-        return '🔍 调试';
+        return { icon: '🔍', text: '调试' };
       case 'tool':
-        return '🔧 工具';
+        return { icon: '🔧', text: '工具' };
       case 'result':
-        return '📊 结果';
+        return { icon: '📊', text: '结果' };
+      case 'user':
+        return { icon: '👤', text: '用户' };
       default:
-        return '📄 消息';
+        return { icon: '📄', text: '消息' };
     }
   };
   
   // 渲染消息项
-  const renderMessage = (msg, index) => {
+  const renderMessage = (msg, index, isTimeline = false) => {
+    const msgId = msg.id || `msg_${index}`;
+    const isCollapsed = collapsedMessages.has(msgId);
+    const showDetail = showDetails.has(msgId);
+    const isSelected = selectedMessage === msgId;
+    const typeDisplay = getTypeDisplay(msg.type);
+    
     return (
-      <div key={index} style={styles.messageItem}>
-        <div style={styles.messageHeader}>
+      <div 
+        key={msgId}
+        style={{
+          ...styles.messageItem,
+          ...(isCollapsed ? styles.messageItemCollapsed : {}),
+          ...(isSelected ? styles.messageItemHover : {}),
+          ...(isTimeline ? { marginLeft: '16px' } : {})
+        }}
+        onMouseEnter={() => handleMouseEnter(msgId)}
+        onMouseLeave={handleMouseLeave}
+      >
+        {/* 时间线指示器 */}
+        {isTimeline && (
+          <div style={{
+            ...styles.timelineDot,
+            top: '12px',
+            backgroundColor: getTypeStyle(msg.type).border?.split(' ')[1] || '#e94560'
+          }} />
+        )}
+        
+        {/* 消息头部 */}
+        <div 
+          style={styles.messageHeader}
+          onClick={() => handleToggleCollapse(msgId)}
+        >
           <span style={getTypeStyle(msg.type)}>
-            {getTypeText(msg.type)}
+            <span>{typeDisplay.icon}</span>
+            <span>{typeDisplay.text}</span>
           </span>
-          <span style={styles.messageTime}>
-            {msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString() : ''}
-          </span>
+          
+          <div style={styles.messageTime}>
+            <span>
+              {msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString() : ''}
+            </span>
+            <span style={{ fontSize: '10px', cursor: 'pointer' }}>
+              {isCollapsed ? '▶ 展开' : '▼ 折叠'}
+            </span>
+          </div>
         </div>
         
-        <div style={styles.messageContent}>
+        {/* 消息内容 */}
+        <div style={{
+          ...styles.messageContent,
+          ...(isCollapsed ? styles.messageContentCollapsed : {})
+        }}>
           {msg.content || msg.message || ''}
         </div>
         
         {/* 元数据 */}
-        {msg.toolName && (
+        {!isCollapsed && msg.toolName && (
           <div style={styles.messageMeta}>
-            <span>工具: {msg.toolName}</span>
-            {msg.duration && <span>耗时: {msg.duration}ms</span>}
+            <span>🔧 工具: {msg.toolName}</span>
+            {msg.args && <span>📝 参数: {JSON.stringify(msg.args).slice(0, 50)}...</span>}
+            {msg.duration && <span>⏱️ 耗时: {msg.duration}ms</span>}
+          </div>
+        )}
+        
+        {/* 操作按钮 */}
+        <div style={{
+          ...styles.messageActions,
+          ...(isSelected ? styles.messageActionsVisible : {})
+        }}>
+          <button
+            style={styles.actionButton}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleCopyMessage(msg);
+            }}
+            title="复制内容"
+          >
+            📋 复制
+          </button>
+          
+          <button
+            style={styles.actionButton}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleToggleDetails(msgId);
+            }}
+            title="查看详情"
+          >
+            {showDetail ? '📖 隐藏详情' : '📖 详情'}
+          </button>
+          
+          <button
+            style={styles.actionButton}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleToggleCollapse(msgId);
+            }}
+            title="折叠/展开"
+          >
+            {isCollapsed ? '▶' : '▼'}
+          </button>
+        </div>
+        
+        {/* 详情面板 */}
+        {showDetail && !isCollapsed && (
+          <div style={styles.detailPanel}>
+            <div style={styles.detailTitle}>消息详情</div>
+            <div style={styles.detailRow}>
+              <span>消息ID:</span>
+              <span style={styles.detailValue}>{msgId}</span>
+            </div>
+            <div style={styles.detailRow}>
+              <span>类型:</span>
+              <span style={styles.detailValue}>{msg.type}</span>
+            </div>
+            <div style={styles.detailRow}>
+              <span>时间:</span>
+              <span style={styles.detailValue}>
+                {msg.timestamp ? new Date(msg.timestamp).toISOString() : 'N/A'}
+              </span>
+            </div>
+            {msg.toolName && (
+              <div style={styles.detailRow}>
+                <span>工具名称:</span>
+                <span style={styles.detailValue}>{msg.toolName}</span>
+              </div>
+            )}
+            {msg.duration && (
+              <div style={styles.detailRow}>
+                <span>执行耗时:</span>
+                <span style={styles.detailValue}>{msg.duration}ms</span>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -306,12 +824,27 @@ function MessageLog({ messages, status, onClear }) {
     return (
       <div style={styles.runningIndicator}>
         <div style={styles.spinner}></div>
-        <span style={styles.runningText}>
+        <div style={styles.runningText}>
           Agent 正在执行...
-        </span>
+        </div>
+        <div style={styles.progressBar}>
+          <div style={{
+            ...styles.progressFill,
+            width: `${progress}%`
+          }} />
+        </div>
       </div>
     );
   };
+  
+  // 渲染分组标题
+  const renderGroupHeader = (title, count) => (
+    <div style={styles.groupHeader}>
+      <span style={styles.groupIcon}>📁</span>
+      <span style={styles.groupTitle}>{title}</span>
+      <span style={styles.groupCount}>{count} 条消息</span>
+    </div>
+  );
   
   // 渲染空状态
   if (messages.length === 0) {
@@ -319,9 +852,47 @@ function MessageLog({ messages, status, onClear }) {
       <div style={styles.container}>
         <div style={styles.emptyContainer}>
           <div style={styles.emptyIcon}>💬</div>
-          <div style={styles.emptyText}>暂无消息</div>
+          <div style={styles.emptyText}>开始与 AI Agent 对话</div>
           <div style={styles.emptyHint}>
-            输入任务并点击执行按钮开始
+            在左侧输入您的任务描述，点击执行按钮开始。
+            Agent 将自动分析任务并调用相应工具完成。
+          </div>
+          
+          {/* 快捷提示 */}
+          <div style={{
+            marginTop: '24px',
+            display: 'flex',
+            gap: '8px',
+            flexWrap: 'wrap',
+            justifyContent: 'center'
+          }}>
+            <span style={{
+              padding: '4px 12px',
+              backgroundColor: '#16213e',
+              borderRadius: '4px',
+              fontSize: '12px',
+              color: '#888888'
+            }}>
+              💡 输入任务描述
+            </span>
+            <span style={{
+              padding: '4px 12px',
+              backgroundColor: '#16213e',
+              borderRadius: '4px',
+              fontSize: '12px',
+              color: '#888888'
+            }}>
+              ⚡ 点击执行
+            </span>
+            <span style={{
+              padding: '4px 12px',
+              backgroundColor: '#16213e',
+              borderRadius: '4px',
+              fontSize: '12px',
+              color: '#888888'
+            }}>
+              📊 查看结果
+            </span>
           </div>
         </div>
       </div>
@@ -333,10 +904,68 @@ function MessageLog({ messages, status, onClear }) {
       {/* 头部 */}
       <div style={styles.header}>
         <div style={styles.title}>
-          📋 消息日志 ({filteredMessages.length}/{messages.length})
+          <span>📋</span>
+          <span>消息日志</span>
+          <span style={{
+            fontSize: '12px',
+            color: '#888888',
+            marginLeft: '4px'
+          }}>
+            ({filteredMessages.length}/{messages.length})
+          </span>
         </div>
         
         <div style={styles.headerButtons}>
+          {/* 搜索 */}
+          <div style={styles.searchContainer}>
+            {searchExpanded && (
+              <input
+                ref={searchRef}
+                style={{
+                  ...styles.searchInput,
+                  ...styles.searchInputExpanded
+                }}
+                value={searchQuery}
+                onChange={handleSearch}
+                placeholder="搜索消息..."
+                onBlur={() => {
+                  if (!searchQuery) setSearchExpanded(false);
+                }}
+              />
+            )}
+            <button
+              style={styles.button}
+              onClick={handleSearchToggle}
+              title="搜索消息"
+            >
+              🔍
+            </button>
+          </div>
+          
+          {/* 视图切换 */}
+          <div style={styles.viewToggle}>
+            <button
+              style={{
+                ...styles.viewButton,
+                ...(viewMode === 'list' ? styles.viewButtonActive : {})
+              }}
+              onClick={() => handleViewChange('list')}
+              title="列表视图"
+            >
+              📋
+            </button>
+            <button
+              style={{
+                ...styles.viewButton,
+                ...(viewMode === 'timeline' ? styles.viewButtonActive : {})
+              }}
+              onClick={() => handleViewChange('timeline')}
+              title="时间线视图"
+            >
+              📅
+            </button>
+          </div>
+          
           {/* 过滤按钮 */}
           <select
             style={{
@@ -348,18 +977,19 @@ function MessageLog({ messages, status, onClear }) {
             onChange={(e) => handleFilterChange(e.target.value)}
           >
             <option value="all">全部</option>
-            <option value="info">信息</option>
-            <option value="success">成功</option>
-            <option value="error">错误</option>
-            <option value="tool">工具</option>
-            <option value="result">结果</option>
+            <option value="user">👤 用户</option>
+            <option value="info">ℹ️ 信息</option>
+            <option value="success">✅ 成功</option>
+            <option value="error">❌ 错误</option>
+            <option value="tool">🔧 工具</option>
+            <option value="result">📊 结果</option>
           </select>
           
           {/* 自动滚动按钮 */}
           <button
             style={{
               ...styles.button,
-              backgroundColor: autoScroll ? '#e94560' : '#0f3460'
+              ...(autoScroll ? styles.buttonActive : {})
             }}
             onClick={handleAutoScrollChange}
             title={autoScroll ? '停止自动滚动' : '启用自动滚动'}
@@ -383,15 +1013,42 @@ function MessageLog({ messages, status, onClear }) {
         {/* 运行指示器 */}
         {renderRunningIndicator()}
         
-        {/* 消息项 */}
-        {filteredMessages.map((msg, index) => renderMessage(msg, index))}
+        {/* 时间线视图 */}
+        {viewMode === 'timeline' && groupedMessages && (
+          <div style={styles.timelineView}>
+            <div style={styles.timelineLine} />
+            {Object.entries(groupedMessages).map(([groupTitle, msgs]) => (
+              <React.Fragment key={groupTitle}>
+                {renderGroupHeader(groupTitle, msgs.length)}
+                {msgs.map((msg, index) => renderMessage(msg, index, true))}
+              </React.Fragment>
+            ))}
+          </div>
+        )}
         
-        {filteredMessages.length === 0 && (
+        {/* 列表视图 */}
+        {viewMode === 'list' && (
+          filteredMessages.map((msg, index) => renderMessage(msg, index))
+        )}
+        
+        {/* 无匹配消息 */}
+        {filteredMessages.length === 0 && messages.length > 0 && (
           <div style={styles.emptyContainer}>
-            <div style={styles.emptyText}>没有匹配的消息</div>
+            <div style={styles.emptyIcon}>🔍</div>
+            <div style={styles.emptyText}>没有找到匹配的消息</div>
+            <div style={styles.emptyHint}>
+              尝试更改过滤条件或搜索关键词
+            </div>
           </div>
         )}
       </div>
+      
+      {/* 复制成功提示 */}
+      {copiedMessage && (
+        <div style={styles.copyToast}>
+          ✅ 已复制到剪贴板
+        </div>
+      )}
       
       {/* CSS 动画 */}
       <style>
@@ -399,6 +1056,21 @@ function MessageLog({ messages, status, onClear }) {
           @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
+          }
+          
+          @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.8; }
+          }
+          
+          @keyframes progressPulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+          }
+          
+          @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
           }
         `}
       </style>
