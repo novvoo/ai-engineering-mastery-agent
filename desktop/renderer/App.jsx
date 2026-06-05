@@ -225,10 +225,21 @@ const styles = {
     color: 'var(--text-dark)',
     fontStyle: 'italic'
   },
+  button: {
+    height: '32px',
+    padding: '0 10px',
+    borderRadius: '6px',
+    border: '1px solid var(--border-subtle)',
+    backgroundColor: 'var(--surface-hover)',
+    color: 'var(--text-color)',
+    cursor: 'pointer',
+    fontSize: '13px'
+  },
   
   // ================== 聊天区域 ==================
   chatArea: {
     flex: 1,
+    minHeight: 0,
     display: 'flex',
     flexDirection: 'column',
     overflow: 'hidden',
@@ -279,7 +290,8 @@ const styles = {
   // ================== 消息列表 ==================
   messageContainer: {
     flex: 1,
-    overflow: 'hidden',
+    minHeight: 0,
+    overflowY: 'auto',
     padding: '0 20px'
   },
   
@@ -293,7 +305,9 @@ const styles = {
   inputWrapper: {
     display: 'flex',
     gap: '10px',
-    alignItems: 'flex-end'
+    alignItems: 'flex-end',
+    position: 'relative',
+    zIndex: 50
   },
   
   inputTextarea: {
@@ -666,6 +680,11 @@ function App() {
   const [chatInput, setChatInput] = useState('');
   const [inputFocused, setInputFocused] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [agentOptions, setAgentOptions] = useState({
+    debug: false,
+    maxIterations: 180,
+    autoSave: true
+  });
   
   // 摘要面板数据 (Codex Style)
   const [summaryData, setSummaryData] = useState({
@@ -679,6 +698,11 @@ function App() {
       '修复 bug #123'
     ]
   });
+
+  // RAG (Retrieval-Augmented Generation) 面板状态
+  const [ragDocs, setRagDocs] = useState([]); // { name, path }
+  const [ragStatus, setRagStatus] = useState('idle'); // idle | indexing | ready | error
+  const [ragIndexProgress, setRagIndexProgress] = useState(0);
   
   // 使用自定义 Hooks
   const runtime = useRuntime();
@@ -930,12 +954,12 @@ function App() {
     }
     
     try {
-      await runtime.processInput(chatInput.trim());
+      await runtime.processInput(chatInput.trim(), agentOptions);
       setChatInput('');
     } catch (error) {
       console.error('[App] 发送消息失败:', error);
     }
-  }, [chatInput, runtime]);
+  }, [chatInput, runtime, agentOptions]);
   
   // 命令提示相关
   const handleChatInputChange = useCallback((value) => {
@@ -946,6 +970,12 @@ function App() {
   const handleCommandSelect = useCallback((command) => {
     setChatInput(command);
     setShowSuggestions(false);
+    chatInputRef.current?.focus();
+  }, []);
+
+  const handleInsertText = useCallback((text) => {
+    setChatInput(text);
+    setShowSuggestions(text.trimStart().startsWith('/'));
     chatInputRef.current?.focus();
   }, []);
   
@@ -974,6 +1004,9 @@ function App() {
             runtime={runtime}
             workingDirectory={workingDirectory}
             onWorkingDirectoryChange={handleWorkingDirectoryChange}
+            agentOptions={agentOptions}
+            onOptionsChange={setAgentOptions}
+            onInsertText={handleInsertText}
           />
         );
       
@@ -994,98 +1027,101 @@ function App() {
   // ================== 渲染摘要面板 (Codex Style) ==================
   const renderSummaryPanel = () => {
     if (!summaryPanelVisible) return null;
-    
+
+    // RAG 初始化与文档管理面板
     return (
       <aside style={styles.summaryPanel}>
-        {/* 当前计划 */}
         <div style={styles.summarySection}>
-          <div style={styles.summarySectionTitle}>
-            📋 当前计划
+          <div style={styles.summarySectionTitle}>⚙️ RAG 初始化</div>
+          <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '8px' }}>
+            使用检索增强生成（RAG）之前，请上传/选择要索引的文档，并执行索引初始化。
           </div>
-          {summaryData.plan.length > 0 ? (
-            summaryData.plan.map((item, i) => (
-              <div key={i} style={styles.summaryItem}>
-                <span style={styles.summaryItemIcon}>▶️</span>
-                <span style={styles.summaryItemText}>{item}</span>
-              </div>
-            ))
-          ) : (
-            <div style={{...styles.summaryItem, ...styles.summaryItemEmpty}}>
-              暂无计划
-            </div>
-          )}
+
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+            <button
+              style={styles.button}
+              onClick={async () => {
+                try {
+                  if (!window.electronAPI) return;
+                  const result = await window.electronAPI.openFileDialog({ properties: ['openFile', 'multiSelections'] });
+                  const paths = result?.filePaths || result || [];
+                  const files = (paths || []).map(p => ({ name: p.split('/').pop(), path: p }));
+                  setRagDocs(prev => [...prev, ...files]);
+                } catch (err) {
+                  console.error('选择文件失败', err);
+                }
+              }}
+            >上传文档</button>
+
+            <button
+              style={styles.button}
+              onClick={async () => {
+                if (ragDocs.length === 0) return;
+                setRagStatus('indexing');
+                setRagIndexProgress(0);
+                try {
+                  const paths = ragDocs.map(d => d.path);
+                  // 使用 agent:processInput 传递 init_rag 指令到主进程处理索引（主进程需支持）
+                  if (window.electronAPI) {
+                    await window.electronAPI.processInput('init_rag', { docs: paths });
+                  }
+                  setRagStatus('ready');
+                  setRagIndexProgress(100);
+                } catch (err) {
+                  console.error('RAG 初始化失败', err);
+                  setRagStatus('error');
+                }
+              }}
+            >初始化索引</button>
+          </div>
+
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <div style={{ fontSize: '12px' }}>状态:</div>
+            <div style={{ fontSize: '12px', fontWeight: 600 }}>{ragStatus}</div>
+          </div>
         </div>
-        
-        {/* 数据来源 */}
+
         <div style={styles.summarySection}>
-          <div style={styles.summarySectionTitle}>
-            📚 数据来源
-          </div>
-          {summaryData.sources.length > 0 ? (
-            summaryData.sources.map((source, i) => (
-              <div key={i} style={styles.summaryItem}>
-                <span style={styles.summaryItemIcon}>
-                  {source.type === 'file' ? '📄' : 
-                   source.type === 'web' ? '🌐' : 
-                   source.type === 'memory' ? '🧠' : '📌'}
-                </span>
-                <span style={styles.summaryItemText}>{source.name}</span>
-              </div>
-            ))
+          <div style={styles.summarySectionTitle}>📁 已加载文档</div>
+          {ragDocs.length === 0 ? (
+            <div style={{ ...styles.summaryItem, ...styles.summaryItemEmpty }}>尚未上传文档</div>
           ) : (
-            <div style={{...styles.summaryItem, ...styles.summaryItemEmpty}}>
-              暂无来源
-            </div>
-          )}
-        </div>
-        
-        {/* 产出 */}
-        <div style={styles.summarySection}>
-          <div style={styles.summarySectionTitle}>
-            📤 产出
-          </div>
-          {summaryData.outputs.length > 0 ? (
-            summaryData.outputs.map((output, i) => (
-              <div key={i} style={styles.summaryItem}>
-                <span style={styles.summaryItemIcon}>✅</span>
-                <span style={styles.summaryItemText}>{output}</span>
-              </div>
-            ))
-          ) : (
-            <div style={{...styles.summaryItem, ...styles.summaryItemEmpty}}>
-              暂无产出
-            </div>
-          )}
-        </div>
-        
-        {/* 快捷技能包 */}
-        <div style={styles.summarySection}>
-          <div style={styles.summarySectionTitle}>
-            🎯 技能包
-          </div>
-          {Object.entries(SKILL_BUNDLES).map(([category, skills]) => (
-            <div key={category} style={{ marginBottom: '10px' }}>
-              <div style={{ fontSize: '11px', color: 'var(--text-dark)', marginBottom: '6px' }}>
-                {category}
-              </div>
-              {skills.slice(0, 3).map((skill) => (
-                <div 
-                  key={skill.name} 
-                  style={{ 
-                    ...styles.summaryItem,
-                    cursor: 'pointer'
-                  }}
-                  onClick={() => {
-                    setChatInput(`/${skill.name} `);
-                    chatInputRef.current?.focus();
-                  }}
-                >
-                  <span style={styles.summaryItemIcon}>{skill.icon}</span>
-                  <span style={styles.summaryItemText}>{skill.desc}</span>
+            ragDocs.map((doc, i) => (
+              <div key={i} style={{ ...styles.summaryItem, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div style={styles.summaryItemIcon}>📄</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: '13px', color: 'var(--text-color)' }}>{doc.name}</div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{doc.path}</div>
                 </div>
-              ))}
-            </div>
-          ))}
+                <button
+                  style={styles.button}
+                  onClick={() => setRagDocs(prev => prev.filter((_, idx) => idx !== i))}
+                >移除</button>
+              </div>
+            ))
+          )}
+        </div>
+
+        <div style={styles.summarySection}>
+          <div style={styles.summarySectionTitle}>📌 操作</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <button
+              style={styles.button}
+              onClick={() => {
+                // 用文档搜索命令初始化提示
+                setChatInput('/doc search ');
+                chatInputRef.current?.focus();
+              }}
+            >快速创建文档搜索命令</button>
+            <button
+              style={styles.button}
+              onClick={() => {
+                setRagDocs([]);
+                setRagStatus('idle');
+                setRagIndexProgress(0);
+              }}
+            >重置 RAG</button>
+          </div>
         </div>
       </aside>
     );
@@ -1313,6 +1349,7 @@ function App() {
               {showSuggestions && (
                 <CommandSuggestions
                   input={chatInput}
+                  tools={runtime.tools}
                   onSelect={handleCommandSelect}
                   onClose={handleSuggestionsClose}
                 />

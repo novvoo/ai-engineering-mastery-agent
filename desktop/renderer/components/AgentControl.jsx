@@ -272,49 +272,7 @@ const styles = {
     cursor: 'not-allowed'
   },
   
-  // 快捷命令面板
-  quickCommandsPanel: {
-    backgroundColor: '#11161e',
-    border: '1px solid var(--border-subtle)',
-    borderRadius: '8px',
-    padding: '10px',
-    marginBottom: '10px'
-  },
-  
-  quickCommandsHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: '8px'
-  },
-  
-  quickCommandsTitle: {
-    fontSize: '12px',
-    color: 'var(--text-muted)',
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: '0'
-  },
-  
-  quickCommandsList: {
-    display: 'flex',
-    gap: '6px',
-    flexWrap: 'wrap'
-  },
-  
-  quickCommandButton: {
-    padding: '5px 8px',
-    borderRadius: '999px',
-    border: '1px solid var(--border-subtle)',
-    backgroundColor: 'var(--surface-color)',
-    color: 'var(--text-muted)',
-    cursor: 'pointer',
-    fontSize: '11px',
-    transition: 'all 0.15s',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '4px'
-  },
+
   
   // 历史记录
   historySection: {
@@ -488,18 +446,6 @@ const styles = {
   }
 };
 
-// 快捷命令定义
-const QUICK_COMMANDS = [
-  { icon: 'R', label: '读取文件', template: '读取文件 {path}' },
-  { icon: 'W', label: '写入文件', template: '写入文件 {path} 内容: {content}' },
-  { icon: '/', label: '搜索代码', template: '在代码中搜索 {pattern}' },
-  { icon: 'F', label: '修复bug', template: '修复bug: {description}' },
-  { icon: 'O', label: '优化代码', template: '优化代码: {description}' },
-  { icon: 'A', label: '分析项目', template: '分析项目结构和依赖' },
-  { icon: 'T', label: '运行测试', template: '运行测试并分析结果' },
-  { icon: 'D', label: '生成文档', template: '为代码生成文档' }
-];
-
 // 输入模板定义
 const INPUT_TEMPLATES = [
   {
@@ -540,27 +486,16 @@ const INPUT_TEMPLATES = [
  * @param {Object} props.runtime - Runtime Hook 返回的对象
  * @param {string} props.workingDirectory - 当前工作目录
  * @param {Function} props.onWorkingDirectoryChange - 工作目录变更回调
+ * @param {Object} props.agentOptions - 当前执行选项
+ * @param {Function} props.onOptionsChange - 执行选项变更回调
+ * @param {Function} props.onInsertText - 将文本插入到主消息输入框
  */
-function AgentControl({ runtime, workingDirectory, onWorkingDirectoryChange }) {
+function AgentControl({ runtime, workingDirectory, onWorkingDirectoryChange, agentOptions, onOptionsChange, onInsertText }) {
   // 状态
-  const [input, setInput] = useState('');
   const [history, setHistory] = useState([]);
   const [historySearch, setHistorySearch] = useState('');
-  const [options, setOptions] = useState({
-    debug: false,
-    maxIterations: 180,
-    autoSave: true
-  });
   const [showTemplates, setShowTemplates] = useState(false);
-  const [showQuickCommands, setShowQuickCommands] = useState(true);
-  const [suggestions, setSuggestions] = useState([]);
-  const [activeSuggestion, setActiveSuggestion] = useState(-1);
-  const [isFocused, setIsFocused] = useState(false);
   const [hoveredHistoryItem, setHoveredHistoryItem] = useState(null);
-  
-  // 引用
-  const textareaRef = useRef(null);
-  const suggestionsRef = useRef(null);
   
   // 加载历史记录
   useEffect(() => {
@@ -574,223 +509,39 @@ function AgentControl({ runtime, workingDirectory, onWorkingDirectoryChange }) {
     }
   }, []);
   
-  // 智能提示
-  const generateSuggestions = useCallback((text) => {
-    if (!text) {
-      setSuggestions([]);
-      return;
-    }
-
-    const trimmed = text.trimStart();
-    // If user is typing a slash command, fetch suggestions from main process
-    if (trimmed.startsWith('/')) {
-      (async () => {
-        try {
-          if (window?.electronAPI?.getSlashSuggestions) {
-            const commands = await window.electronAPI.getSlashSuggestions();
-            const inputPrefix = trimmed;
-            const hasSpace = /\s/.test(inputPrefix);
-            const filtered = (commands || []).filter(cmd => {
-              if (!cmd || !cmd.name) return false;
-              if (!cmd.name.startsWith(inputPrefix)) return false;
-              return hasSpace ? cmd.source === 'builtin_subcommand' : !cmd.name.includes(' ');
-            }).slice(0, 8);
-
-            const mapped = filtered.map(cmd => ({
-              type: 'slash',
-              icon: '/',
-              text: cmd.name,
-              description: cmd.description,
-              fullText: `${cmd.name} `
-            }));
-
-            setSuggestions(mapped);
-            setActiveSuggestion(-1);
-          } else {
-            setSuggestions([]);
-          }
-        } catch (err) {
-          console.error('[AgentControl] getSlashSuggestions failed', err);
-          setSuggestions([]);
-        }
-      })();
-      return;
-    }
-
-    const newSuggestions = [];
-
-    // 基于历史记录的提示
-    const historyMatches = history
-      .filter(item => item.input.toLowerCase().includes(text.toLowerCase()))
-      .slice(0, 3)
-      .map(item => ({
-        type: 'history',
-        icon: 'H',
-        text: item.input.slice(0, 50) + (item.input.length > 50 ? '...' : ''),
-        fullText: item.input
-      }));
-
-    newSuggestions.push(...historyMatches);
-
-    // 基于快捷命令的提示
-    const commandMatches = QUICK_COMMANDS
-      .filter(cmd => cmd.label.toLowerCase().includes(text.toLowerCase()) || 
-                     cmd.template.toLowerCase().includes(text.toLowerCase()))
-      .slice(0, 2)
-      .map(cmd => ({
-        type: 'command',
-        icon: cmd.icon,
-        text: cmd.label,
-        fullText: cmd.template
-      }));
-
-    newSuggestions.push(...commandMatches);
-
-    setSuggestions(newSuggestions);
-    setActiveSuggestion(-1);
-  }, [history]);
-  
-  // 处理输入变更
-  const handleInputChange = useCallback((e) => {
-    const value = e.target.value;
-    setInput(value);
-    generateSuggestions(value);
-  }, [generateSuggestions]);
-  
-  // 处理键盘事件
-  const handleKeyDown = useCallback((e) => {
-    // 处理智能提示导航
-    if (suggestions.length > 0) {
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        setActiveSuggestion(prev => 
-          prev < suggestions.length - 1 ? prev + 1 : prev
-        );
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        setActiveSuggestion(prev => prev > 0 ? prev - 1 : prev);
-      } else if (e.key === 'Tab' || (e.key === 'Enter' && activeSuggestion >= 0)) {
-        e.preventDefault();
-        if (activeSuggestion >= 0) {
-          setInput(suggestions[activeSuggestion].fullText);
-          setSuggestions([]);
-        }
-      } else if (e.key === 'Escape') {
-        setSuggestions([]);
-      }
-    }
-    
-    // Ctrl+Enter 执行
-    if (e.key === 'Enter' && e.ctrlKey) {
-      e.preventDefault();
-      handleExecute();
-    }
-  }, [suggestions, activeSuggestion]);
-  
-  // 处理焦点
-  const handleFocus = useCallback(() => {
-    setIsFocused(true);
-  }, []);
-  
-  const handleBlur = useCallback(() => {
-    // 延迟关闭提示，允许点击提示项
-    setTimeout(() => {
-      setIsFocused(false);
-      setSuggestions([]);
-    }, 200);
-  }, []);
-  
-  // 处理建议选择
-  const handleSuggestionClick = useCallback((suggestion) => {
-    setInput(suggestion.fullText);
-    setSuggestions([]);
-    if (textareaRef.current) {
-      textareaRef.current.focus();
-    }
-  }, []);
-  
-  // 处理执行
-  const handleExecute = useCallback(async () => {
-    if (!input.trim()) {
-      return;
-    }
-    
-    // 保存到历史记录
-    const newHistory = [
-      { input: input.trim(), timestamp: Date.now() },
-      ...history.slice(0, 19) // 最多保存 20 条
-    ];
-    setHistory(newHistory);
-    
-    try {
-      localStorage.setItem('agentHistory', JSON.stringify(newHistory));
-    } catch (error) {
-      console.error('[AgentControl] 保存历史记录失败:', error);
-    }
-    
-    // 执行
-    try {
-      await runtime.processInput(input.trim(), options);
-      setInput('');
-    } catch (error) {
-      console.error('[AgentControl] 执行失败:', error);
-    }
-  }, [input, history, runtime, options]);
-  
-  // 处理停止
-  const handleStop = useCallback(async () => {
-    try {
-      await runtime.stop();
-    } catch (error) {
-      console.error('[AgentControl] 停止失败:', error);
-    }
-  }, [runtime]);
-  
-  // 处理历史记录点击
   const handleHistoryClick = useCallback((item) => {
-    setInput(item.input);
-    if (textareaRef.current) {
-      textareaRef.current.focus();
+    if (onInsertText) {
+      onInsertText(item.input);
     }
-  }, []);
+  }, [onInsertText]);
   
-  // 处理历史记录删除
   const handleHistoryDelete = useCallback((index) => {
     const newHistory = history.filter((_, i) => i !== index);
     setHistory(newHistory);
     localStorage.setItem('agentHistory', JSON.stringify(newHistory));
   }, [history]);
   
-  // 处理快捷命令点击
   const handleQuickCommandClick = useCallback((cmd) => {
-    setInput(cmd.template);
-    if (textareaRef.current) {
-      textareaRef.current.focus();
+    if (onInsertText) {
+      onInsertText(cmd.template);
     }
-  }, []);
+  }, [onInsertText]);
   
-  // 处理模板点击
   const handleTemplateClick = useCallback((template) => {
-    setInput(template.template);
-    setShowTemplates(false);
-    if (textareaRef.current) {
-      textareaRef.current.focus();
+    if (onInsertText) {
+      onInsertText(template.template);
     }
-  }, []);
+    setShowTemplates(false);
+  }, [onInsertText]);
   
-  // 处理选项变更
   const handleOptionChange = useCallback((key, value) => {
-    setOptions(prev => ({
-      ...prev,
-      [key]: value
-    }));
-  }, []);
-  
-  // 清空输入
-  const handleClearInput = useCallback(() => {
-    setInput('');
-    setSuggestions([]);
-  }, []);
+    if (onOptionsChange) {
+      onOptionsChange(prev => ({
+        ...prev,
+        [key]: value
+      }));
+    }
+  }, [onOptionsChange]);
   
   // 过滤历史记录
   const filteredHistory = useMemo(() => {
@@ -832,16 +583,6 @@ function AgentControl({ runtime, workingDirectory, onWorkingDirectoryChange }) {
     }
   };
   
-  // 是否可以执行
-  const canExecute = input.trim().length > 0 && runtime.status !== 'running';
-  
-  // 是否可以停止
-  const canStop = runtime.status === 'running';
-  
-  // 字符计数
-  const charCount = input.length;
-  const charCountStyle = charCount > 500 ? styles.charCountWarning : {};
-  
   return (
     <div style={styles.container}>
       {/* 状态显示 */}
@@ -880,46 +621,7 @@ function AgentControl({ runtime, workingDirectory, onWorkingDirectoryChange }) {
         </div>
       </div>
       
-      {/* 快捷命令 */}
-      {showQuickCommands && (
-        <div style={styles.section}>
-          <div style={styles.quickCommandsPanel}>
-            <div style={styles.quickCommandsHeader}>
-              <span style={styles.quickCommandsTitle}>
-                快捷命令
-              </span>
-              <button
-                style={styles.clearButton}
-                onClick={() => setShowQuickCommands(false)}
-                title="隐藏快捷命令"
-              >
-                ×
-              </button>
-            </div>
-            <div style={styles.quickCommandsList}>
-              {QUICK_COMMANDS.map((cmd, index) => (
-                <button
-                  key={index}
-                  style={styles.quickCommandButton}
-                  onClick={() => handleQuickCommandClick(cmd)}
-                  title={cmd.template}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = 'var(--surface-hover)';
-                    e.currentTarget.style.color = 'var(--text-color)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = 'var(--surface-color)';
-                    e.currentTarget.style.color = 'var(--text-muted)';
-                  }}
-                >
-                  <span>{cmd.icon}</span>
-                  <span>{cmd.label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
+      {/* 快捷命令面板已移除 */}
       
       {/* 输入区域 */}
       <div style={styles.section}>
@@ -960,111 +662,6 @@ function AgentControl({ runtime, workingDirectory, onWorkingDirectoryChange }) {
           </div>
         )}
         
-        <div style={styles.inputContainer}>
-          {/* 文本输入 */}
-          <div style={{
-            ...styles.textareaWrapper,
-            ...(isFocused ? styles.textareaWrapperFocused : {})
-          }}>
-            {/* 智能提示 */}
-            {suggestions.length > 0 && (
-              <div style={styles.suggestionsContainer} ref={suggestionsRef}>
-                {suggestions.map((suggestion, index) => (
-                  <div
-                    key={index}
-                    style={{
-                      ...styles.suggestionItem,
-                      ...(index === activeSuggestion ? styles.suggestionItemActive : {})
-                    }}
-                    onClick={() => handleSuggestionClick(suggestion)}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.backgroundColor = 'var(--border-color)';
-                      setActiveSuggestion(index);
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = index === activeSuggestion ? 'var(--border-color)' : 'transparent';
-                    }}
-                  >
-                    <span style={styles.suggestionIcon}>{suggestion.icon}</span>
-                    <span style={styles.suggestionText}>{suggestion.text}</span>
-                    <span style={styles.suggestionType}>{suggestion.type}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-            
-            <textarea
-              ref={textareaRef}
-              style={styles.textarea}
-              value={input}
-              onChange={handleInputChange}
-              onKeyDown={handleKeyDown}
-              onFocus={handleFocus}
-              onBlur={handleBlur}
-              placeholder="输入您的任务描述... (Ctrl+Enter 执行)"
-              disabled={runtime.status === 'running'}
-            />
-            
-            {/* 控制按钮 */}
-            <div style={styles.textareaControls}>
-              <span style={{ ...styles.charCount, ...charCountStyle }}>
-                {charCount}
-              </span>
-              {input && (
-                <button
-                  style={styles.clearButton}
-                  onClick={handleClearInput}
-                  title="清空输入"
-                  onMouseEnter={(e) => e.currentTarget.style.color = 'var(--primary-color)'}
-                  onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-muted)'}
-                >
-                  ×
-                </button>
-              )}
-            </div>
-          </div>
-          
-          {/* 执行按钮 */}
-          <div style={styles.buttonGroup}>
-            <button
-              style={{
-                ...styles.button,
-                ...(canExecute ? styles.primaryButton : styles.disabledButton)
-              }}
-              onClick={handleExecute}
-              disabled={!canExecute}
-              onMouseEnter={(e) => {
-                if (canExecute) e.currentTarget.style.backgroundColor = 'var(--primary-dark)';
-              }}
-              onMouseLeave={(e) => {
-                if (canExecute) e.currentTarget.style.backgroundColor = 'var(--primary-color)';
-              }}
-            >
-              {runtime.status === 'running' ? '执行中...' : '执行'}
-            </button>
-            
-            <button
-              style={{
-                ...styles.button,
-                ...(canStop ? {} : styles.disabledButton)
-              }}
-              onClick={handleStop}
-              disabled={!canStop}
-            >
-              停止
-            </button>
-            
-            {!showQuickCommands && (
-              <button
-                style={styles.button}
-                onClick={() => setShowQuickCommands(true)}
-                title="显示快捷命令"
-              >
-                命令
-              </button>
-            )}
-          </div>
-        </div>
       </div>
       
       {/* 执行选项 */}
@@ -1078,12 +675,12 @@ function AgentControl({ runtime, workingDirectory, onWorkingDirectoryChange }) {
             <input
               type="checkbox"
               style={styles.checkbox}
-              checked={options.debug}
+              checked={agentOptions.debug}
               onChange={(e) => handleOptionChange('debug', e.target.checked)}
             />
             <label 
               style={styles.label}
-              onClick={() => handleOptionChange('debug', !options.debug)}
+              onClick={() => handleOptionChange('debug', !agentOptions.debug)}
             >
               调试模式
             </label>
@@ -1093,12 +690,12 @@ function AgentControl({ runtime, workingDirectory, onWorkingDirectoryChange }) {
             <input
               type="checkbox"
               style={styles.checkbox}
-              checked={options.autoSave}
+              checked={agentOptions.autoSave}
               onChange={(e) => handleOptionChange('autoSave', e.target.checked)}
             />
             <label 
               style={styles.label}
-              onClick={() => handleOptionChange('autoSave', !options.autoSave)}
+              onClick={() => handleOptionChange('autoSave', !agentOptions.autoSave)}
             >
               自动保存结果
             </label>
@@ -1111,7 +708,7 @@ function AgentControl({ runtime, workingDirectory, onWorkingDirectoryChange }) {
             <input
               type="number"
               style={styles.numberInput}
-              value={options.maxIterations}
+              value={agentOptions.maxIterations}
               onChange={(e) => handleOptionChange('maxIterations', parseInt(e.target.value) || 180)}
               min={1}
               max={500}

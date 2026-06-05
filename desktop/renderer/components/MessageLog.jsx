@@ -19,6 +19,7 @@ const styles = {
     flex: 1,
     display: 'flex',
     flexDirection: 'column',
+    height: '100%',
     overflow: 'hidden',
     backgroundColor: '#11161e',
     borderRadius: '8px',
@@ -226,6 +227,12 @@ const styles = {
     backgroundColor: 'var(--primary-soft)',
     color: 'var(--primary-color)',
     border: '1px solid var(--primary-color)'
+  },
+  
+  typeEvent: {
+    backgroundColor: 'rgba(255, 193, 7, 0.14)',
+    color: 'var(--warning-color)',
+    border: '1px solid rgba(255, 193, 7, 0.5)'
   },
   
   typeResult: {
@@ -512,7 +519,12 @@ function MessageLog({ messages, status, onClear }) {
   
   // 自动滚动到底部
   useEffect(() => {
-    if (autoScroll && listRef.current) {
+    if (!listRef.current) return;
+
+    const lastMessage = messages[messages.length - 1];
+    const shouldScroll = autoScroll || lastMessage?.type === 'event';
+
+    if (shouldScroll) {
       listRef.current.scrollTop = listRef.current.scrollHeight;
     }
   }, [messages, autoScroll]);
@@ -669,6 +681,8 @@ function MessageLog({ messages, status, onClear }) {
         return { ...styles.messageType, ...styles.typeDebug };
       case 'tool':
         return { ...styles.messageType, ...styles.typeTool };
+      case 'event':
+        return { ...styles.messageType, ...styles.typeEvent };
       case 'result':
         return { ...styles.messageType, ...styles.typeResult };
       case 'user':
@@ -693,6 +707,8 @@ function MessageLog({ messages, status, onClear }) {
         return { icon: '🔍', text: '调试' };
       case 'tool':
         return { icon: '🔧', text: '工具' };
+      case 'event':
+        return { icon: '✨', text: '事件' };
       case 'result':
         return { icon: '📊', text: '结果' };
       case 'user':
@@ -767,6 +783,14 @@ function MessageLog({ messages, status, onClear }) {
             {msg.duration && <span>⏱️ 耗时: {msg.duration}ms</span>}
           </div>
         )}
+
+        {/* 对于事件类型，在消息流中显示简要负载，方便直接查看 */}
+        {!isCollapsed && msg.type === 'event' && msg.payloadSummary && (
+          <div style={{ marginTop: '8px', fontSize: '12px', color: 'var(--text-muted)' }}>
+            <div style={{ marginBottom: '6px', color: 'var(--text-muted)' }}>事件负载预览</div>
+            <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '12px', color: 'var(--text-color)', backgroundColor: 'transparent', borderRadius: '4px' }}>{msg.payloadSummary}</pre>
+          </div>
+        )}
         
         {/* 操作按钮 */}
         <div style={{
@@ -837,6 +861,18 @@ function MessageLog({ messages, status, onClear }) {
                 <span style={styles.detailValue}>{msg.duration}ms</span>
               </div>
             )}
+            {msg.payload && (
+              <div style={{ marginTop: '8px' }}>
+                <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '6px' }}>负载 (payload)</div>
+                <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '12px', color: 'var(--text-color)', backgroundColor: 'transparent', borderRadius: '4px' }}>{typeof msg.payload === 'string' ? msg.payload : JSON.stringify(msg.payload, null, 2)}</pre>
+              </div>
+            )}
+            {msg.raw && (
+              <div style={{ marginTop: '8px' }}>
+                <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '6px' }}>原始数据</div>
+                <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '12px', color: 'var(--text-color)', backgroundColor: 'transparent', borderRadius: '4px' }}>{typeof msg.raw === 'string' ? msg.raw : JSON.stringify(msg.raw, null, 2)}</pre>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -880,7 +916,7 @@ function MessageLog({ messages, status, onClear }) {
           <div style={styles.emptyIcon}>AI</div>
           <div style={styles.emptyText}>开始与 AI Agent 对话</div>
           <div style={styles.emptyHint}>
-            在左侧输入您的任务描述，点击执行按钮开始。
+            在中间输入框输入您的任务描述，点击发送或按 Ctrl+Enter 开始。
             Agent 将自动分析任务并调用相应工具完成。
           </div>
           

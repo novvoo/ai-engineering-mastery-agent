@@ -286,6 +286,33 @@ export function useRuntime() {
         ...data
       });
     });
+
+    // 订阅通用 IPC 事件
+    const unsubIpcEvent = window.electronAPI.on('ipc:event', (data) => {
+      // IPCMessage shape: { id, type, payload, timestamp, status, correlationId, metadata }
+      const eventName = data?.metadata?.eventName || data?.payload?.event || data?.payload?.name || 'ipc:event';
+      const payload = data?.payload ?? data;
+
+      // 简要摘要，便于在消息流中直接显示
+      const payloadSummary = typeof payload === 'object'
+        ? JSON.stringify(payload).slice(0, 500)
+        : String(payload);
+
+      console.debug('[useRuntime] 收到 ipc:event ->', { eventName, payload });
+
+      addMessage({
+        type: 'event',
+        content: `IPC 事件: ${eventName}`,
+        // store raw payload for details view
+        raw: payload,
+        details: typeof payload === 'object' ? JSON.stringify(payload, null, 2) : String(payload),
+        event: eventName,
+        payload,
+        payloadSummary,
+        // 标记这是一个需要触发滚动的事件消息
+        eventMessage: true
+      });
+    });
     
     // 清理订阅
     return () => {
@@ -295,6 +322,7 @@ export function useRuntime() {
       unsubToolCall?.();
       unsubToolResult?.();
       unsubStatus?.();
+      unsubIpcEvent?.();
     };
   }, [addMessage]);
   
