@@ -5,6 +5,7 @@
 
 import { RuntimeConfig, AgentState, RuntimeEvent } from './types.js';
 import { getEventBus } from './event-bus.js';
+import { PluginManager, HOOKS } from './plugin-system.js';
 
 // Import core components
 import { ReActAgent } from '../core/agent.js';
@@ -29,10 +30,13 @@ export class AgentEngine {
   #experienceMemory;
   #state;
   #isInitialized;
+  #pluginManager;
+  #tokenJuice;
 
   constructor(config) {
     this.#config = config instanceof RuntimeConfig ? config : new RuntimeConfig(config);
     this.#eventBus = getEventBus();
+    this.#pluginManager = new PluginManager(this.#eventBus);
     this.#state = new AgentState();
     this.#isInitialized = false;
   }
@@ -44,6 +48,9 @@ export class AgentEngine {
     if (this.#isInitialized) {
       return;
     }
+
+    // Trigger before init hooks
+    await this.#pluginManager.triggerHook(HOOKS.BEFORE_INIT, this.#config);
 
     this.#eventBus.emit(RuntimeEvent.STATUS_UPDATE, {
       status: 'initializing',
@@ -65,6 +72,11 @@ export class AgentEngine {
       maxExperiences: 500
     });
 
+    // Initialize TokenJuice
+    this.#tokenJuice = new TokenJuice({
+      maxChars: parseInt(process.env.MAX_RESULT_CHARS || '4000')
+    });
+
     // Register default tools
     await this.#registerDefaultTools();
     
@@ -72,6 +84,10 @@ export class AgentEngine {
     this.#securityPolicy.registerDefaultPolicies(this.#toolRegistry.getAll());
 
     this.#isInitialized = true;
+    
+    // Trigger after init hooks
+    await this.#pluginManager.triggerHook(HOOKS.AFTER_INIT, this);
+
     this.#eventBus.emit(RuntimeEvent.STATUS_UPDATE, {
       status: 'ready',
       message: 'AI agent ready'
@@ -161,6 +177,13 @@ export class AgentEngine {
   }
 
   /**
+   * Get the plugin manager
+   */
+  getPluginManager() {
+    return this.#pluginManager;
+  }
+
+  /**
    * Process user input and run the agent
    */
   async processInput(input) {
@@ -177,6 +200,9 @@ export class AgentEngine {
     this.#state.startTime = Date.now();
     this.#state.iteration = 0;
 
+    // Trigger before agent start hooks
+    await this.#pluginManager.triggerHook(HOOKS.BEFORE_AGENT_START, input);
+
     this.#eventBus.emit(RuntimeEvent.AGENT_START, {
       task: input,
       timestamp: this.#state.startTime
@@ -192,25 +218,33 @@ export class AgentEngine {
         workingDirectory: this.#config.workingDirectory,
         debug: this.#config.debug,
         securityPolicy: this.#securityPolicy,
-        tokenJuice: new TokenJuice()
+        tokenJuice: this.#tokenJuice
       },
       this.#createUIFacade()
     );
 
+    let result;
     try {
       // Wrap tool executions to emit events
       this.#wrapToolCalls();
 
       // Run agent
-      const result = await this.#agent.processInput(input);
+      result = await this.#agent.processInput(input);
       
       this.#state.status = 'completed';
       this.#eventBus.emit(RuntimeEvent.AGENT_COMPLETE, { result });
+      
+      // Trigger after agent complete hooks
+      await this.#pluginManager.triggerHook(HOOKS.AFTER_AGENT_COMPLETE, result);
       
       return result;
     } catch (error) {
       this.#state.status = 'error';
       this.#eventBus.emit(RuntimeEvent.AGENT_ERROR, { error: error.message });
+      
+      // Trigger tool error hooks
+      await this.#pluginManager.triggerHook(HOOKS.ON_TOOL_ERROR, null, error);
+      
       throw error;
     } finally {
       this.#state.lastActivity = Date.now();
@@ -222,6 +256,7 @@ export class AgentEngine {
    */
   #createUIFacade() {
     const eventBus = this.#eventBus;
+    const pluginManager = this.#pluginManager;
     return {
       info: (message) => {
         eventBus.emit(RuntimeEvent.STATUS_UPDATE, { message, level: 'info' });
@@ -251,16 +286,28 @@ export class AgentEngine {
   #wrapToolCalls() {
     const originalExecute = this.#toolRegistry.execute.bind(this.#toolRegistry);
     const eventBus = this.#eventBus;
+    const pluginManager = this.#pluginManager;
     
     this.#toolRegistry.execute = async (toolName, args, context) => {
+      // Trigger before tool call hooks
+      await pluginManager.triggerHook(HOOKS.BEFORE_TOOL_CALL, toolName, args);
+      
       eventBus.emit(RuntimeEvent.TOOL_CALL, { toolName, args });
       
       try {
         const result = await originalExecute(toolName, args, context);
         eventBus.emit(RuntimeEvent.TOOL_RESULT, { toolName, result });
+        
+        // Trigger after tool call hooks
+        await pluginManager.triggerHook(HOOKS.AFTER_TOOL_CALL, toolName, result);
+        
         return result;
       } catch (error) {
         eventBus.emit(RuntimeEvent.TOOL_ERROR, { toolName, error: error.message });
+        
+        // Trigger tool error hooks
+        await pluginManager.triggerHook(HOOKS.ON_TOOL_ERROR, toolName, error);
+        
         throw error;
       }
     };
@@ -280,9 +327,20 @@ export class AgentEngine {
   /**
    * Dispose the engine and clean up resources
    */
-  dispose() {
+  async dispose() {
+    // Trigger before dispose hooks
+    await this.#pluginManager.triggerHook(HOOKS.BEFORE_DISPOSE, this);
+    
     this.stop();
     this.#isInitialized = false;
     this.#eventBus.clear();
+    
+    // Trigger after dispose hooks
+    await this.#pluginManager.triggerHook(HOOKS.AFTER_DISPOSE);
+    
+    // Cleanup plugins
+    for (const plugin of this.#pluginManager.getAllPlugins()) {
+      this.#pluginManager.unregister(plugin.name);
+    }
   }
 }

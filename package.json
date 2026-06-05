@@ -9,6 +9,7 @@
   },
   "scripts": {
     "start": "bun src/index.js",
+    "start:new": "USE_NEW_ARCH=true bun src/new-index.js",
     "start:debug": "DEBUG=true AGENT_TRACE=true bun src/index.js",
     "start:inspect": "bun --inspect src/index.js",
     "dev": "bun --watch src/index.js",
@@ -26,7 +27,11 @@
     "format": "prettier --write \"src/**/*.js\"",
     "format:check": "prettier --check \"src/**/*.js\"",
     "examples": "bun examples/runtime-usage.js",
-    "examples:runtime": "bun examples/runtime-usage.js"
+    "examples:runtime": "bun examples/runtime-usage.js",
+    "examples:plugins": "bun examples/plugin-system.js",
+    "examples:desktop": "bun examples/desktop-integration.js",
+    "examples:performance": "bun examples/performance-tests.js",
+    "examples:all": "bun examples/runtime-usage.js && bun examples/plugin-system.js && bun examples/desktop-integration.js"
   },
   "keywords": [
     "ai-agent",

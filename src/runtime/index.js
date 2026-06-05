@@ -12,6 +12,9 @@ export { RuntimeEventBus, getEventBus } from './event-bus.js';
 // Agent Engine
 export { AgentEngine } from './agent-engine.js';
 
+// Plugin System
+export * from './plugin-system.js';
+
 // Convenience factory
 import { AgentEngine } from './agent-engine.js';
 import { RuntimeConfig } from './types.js';
