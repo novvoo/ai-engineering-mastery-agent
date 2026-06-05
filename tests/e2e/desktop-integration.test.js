@@ -501,6 +501,33 @@ describe('Desktop Integration - Enhanced', () => {
         rmSync(root, { recursive: true, force: true });
       }
     });
+
+    test('工作目录监听应该忽略大型依赖和构建目录', async () => {
+      const root = mkdtempSync(join(tmpdir(), 'desktop-watch-ignore-'));
+      let watcher;
+
+      try {
+        mkdirSync(join(root, 'node_modules'));
+        writeFileSync(join(root, 'node_modules', 'cached.js'), 'old');
+
+        const changes = [];
+        watcher = createWorkspaceWatcher(root, (change) => {
+          changes.push(change);
+        }, {
+          debounceMs: 10,
+          pollIntervalMs: 25,
+          enableNativeWatch: false
+        });
+
+        writeFileSync(join(root, 'node_modules', 'cached.js'), 'new');
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        expect(changes).toEqual([]);
+      } finally {
+        watcher?.close();
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
   });
 
   describe('Desktop Conversation Event Integration', () => {

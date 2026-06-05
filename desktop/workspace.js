@@ -1,6 +1,22 @@
 import fs from 'fs';
 import path from 'path';
 
+const DEFAULT_IGNORED_WATCH_DIRECTORIES = new Set([
+  '.git',
+  '.hg',
+  '.svn',
+  'node_modules',
+  'dist',
+  'release',
+  'build',
+  'coverage',
+  '.next',
+  '.vite',
+  '.turbo',
+  '.cache',
+  '.agent-data'
+]);
+
 export function listWorkspaceDirectory(workingDirectory, options = {}) {
   const root = path.resolve(workingDirectory);
   const relativePath = typeof options?.path === 'string' ? options.path : '';
@@ -76,6 +92,10 @@ export function createWorkspaceWatcher(workingDirectory, onChange, options = {})
   const maxWatchedDirectories = Number.isInteger(options.maxWatchedDirectories)
     ? options.maxWatchedDirectories
     : 2000;
+  const ignoredDirectories = new Set([
+    ...DEFAULT_IGNORED_WATCH_DIRECTORIES,
+    ...(Array.isArray(options.ignoredDirectories) ? options.ignoredDirectories : [])
+  ]);
   let debounceTimer = null;
   let pollTimer = null;
   let closed = false;
@@ -85,6 +105,10 @@ export function createWorkspaceWatcher(workingDirectory, onChange, options = {})
   const normalizeRelativePath = (directory, filename) => {
     const changedPath = filename ? path.join(directory, String(filename)) : directory;
     return path.relative(root, changedPath).split(path.sep).join('/');
+  };
+
+  const shouldWatchDirectoryEntry = (entry) => {
+    return entry.isDirectory() && !ignoredDirectories.has(entry.name);
   };
 
   const scanWorkspace = (directory = root, result = { directories: [], signatureParts: [] }) => {
@@ -112,23 +136,24 @@ export function createWorkspaceWatcher(workingDirectory, onChange, options = {})
 
     entries.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
     for (const entry of entries) {
+      if (!shouldWatchDirectoryEntry(entry)) {
+        continue;
+      }
+
       const entryPath = path.join(directory, entry.name);
       const relativeEntryPath = path.relative(root, entryPath).split(path.sep).join('/');
       let entryStats = null;
       try {
-        entryStats = fs.lstatSync(entryPath);
+        entryStats = fs.statSync(entryPath);
       } catch {
         result.signatureParts.push(`${relativeEntryPath}:missing`);
         continue;
       }
 
-      const type = entry.isDirectory() ? 'dir' : (entry.isSymbolicLink() ? 'symlink' : 'file');
-      result.signatureParts.push(`${relativeEntryPath}:${type}:${entryStats.mtimeMs}:${entryStats.size}`);
-      if (entry.isDirectory()) {
-        scanWorkspace(entryPath, result);
-        if (result.directories.length >= maxWatchedDirectories) {
-          break;
-        }
+      result.signatureParts.push(`${relativeEntryPath}:dir:${entryStats.mtimeMs}:${entryStats.size}`);
+      scanWorkspace(entryPath, result);
+      if (result.directories.length >= maxWatchedDirectories) {
+        break;
       }
     }
 
@@ -143,40 +168,12 @@ export function createWorkspaceWatcher(workingDirectory, onChange, options = {})
     };
   };
 
-  const listDirectories = (directory, directories = []) => {
-    if (directories.length >= maxWatchedDirectories) {
-      return directories;
-    }
-
-    directories.push(directory);
-
-    let entries = [];
-    try {
-      entries = fs.readdirSync(directory, { withFileTypes: true });
-    } catch {
-      return directories;
-    }
-
-    for (const entry of entries) {
-      if (!entry.isDirectory()) {
-        continue;
-      }
-
-      listDirectories(path.join(directory, entry.name), directories);
-      if (directories.length >= maxWatchedDirectories) {
-        break;
-      }
-    }
-
-    return directories;
-  };
-
   const syncWatchers = (snapshot = null) => {
     if (closed || !fs.existsSync(root)) {
       return;
     }
 
-    const directories = new Set(snapshot?.directories || listDirectories(root));
+    const directories = new Set(snapshot?.directories || readSnapshot().directories);
 
     for (const [directory, watcher] of watchers) {
       if (!directories.has(directory)) {
@@ -205,10 +202,10 @@ export function createWorkspaceWatcher(workingDirectory, onChange, options = {})
     }
   };
 
-  const emitChange = (eventType, relativePath) => {
+  const emitChange = (eventType, relativePath, knownSnapshot = null) => {
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
-      const snapshot = readSnapshot();
+      const snapshot = knownSnapshot || readSnapshot();
       lastSnapshot = snapshot.signature;
       syncWatchers(snapshot);
       onChange({
@@ -238,7 +235,7 @@ export function createWorkspaceWatcher(workingDirectory, onChange, options = {})
       if (snapshot.signature !== lastSnapshot) {
         lastSnapshot = snapshot.signature;
         syncWatchers(snapshot);
-        emitChange('change', '');
+        emitChange('change', '', snapshot);
       }
     }, pollIntervalMs);
   }

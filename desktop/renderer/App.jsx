@@ -28,6 +28,7 @@ const LAYOUT = {
 };
 
 const REPOSITORY_URL = 'https://github.com/novvoo/ai-engineering-mastery-agent';
+const PROJECT_TREE_REFRESH_CONCURRENCY = 12;
 
 function getDocumentDisplayName(pathOrTitle = '') {
   const text = String(pathOrTitle || '').trim();
@@ -990,10 +991,15 @@ function App() {
     setProjectTreeError('');
 
     try {
-      const results = await Promise.all(pathsToRefresh.map(async (directoryPath) => {
-        const result = await ipc.listDirectory(directoryPath);
-        return { directoryPath, result };
-      }));
+      const results = [];
+      for (let index = 0; index < pathsToRefresh.length; index += PROJECT_TREE_REFRESH_CONCURRENCY) {
+        const batch = pathsToRefresh.slice(index, index + PROJECT_TREE_REFRESH_CONCURRENCY);
+        const batchResults = await Promise.all(batch.map(async (directoryPath) => {
+          const result = await ipc.listDirectory(directoryPath);
+          return { directoryPath, result };
+        }));
+        results.push(...batchResults);
+      }
 
       const nextChildren = {};
       const missingDirectories = new Set();
