@@ -9,6 +9,7 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
+    "dev:vite": "vite --config vite.config.js",
     "build": "npx electron-builder",
     "build:win": "npx electron-builder --win",
     "build:mac": "npx electron-builder --mac",
