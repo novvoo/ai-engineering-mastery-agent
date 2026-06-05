@@ -5,7 +5,8 @@
   "type": "module",
   "main": "src/index.js",
   "bin": {
-    "agent": "src/index.js"
+    "agent": "src/index.js",
+    "ai-agent": "src/index.js"
   },
   "scripts": {
     "start": "bun src/index.js",
@@ -33,18 +34,20 @@
     "examples:desktop": "bun examples/desktop-integration.js",
     "examples:performance": "bun examples/performance-tests.js",
     "examples:all": "bun examples/runtime-usage.js && bun examples/plugin-system.js && bun examples/desktop-integration.js",
-    "desktop:dev": "cd desktop && npm run dev",
-    "desktop:start": "cd desktop && npm run start",
-    "desktop:build": "cd desktop && npm run build",
-    "desktop:build:win": "cd desktop && npm run build:win",
-    "desktop:build:mac": "cd desktop && npm run build:mac",
-    "desktop:build:linux": "cd desktop && npm run build:linux",
-    "desktop:build:all": "cd desktop && npm run build:all",
-    "desktop:pack": "cd desktop && npm run pack",
-    "desktop:dist": "cd desktop && npm run dist",
-    "build:desktop": "bun run desktop:build",
-    "build:all": "bun run desktop:build:all",
-    "release:desktop": "bun run desktop:dist && bun run package:release"
+    "desktop:dev": "electron desktop/main.js",
+    "desktop:start": "electron desktop/main.js",
+    "desktop:build": "bun scripts/build-desktop.js",
+    "desktop:build:win": "bun scripts/build-desktop.js --win",
+    "desktop:build:mac": "bun scripts/build-desktop.js --mac",
+    "desktop:build:linux": "bun scripts/build-desktop.js --linux",
+    "desktop:build:all": "bun scripts/build-desktop.js --win --mac --linux",
+    "build:cli": "bun scripts/build-cli.js",
+    "build:desktop": "bun scripts/build-desktop.js",
+    "build:all": "bun scripts/build-all.js",
+    "release:cli": "bun scripts/release-cli.js",
+    "release:desktop": "bun scripts/release-desktop.js",
+    "release:all": "bun scripts/release-all.js",
+    "publish": "npm run release:all"
   },
   "keywords": [
     "ai-agent",
@@ -62,6 +65,12 @@
     "type": "git",
     "url": ""
   },
+  "files": [
+    "src/",
+    "package.json",
+    "README.md",
+    "LICENSE"
+  ],
   "dependencies": {
     "@huggingface/tokenizers": "^0.1.3",
     "boxen": "^8.0.1",
@@ -78,6 +87,120 @@
     "pdf-parse": "^2.4.5"
   },
   "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1",
     "eslint": "^8.57.1"
+  },
+  "build": {
+    "appId": "com.ai-engineering-mastery.agent",
+    "productName": "AI Engineering Mastery Agent",
+    "copyright": "Copyright © 2024 AI Engineering Mastery Agent",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "desktop/main.js",
+      "desktop/preload.js",
+      "desktop/renderer/**/*",
+      "desktop/build/**/*",
+      "src/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "src",
+        "to": "src",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "AI Agent",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico",
+      "license": "LICENSE"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["x64", "arm64"]
+        },
+        {
+          "target": "zip",
+          "arch": ["x64", "arm64"]
+        }
+      ],
+      "icon": "build/icon.icns",
+      "category": "public.app-category.developer-tools",
+      "hardenedRuntime": true,
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
+    "dmg": {
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ],
+      "window": {
+        "width": 540,
+        "height": 380
+      }
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": ["x64"]
+        },
+        {
+          "target": "deb",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "build/icons",
+      "category": "Development",
+      "maintainer": "ai-engineering@example.com",
+      "desktop": {
+        "Name": "AI Engineering Mastery Agent",
+        "Comment": "AI Engineering Mastery Agent - Desktop Application",
+        "Categories": "Development;IDE;AI",
+        "StartupWMClass": "ai-engineering-mastery-agent"
+      },
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
+    "appImage": {
+      "systemIntegration": "ask"
+    },
+    "publish": {
+      "provider": "npm",
+      "packageName": "ai-engineering-mastery-agent"
+    }
   }
 }
