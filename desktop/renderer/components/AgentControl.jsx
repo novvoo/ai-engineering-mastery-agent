@@ -576,13 +576,49 @@ function AgentControl({ runtime, workingDirectory, onWorkingDirectoryChange }) {
   
   // 智能提示
   const generateSuggestions = useCallback((text) => {
-    if (!text || text.length < 2) {
+    if (!text) {
       setSuggestions([]);
       return;
     }
-    
+
+    const trimmed = text.trimStart();
+    // If user is typing a slash command, fetch suggestions from main process
+    if (trimmed.startsWith('/')) {
+      (async () => {
+        try {
+          if (window?.electronAPI?.getSlashSuggestions) {
+            const commands = await window.electronAPI.getSlashSuggestions();
+            const inputPrefix = trimmed;
+            const hasSpace = /\s/.test(inputPrefix);
+            const filtered = (commands || []).filter(cmd => {
+              if (!cmd || !cmd.name) return false;
+              if (!cmd.name.startsWith(inputPrefix)) return false;
+              return hasSpace ? cmd.source === 'builtin_subcommand' : !cmd.name.includes(' ');
+            }).slice(0, 8);
+
+            const mapped = filtered.map(cmd => ({
+              type: 'slash',
+              icon: '/',
+              text: cmd.name,
+              description: cmd.description,
+              fullText: `${cmd.name} `
+            }));
+
+            setSuggestions(mapped);
+            setActiveSuggestion(-1);
+          } else {
+            setSuggestions([]);
+          }
+        } catch (err) {
+          console.error('[AgentControl] getSlashSuggestions failed', err);
+          setSuggestions([]);
+        }
+      })();
+      return;
+    }
+
     const newSuggestions = [];
-    
+
     // 基于历史记录的提示
     const historyMatches = history
       .filter(item => item.input.toLowerCase().includes(text.toLowerCase()))
@@ -593,9 +629,9 @@ function AgentControl({ runtime, workingDirectory, onWorkingDirectoryChange }) {
         text: item.input.slice(0, 50) + (item.input.length > 50 ? '...' : ''),
         fullText: item.input
       }));
-    
+
     newSuggestions.push(...historyMatches);
-    
+
     // 基于快捷命令的提示
     const commandMatches = QUICK_COMMANDS
       .filter(cmd => cmd.label.toLowerCase().includes(text.toLowerCase()) || 
@@ -607,9 +643,9 @@ function AgentControl({ runtime, workingDirectory, onWorkingDirectoryChange }) {
         text: cmd.label,
         fullText: cmd.template
       }));
-    
+
     newSuggestions.push(...commandMatches);
-    
+
     setSuggestions(newSuggestions);
     setActiveSuggestion(-1);
   }, [history]);
