@@ -12,7 +12,7 @@
 
 import { spawn, exec } from 'child_process';
 import { platform, tmpdir } from 'os';
-import { existsSync, writeFileSync, readFileSync, unlinkSync, mkdirSync } from 'fs';
+import { existsSync, writeFileSync, readFileSync, unlinkSync, mkdirSync, readdirSync, statSync } from 'fs';
 import { resolve, join } from 'path';
 import { EventEmitter } from 'events';
 import { networkInterfaces } from 'os';
@@ -491,7 +491,6 @@ export class ProcessManager extends EventEmitter {
     try {
       if (!existsSync(LOCK_DIR)) return;
       
-      const { readdirSync, statSync, unlinkSync } = require('fs');
       const files = readdirSync(LOCK_DIR);
       const now = Date.now();
       const LOCK_TTL_MS = 30 * 60 * 1000; // 30分钟后锁过期

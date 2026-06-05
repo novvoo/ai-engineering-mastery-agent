@@ -236,8 +236,6 @@ jobs:
             release/desktop/**/*.rpm
             release/desktop/**/*.snap
             release/desktop/**/*.tar.gz
-            release/desktop/**/*.yml
-            release/desktop/**/*.blockmap
           if-no-files-found: error
 
   publish:
