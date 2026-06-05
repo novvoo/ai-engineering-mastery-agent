@@ -146,6 +146,23 @@ npm run build:all
 
 CLI 和 Desktop 的 release 产物会分别输出到独立目录，方便按平台分发。
 
+### macOS 首次打开
+
+macOS 用户下载 Desktop 版后，如果看到“应用已损坏，无法打开，你应该将它移到废纸篓”，通常不是文件真的损坏，而是当前社区构建没有完成 Apple Developer ID 签名和 notarization 公证，被 Gatekeeper 拦截了。
+
+推荐先确认来源是本项目的 GitHub Release，并优先下载与你的芯片匹配的包：
+
+- Apple Silicon：`arm64.dmg`
+- Intel Mac：`x64.dmg`
+
+如果你信任这个下载来源，可以在安装到 `/Applications` 后临时移除隔离标记：
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/AI Engineering Mastery Agent.app"
+```
+
+然后再从 Finder 或 Launchpad 打开应用。后续如果发布流程接入正式签名和公证，这一步就不再需要。
+
 ## 模型配置
 
 项目支持多 Provider。你可以在 `.env` 中配置不同模型和 API Key，按自己的成本、上下文窗口和响应速度偏好选择。
@@ -199,6 +216,7 @@ npm run desktop:renderer:build
 
 ## 已知限制
 
+- macOS Desktop 产物目前可能触发 Gatekeeper 提示，需要按“macOS 首次打开”里的方式处理；这属于发布签名/公证问题，不代表应用包一定损坏。
 - 文档解析依赖本地运行环境，PDF 渲染相关原生依赖缺失时可能需要安装或使用 fallback。
 - Shell 沙箱不是所有平台都能提供同等级隔离，生产级隔离建议配合容器或 VM。
 - Web 搜索结果受搜索服务和网络环境影响，实时信息应优先查看来源链接。
