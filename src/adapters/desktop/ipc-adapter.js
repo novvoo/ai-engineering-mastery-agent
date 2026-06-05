@@ -12,6 +12,7 @@
 
 import { EventEmitter } from 'events';
 import { RuntimeEvent } from '../../runtime/types.js';
+import { buildSlashCommandSuggestions } from '../../cli/slash-command-suggestions.js';
 
 /**
  * IPC 消息类型定义
@@ -489,6 +490,7 @@ export class MainProcessIPCAdapter extends IPCAdapterBase {
       'agent:processInput',
       'agent:stop',
       'agent:getState',
+      'agent:getSlashSuggestions',
       'agent:getTools',
       'agent:getStats',
       'system:getStats',
@@ -601,6 +603,17 @@ export class MainProcessIPCAdapter extends IPCAdapterBase {
           return this.createResponse(message, []);
         }
         return this.createResponse(message, this.#serializeTools(this.#engine.getTools()));
+
+      case 'agent:getSlashSuggestions':
+        if (!this.#engine) {
+          return this.createResponse(message, []);
+        }
+        try {
+          const suggestions = buildSlashCommandSuggestions(this.#engine.getTools() || []);
+          return this.createResponse(message, suggestions);
+        } catch (err) {
+          return this.createResponse(message, []);
+        }
 
       case 'agent:getStats':
       case 'system:getStats':
@@ -997,6 +1010,13 @@ export class RendererProcessIPCAdapter extends IPCAdapterBase {
    */
   async getTools() {
     return this.request('agent:getTools');
+  }
+
+  /**
+   * 便捷方法：获取 slash 补全建议
+   */
+  async getSlashSuggestions() {
+    return this.request('agent:getSlashSuggestions');
   }
 
   /**

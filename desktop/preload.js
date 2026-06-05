@@ -20,6 +20,7 @@ const ALLOWED_CHANNELS = {
     'agent:stop',
     'agent:getState',
     'agent:getTools',
+    'agent:getSlashSuggestions',
     'agent:getStats',
     'system:getStats',
     'window:minimize',
@@ -247,6 +248,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return await ipcRenderer.invoke('agent:getTools');
     } catch (error) {
       console.error('[Preload] getTools 失败:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * 获取 slash 补全建议
+   * @returns {Promise<Array>} 补全建议
+   */
+  getSlashSuggestions: async () => {
+    try {
+      return await ipcRenderer.invoke('agent:getSlashSuggestions');
+    } catch (error) {
+      console.error('[Preload] getSlashSuggestions 失败:', error);
       throw error;
     }
   },

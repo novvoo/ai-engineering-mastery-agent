@@ -6,8 +6,7 @@
   "type": "module",
   "main": "src/index.js",
   "bin": {
-    "agent": "src/index.js",
-    "ai-agent": "src/index.js"
+    "agent": "src/index.js"
   },
   "scripts": {
     "start": "bun src/index.js",

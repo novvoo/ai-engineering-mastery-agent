@@ -411,6 +411,13 @@ class AIEngineeringAgent {
       toolRegistry.register(tool);
       registered += 1;
     }
+    // Rebuild slash command suggestions when new MCP tools are registered
+    try {
+      this.slashCommandSuggestions = buildSlashCommandSuggestions(this.engine.getTools() || []);
+    } catch (err) {
+      enhancedUI.debugEvent('Failed to rebuild slash command suggestions after MCP register', { error: String(err) });
+    }
+
     return registered;
   }
 
@@ -470,6 +477,14 @@ class AIEngineeringAgent {
       automationEngine: this.automationEngine,
       registerMcpTools: serverName => this.#registerMCPTools(this.toolRegistry, serverName),
     });
+
+    // Build initial slash command suggestions from registered tools
+    try {
+      this.slashCommandSuggestions = buildSlashCommandSuggestions(this.engine.getTools() || []);
+    } catch (err) {
+      enhancedUI.debugEvent('Failed to build slash command suggestions on init', { error: String(err) });
+      this.slashCommandSuggestions = [];
+    }
 
     // Create readline interface
     this.rl = createInterface({
