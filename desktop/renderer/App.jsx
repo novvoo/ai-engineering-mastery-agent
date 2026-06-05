@@ -14,6 +14,7 @@ import AgentControl from './components/AgentControl.jsx';
 import ToolPanel from './components/ToolPanel.jsx';
 import MessageLog from './components/MessageLog.jsx';
 import StatusBar from './components/StatusBar.jsx';
+import CommandSuggestions from './components/CommandSuggestions.jsx';
 import { useRuntime } from './hooks/useRuntime.js';
 import { useIPC } from './hooks/useIPC.js';
 import './index.css';
@@ -664,6 +665,7 @@ function App() {
   const [activeMenu, setActiveMenu] = useState(null);
   const [chatInput, setChatInput] = useState('');
   const [inputFocused, setInputFocused] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
   
   // 摘要面板数据 (Codex Style)
   const [summaryData, setSummaryData] = useState({
@@ -935,13 +937,33 @@ function App() {
     }
   }, [chatInput, runtime]);
   
+  // 命令提示相关
+  const handleChatInputChange = useCallback((value) => {
+    setChatInput(value);
+    setShowSuggestions(value.trimStart().startsWith('/'));
+  }, []);
+  
+  const handleCommandSelect = useCallback((command) => {
+    setChatInput(command);
+    setShowSuggestions(false);
+    chatInputRef.current?.focus();
+  }, []);
+  
+  const handleSuggestionsClose = useCallback(() => {
+    setShowSuggestions(false);
+  }, []);
+  
   const handleChatKeyDown = useCallback((e) => {
     // Ctrl+Enter 发送消息
     if (e.key === 'Enter' && e.ctrlKey) {
       e.preventDefault();
       handleSendMessage();
     }
-  }, [handleSendMessage]);
+    // 隐藏命令提示当按下 Escape 或 Enter(非 Ctrl)
+    if (e.key === 'Escape' || (e.key === 'Enter' && !e.ctrlKey && !showSuggestions)) {
+      setShowSuggestions(false);
+    }
+  }, [handleSendMessage, showSuggestions]);
   
   // 渲染侧边栏内容
   const renderSidebarContent = () => {
@@ -1287,6 +1309,15 @@ function App() {
           {/* 输入区域 */}
           <div style={styles.inputArea}>
             <div style={styles.inputWrapper}>
+              {/* 命令提示 */}
+              {showSuggestions && (
+                <CommandSuggestions
+                  input={chatInput}
+                  onSelect={handleCommandSelect}
+                  onClose={handleSuggestionsClose}
+                />
+              )}
+              
               <textarea
                 ref={chatInputRef}
                 style={{
@@ -1294,11 +1325,11 @@ function App() {
                   ...(inputFocused ? styles.inputTextareaFocused : {})
                 }}
                 value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
+                onChange={(e) => handleChatInputChange(e.target.value)}
                 onKeyDown={handleChatKeyDown}
                 onFocus={() => setInputFocused(true)}
                 onBlur={() => setInputFocused(false)}
-                placeholder="输入消息... (Ctrl+Enter 发送)"
+                placeholder="输入消息... (Ctrl+Enter 发送 | 输入 / 查看命令)"
                 disabled={runtime.status === 'running'}
               />
               <button
