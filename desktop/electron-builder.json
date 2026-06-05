@@ -64,20 +64,15 @@
         ]
       }
     ],
-    "icon": "build/icon.ico",
     "artifactName": "desktop-${productName}-${version}-${arch}-setup.${ext}"
   },
   "nsis": {
     "oneClick": false,
     "allowToChangeInstallationDirectory": true,
     "allowElevation": true,
-    "installerIcon": "build/icon.ico",
-    "uninstallerIcon": "build/icon.ico",
-    "installerHeaderIcon": "build/icon.ico",
     "createDesktopShortcut": true,
     "createStartMenuShortcut": true,
     "shortcutName": "AI Agent Desktop",
-    "include": "build/installer.nsh",
     "deleteAppDataOnUninstall": false,
     "displayLanguageSelector": false,
     "installerLanguages": [
@@ -109,14 +104,11 @@
         ]
       }
     ],
-    "icon": "build/icon.icns",
     "category": "public.app-category.developer-tools",
     "type": "distribution",
     "hardenedRuntime": true,
     "gatekeeperAssess": false,
     "strictIdentify": true,
-    "entitlements": "build/entitlements.mac.plist",
-    "entitlementsInherit": "build/entitlements.mac.plist",
     "artifactName": "desktop-${productName}-${version}-${arch}.${ext}",
     "darkModeSupport": true
   },
@@ -181,7 +173,6 @@
         ]
       }
     ],
-    "icon": "build/icons",
     "category": "Development",
     "maintainer": "ai-agent@example.com",
     "desktop": {

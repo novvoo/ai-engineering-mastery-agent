@@ -139,7 +139,6 @@
           ]
         }
       ],
-      "icon": "build/icon.ico",
       "artifactName": "desktop-${productName}-${version}-${arch}-setup.${ext}"
     },
     "nsis": {
@@ -148,9 +147,6 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "AI Agent",
-      "installerIcon": "build/icon.ico",
-      "uninstallerIcon": "build/icon.ico",
-      "installerHeaderIcon": "build/icon.ico",
       "license": "LICENSE"
     },
     "mac": {
@@ -170,7 +166,6 @@
           ]
         }
       ],
-      "icon": "build/icon.icns",
       "category": "public.app-category.developer-tools",
       "hardenedRuntime": true,
       "artifactName": "desktop-${productName}-${version}-${arch}.${ext}"
@@ -208,7 +203,6 @@
           ]
         }
       ],
-      "icon": "build/icons",
       "category": "Development",
       "maintainer": "ai-engineering@example.com",
       "desktop": {

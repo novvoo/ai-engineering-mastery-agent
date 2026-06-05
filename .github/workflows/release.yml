@@ -223,13 +223,16 @@ jobs:
         with:
           name: desktop-${{ matrix.target }}
           path: |
-            release/*.dmg
-            release/*.zip
-            release/*.exe
-            release/*.AppImage
-            release/*.deb
-            release/*.yml
-            release/*.blockmap
+            release/desktop/**/*.dmg
+            release/desktop/**/*.zip
+            release/desktop/**/*.exe
+            release/desktop/**/*.AppImage
+            release/desktop/**/*.deb
+            release/desktop/**/*.rpm
+            release/desktop/**/*.snap
+            release/desktop/**/*.tar.gz
+            release/desktop/**/*.yml
+            release/desktop/**/*.blockmap
           if-no-files-found: error
 
   publish:
