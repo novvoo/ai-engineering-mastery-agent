@@ -77,6 +77,8 @@ import createGrillTool from './tools/skills/grill.js';
 import createTddTool from './tools/skills/tdd.js';
 import createDiagnoseTool from './tools/skills/diagnose.js';
 import createVerifyTool from './tools/skills/verify.js';
+import createCoverageCheckTool from './tools/skills/coverage_check.js';
+import createAskUserTool from './tools/skills/ask_user.js';
 import createReviewTool from './tools/skills/review.js';
 import createArchitectTool from './tools/skills/architect.js';
 import createZoomOutTool from './tools/skills/zoom_out.js';
@@ -2139,9 +2141,14 @@ class AIEngineeringAgent {
       const result = await this.engine.processInput(preparedInput);
       enhancedUI.debugEvent('Agent input completed', {
         inputChars: preparedInput.length,
-        result: result?.answer ? 'completed' : 'unknown',
+        result: result?.status || (result?.answer ? 'completed' : 'unknown'),
       });
-      if (result?.answer) {
+      if (result?.status === 'needs_user_input') {
+        if (result.answer) {
+          enhancedUI.finalAnswer(result.answer);
+        }
+        enhancedUI.info('请直接在下一行输入补充信息，我会带着当前上下文继续。');
+      } else if (result?.answer) {
         enhancedUI.finalAnswer(result.answer);
       } else if (result?.status === 'max_iterations') {
         enhancedUI.warning('Agent stopped after reaching the maximum iteration limit without a final answer.');
@@ -2423,6 +2430,8 @@ export {
   createTddTool,
   createDiagnoseTool,
   createVerifyTool,
+  createCoverageCheckTool,
+  createAskUserTool,
   createReviewTool,
   createArchitectTool,
   createZoomOutTool,

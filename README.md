@@ -16,14 +16,14 @@ AI Engineering Mastery Agent 更像一个带方法论的本地工程协作者，
 
 核心差异：
 
-- 方法论工具：`grill`、`zoom_out`、`diagnose`、`brainstorm`、`tdd`、`review`、`verify`、`architect`、`to_prd`、`to_issues`、`handoff`。
+- 方法论工具：`coverage_check`、`ask_user`、`grill`、`zoom_out`、`diagnose`、`brainstorm`、`tdd`、`review`、`verify`、`architect`、`to_prd`、`to_issues`、`handoff`。
 - 工程工具：文件读写、Shell、PTY、Git、文档 RAG、语义搜索、MCP、Web 搜索。
 - 工程闭环：需求对齐、系统分析、执行、观察、审查、验证、交付摘要。
 - 本地体验：项目隔离的文档索引和历史会话，CLI/Desktop 共享 RAG，Desktop 可观察每轮执行过程。
 
 ## 工具系统
 
-Agent 的工具不是简单堆在提示词里，而是按任务动态选择和约束。复杂任务会优先暴露当前真正需要的工具，降低模型误用工具、重复调用或跑偏的概率；涉及写文件、运行命令和访问工作区外路径时，会经过安全策略和上下文预算控制。
+Agent 的工具不是简单堆在提示词里，而是按任务动态选择和约束。复杂任务会优先暴露当前真正需要的工具，降低模型误用工具、重复调用或跑偏的概率；涉及 RAG/Web 回答时，会先用 `coverage_check` 判断证据是否足够，并把缺口转成检索动作；如果缺的是用户掌握的业务约束、验收标准或确认信息，会用 `ask_user` 中断本轮并请你补充；涉及写文件、运行命令和访问工作区外路径时，会经过安全策略和上下文预算控制。
 
 ## 你可以用它做什么
 

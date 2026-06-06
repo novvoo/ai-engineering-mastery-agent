@@ -540,6 +540,15 @@ describe('Desktop Integration - Enhanced', () => {
       expect(agentComplete.message.type).toBe('result');
       expect(agentComplete.message.content).toBe('完成了');
 
+      const userInputRequest = normalizeRuntimeEventMessage('agent:complete', {
+        result: {
+          status: 'needs_user_input',
+          answer: '需要你补充一点信息后我才能继续。',
+        },
+      });
+      expect(userInputRequest.message.type).toBe('warning');
+      expect(userInputRequest.message.content).toContain('需要你补充');
+
       const toolCall = normalizeRuntimeEventMessage('tool:call', {
         toolName: 'read_file',
         args: { path: 'README.md' }

@@ -27,6 +27,8 @@ const WEB_TOOLS = [
 
 const CODING_METHODOLOGY_TOOLS = [
   'setup',
+  'coverage_check',
+  'ask_user',
   'grill',
   'brainstorm',
   'zoom_out',
@@ -40,6 +42,8 @@ const CODING_METHODOLOGY_TOOLS = [
 ];
 
 const GENERAL_METHODOLOGY_TOOLS = [
+  'coverage_check',
+  'ask_user',
   'grill',
   'brainstorm',
   'diagnose',
@@ -168,7 +172,7 @@ export function selectToolsForRequest(allTools, {
     }
   } else if (asksForFreshData) {
     add(WEB_TOOLS);
-    add(['grill']);
+    add(['coverage_check', 'grill']);
   } else {
     add(CORE_READ_TOOLS);
     add(GENERAL_METHODOLOGY_TOOLS);

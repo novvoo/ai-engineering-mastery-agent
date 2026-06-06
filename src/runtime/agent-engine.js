@@ -45,6 +45,8 @@ import createGrillTool from '../tools/skills/grill.js';
 import createTddTool from '../tools/skills/tdd.js';
 import createDiagnoseTool from '../tools/skills/diagnose.js';
 import createVerifyTool from '../tools/skills/verify.js';
+import createCoverageCheckTool from '../tools/skills/coverage_check.js';
+import createAskUserTool from '../tools/skills/ask_user.js';
 import createReviewTool from '../tools/skills/review.js';
 import createArchitectTool from '../tools/skills/architect.js';
 import createZoomOutTool from '../tools/skills/zoom_out.js';
@@ -418,6 +420,8 @@ export class AgentEngine {
       createTddTool,
       createDiagnoseTool,
       createVerifyTool,
+      createCoverageCheckTool,
+      createAskUserTool,
       createReviewTool,
       createArchitectTool,
       createZoomOutTool,
@@ -664,7 +668,7 @@ export class AgentEngine {
       // 运行 Agent（使用 run 方法）
       result = await this.#agent.run(input);
       
-      this.#state.status = 'completed';
+      this.#state.status = result?.status === 'needs_user_input' ? 'needs_user_input' : 'completed';
       this.#eventBus.emit(RuntimeEvent.AGENT_COMPLETE, { result });
       
       // 触发输出生成钩子

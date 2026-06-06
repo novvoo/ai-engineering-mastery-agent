@@ -16,6 +16,8 @@ import { selectToolsForRequest, shouldUseIntentClassifier } from './tool-router.
 const TERMINATION_KEYWORDS = ['FINAL_ANSWER:', 'Answer:', 'TASK_COMPLETE'];
 const MAX_ITERATIONS_DEFAULT = 180;
 const METHODOLOGY_TOOLS = new Set([
+  'coverage_check',
+  'ask_user',
   'brainstorm',
   'grill',
   'zoom_out',
@@ -472,14 +474,28 @@ export class ReActAgent {
         if (nativeToolCalls.length > 0) {
           this.#sessionManager.addAssistantMessage(response.text, nativeToolCalls);
           for (const toolCall of nativeToolCalls) {
-            await this.#executeToolCall(toolCall, { resultMode: 'tool' });
+            const toolResult = await this.#executeToolCall(toolCall, { resultMode: 'tool' });
+            if (this.#isUserInputRequest(toolResult?.result)) {
+              return this.#completeUserInputRequest(toolResult.result, {
+                iteration,
+                startedAt: runStartedAt,
+                reason: 'ask_user_tool',
+              });
+            }
           }
         } else {
           this.#sessionManager.addAssistantMessage(response.text);
         }
 
         for (const toolCall of parsedToolCalls) {
-          await this.#executeToolCall(toolCall, { resultMode: 'observation' });
+          const toolResult = await this.#executeToolCall(toolCall, { resultMode: 'observation' });
+          if (this.#isUserInputRequest(toolResult?.result)) {
+            return this.#completeUserInputRequest(toolResult.result, {
+              iteration,
+              startedAt: runStartedAt,
+              reason: 'ask_user_tool',
+            });
+          }
         }
 
       } catch (error) {
@@ -533,7 +549,8 @@ export class ReActAgent {
    * Execute a single tool call
    */
   async #executeToolCall(toolCall, options = {}) {
-    const rewrittenToolCall = this.#rewriteShellRuntimeToolCall(toolCall) || toolCall;
+    const normalizedToolCall = this.#normalizeToolCall(toolCall);
+    const rewrittenToolCall = this.#rewriteShellRuntimeToolCall(normalizedToolCall) || normalizedToolCall;
     const { id, name, arguments: args } = rewrittenToolCall;
     const resultMode = options.resultMode || 'tool';
     const startedAt = Date.now();
@@ -558,7 +575,7 @@ export class ReActAgent {
           : `Warning: Duplicate call to ${name} skipped. Use the existing observations to provide the final answer.`,
         resultMode
       );
-      return;
+      return { name, result: cachedResult || null, skipped: true };
     }
     this.#toolCallHistory.push(callSignature);
     // Keep history manageable
@@ -578,7 +595,7 @@ export class ReActAgent {
       });
       this.#ui.toolError(name, errorMsg);
       this.#addToolObservation(id, name, errorMsg, resultMode);
-      return;
+      return { name, result: errorMsg, error: errorMsg };
     }
 
     const securityBlock = this.#enforceToolSecurity(name, args);
@@ -591,7 +608,7 @@ export class ReActAgent {
       this.#ui.toolError(name, securityBlock);
       this.#recordToolEvent(name, args, false, `Security policy blocked tool call: ${securityBlock}`);
       this.#addToolObservation(id, name, `Error: Security policy blocked ${name}: ${securityBlock}`, resultMode);
-      return;
+      return { name, result: `Error: Security policy blocked ${name}: ${securityBlock}`, error: securityBlock };
     }
 
     this.#debugEvent('Tool call started', {
@@ -636,6 +653,7 @@ export class ReActAgent {
       this.#toolResultCache.set(callSignature, typeof finalResult === 'string' ? finalResult : JSON.stringify(finalResult));
       this.#addToolObservation(id, name, finalResult, resultMode);
       this.#advanceAutomaticPlan(name, args, finalResult);
+      return { name, result: finalResult };
 
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
@@ -648,7 +666,89 @@ export class ReActAgent {
       this.#recordToolEvent(name, args, false, `Error: ${errorMsg}`);
       this.#toolResultCache.set(callSignature, `Error: ${errorMsg}`);
       this.#addToolObservation(id, name, `Error: ${errorMsg}`, resultMode);
+      return { name, result: `Error: ${errorMsg}`, error: errorMsg };
     }
+  }
+
+  #normalizeToolCall(toolCall) {
+    if (!toolCall || typeof toolCall !== 'object') {
+      return toolCall;
+    }
+
+    if (toolCall.name) {
+      return {
+        ...toolCall,
+        arguments: this.#parseToolArguments(toolCall.arguments),
+      };
+    }
+
+    if (toolCall.function?.name) {
+      return {
+        id: toolCall.id,
+        name: toolCall.function.name,
+        arguments: this.#parseToolArguments(toolCall.function.arguments),
+        source: toolCall.type || 'native_tool_call',
+        raw: toolCall,
+      };
+    }
+
+    return toolCall;
+  }
+
+  #parseToolArguments(args) {
+    if (!args) {
+      return {};
+    }
+    if (typeof args === 'object') {
+      return args;
+    }
+    if (typeof args !== 'string') {
+      return {};
+    }
+    try {
+      const parsed = JSON.parse(args);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  #isUserInputRequest(result) {
+    if (!result || typeof result !== 'object') {
+      return false;
+    }
+    return result.requiresUserInput === true || result.type === 'user_input_required';
+  }
+
+  #completeUserInputRequest(result, { iteration, startedAt, reason }) {
+    const answer = result.answer || this.#formatUserInputRequestAnswer(result);
+    this.#debugEvent('User input requested', {
+      reason,
+      questions: result.questions || [],
+      blockingFacts: result.blockingFacts || [],
+    });
+    this.#ui.finalAnswer(answer);
+    this.#sessionManager.addAssistantMessage(`FINAL_ANSWER: ${answer}`);
+    return this.#completeRun({
+      success: true,
+      status: 'needs_user_input',
+      answer,
+      reason,
+      iterations: iteration,
+      startedAt,
+      userInputRequest: result,
+    });
+  }
+
+  #formatUserInputRequestAnswer(result) {
+    const questions = Array.isArray(result.questions) ? result.questions : [];
+    return [
+      '需要你补充一点信息后我才能继续。',
+      result.reason ? `原因：${result.reason}` : '',
+      questions.length > 0
+        ? `请回答：\n${questions.map((question, index) => `${index + 1}. ${question}`).join('\n')}`
+        : '',
+    ].filter(Boolean).join('\n\n');
   }
 
   #recordToolEvent(name, args, success, result) {
@@ -1209,7 +1309,7 @@ export class ReActAgent {
     return this.#lastRunResult ? { ...this.#lastRunResult } : null;
   }
 
-  #completeRun({ success, status, answer, reason, iterations, startedAt, error }) {
+  #completeRun({ success, status, answer, reason, iterations, startedAt, error, userInputRequest }) {
     const result = {
       success,
       status,
@@ -1221,6 +1321,9 @@ export class ReActAgent {
     };
     if (error) {
       result.error = error;
+    }
+    if (userInputRequest) {
+      result.userInputRequest = userInputRequest;
     }
     this.#lastRunResult = result;
     return result;
@@ -1407,7 +1510,7 @@ export class ReActAgent {
   #buildCodingTaskOperatingPrompt(userInput) {
     const hasMethodologyTools = this.#hasAnyTool(METHODOLOGY_TOOLS);
     const methodologyLine = hasMethodologyTools
-      ? 'Use the built-in methodology tools proactively when they fit: setup only when project context is missing, diagnose for bugs, grill/zoom_out for unclear or shared changes, brainstorm/tdd before implementation when non-trivial, to_prd/to_issues for formal planning, review after editing, and verify before completion. For a small standalone file creation, do not run setup repeatedly; write the file and inspect it.'
+      ? 'Use the built-in methodology tools proactively when they fit: setup only when project context is missing, coverage_check before uncertain/RAG/web answers, diagnose for bugs, grill/zoom_out for unclear or shared changes, brainstorm/tdd before implementation when non-trivial, to_prd/to_issues for formal planning, review after editing, and verify before completion. For a small standalone file creation, do not run setup repeatedly; write the file and inspect it.'
       : 'Use the same methodology directly in your reasoning because methodology tools are not registered in this runtime.';
 
     return (

@@ -135,6 +135,44 @@ describe('Runtime Layer Integration Tests', () => {
       // 检查常见工具类别
       const categories = new Set(tools.map(t => t.category));
       expect(categories.has('FileSystem') || categories.has('filesystem')).toBe(true);
+      expect(tools.some(t => t.name === 'coverage_check')).toBe(true);
+      expect(tools.some(t => t.name === 'ask_user')).toBe(true);
+    });
+
+    it('应该在 ask_user 请求补充信息时停在等待用户输入状态', async () => {
+      engine = createAgentEngine({ workingDirectory: testDir, maxIterations: 3 });
+      await engine.initialize();
+
+      engine.attachModelProvider({
+        chat: async () => ({
+          text: '',
+          finishReason: 'tool_calls',
+          toolCalls: [{
+            id: 'call_ask_user',
+            type: 'function',
+            function: {
+              name: 'ask_user',
+              arguments: JSON.stringify({
+                reason: '缺少验收标准，继续实现会引入猜测。',
+                questions: ['这个功能的成功标准是什么？'],
+                blocking_facts: ['验收标准'],
+                suggestions: ['返回 JSON', '返回 Markdown'],
+              }),
+            },
+          }],
+        }),
+        getMaxContextTokens: () => 128000,
+        dispose: () => {},
+      });
+
+      const result = await engine.processInput('实现导出功能');
+
+      expect(result.status).toBe('needs_user_input');
+      expect(result.success).toBe(true);
+      expect(result.userInputRequest.requiresUserInput).toBe(true);
+      expect(result.answer).toContain('需要你补充一点信息');
+      expect(result.answer).toContain('这个功能的成功标准是什么？');
+      expect(engine.getState().status).toBe('needs_user_input');
     });
 
     it('模型提供者未附加时应该抛出错误', async () => {

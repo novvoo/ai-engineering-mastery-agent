@@ -153,12 +153,13 @@ export function useRuntime() {
       if (window.electronAPI) {
         const result = await window.electronAPI.processInput(input, options);
         const answer = extractAgentAnswer(result);
+        const needsUserInput = result?.status === 'needs_user_input';
         
         // 添加结果消息
         if (answer && answer !== lastAnswerRef.current) {
           lastAnswerRef.current = answer;
           addMessage({
-            type: 'result',
+            type: needsUserInput ? 'warning' : 'result',
             content: answer,
             ...result
           });
@@ -170,7 +171,7 @@ export function useRuntime() {
           });
         }
         
-        setStatus('completed');
+        setStatus(needsUserInput ? 'needs_user_input' : 'completed');
         setStats(prev => ({
           ...prev,
           endTime: Date.now()
@@ -248,7 +249,7 @@ export function useRuntime() {
         if (eventName === 'agent:start') {
           setStatus('running');
         } else if (eventName === 'agent:complete') {
-          setStatus('completed');
+          setStatus(payload?.result?.status === 'needs_user_input' ? 'needs_user_input' : 'completed');
         } else if (eventName === 'agent:error') {
           setStatus('error');
         }
@@ -316,11 +317,12 @@ export function normalizeRuntimeEventMessage(eventName, payload = {}) {
       };
     case 'agent:complete': {
       const answer = extractAgentAnswer(payload);
+      const needsUserInput = payload?.result?.status === 'needs_user_input' || payload?.status === 'needs_user_input';
       return {
         message: {
           ...base,
-          type: answer ? 'result' : 'success',
-          content: answer || 'Agent 执行完成',
+          type: needsUserInput ? 'warning' : (answer ? 'result' : 'success'),
+          content: answer || (needsUserInput ? '需要你补充信息后继续' : 'Agent 执行完成'),
         },
       };
     }

@@ -33,8 +33,8 @@
   <rect x="60" y="132" width="205" height="155" rx="14" class="panel"/>
   <circle cx="92" cy="166" r="11" class="accent-yellow"/>
   <text x="112" y="171" class="label">1. 对齐与看全局</text>
-  <text x="84" y="205" class="body">grill: 需求、假设、验收标准</text>
-  <text x="84" y="229" class="body">zoom_out: 结构、依赖、影响面</text>
+  <text x="84" y="205" class="body">coverage_check / ask_user: 缺口判断</text>
+  <text x="84" y="229" class="body">grill / zoom_out: 对齐与影响面</text>
   <text x="84" y="253" class="body">brainstorm: 多方案与取舍</text>
 
   <rect x="314" y="132" width="205" height="155" rx="14" class="panel"/>
