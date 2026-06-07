@@ -28,7 +28,7 @@
   <rect class="bg" width="1200" height="620" rx="22"/>
 
   <text x="60" y="64" class="title">Methodology-driven AI engineering agent</text>
-  <text x="60" y="92" class="subtitle">不是只补全代码，而是把需求对齐、工具选择、代码执行和证据验证放进同一条工程闭环。</text>
+  <text x="60" y="92" class="subtitle">工程闭环 + 高效缓存 + 持久化记忆，从探索到交付的全链路优化。</text>
 
   <rect x="60" y="132" width="205" height="155" rx="14" class="panel"/>
   <circle cx="92" cy="166" r="11" class="accent-yellow"/>
