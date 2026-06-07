@@ -562,7 +562,7 @@ const styles = {
     flex: 1,
     minHeight: 0,
     overflow: 'hidden',
-    padding: 0
+    padding: '0 20px'
   },
   
   // ================== 输入区域 ==================
@@ -621,11 +621,6 @@ const styles = {
     backgroundColor: 'var(--border-subtle)',
     color: 'var(--text-dark)',
     cursor: 'not-allowed'
-  },
-  
-  sendButtonStop: {
-    backgroundColor: '#ff4444',
-    color: '#ffffff'
   },
   
   inputHint: {
@@ -966,8 +961,11 @@ function App() {
   const [previewSession, setPreviewSession] = useState(null);
   const [previewStatus, setPreviewStatus] = useState('idle');
   const [previewFrameKey, setPreviewFrameKey] = useState(0);
-  const [activePreviewUrl, setActivePreviewUrl] = useState(null);
-  const [previewUrlDraft, setPreviewUrlDraft] = useState('');
+  const [activePreviewUrl, setActivePreviewUrl] = useState(readStoredPreviewUrl);
+  const [previewUrlDraft, setPreviewUrlDraft] = useState(() => {
+    const storedUrl = readStoredPreviewUrl();
+    return storedUrl ? formatPreviewUrlInput(storedUrl) : '';
+  });
   
   // 使用自定义 Hooks
   const runtime = useRuntime();
@@ -1456,6 +1454,17 @@ function App() {
     let unsubscribeStarted = null;
     let unsubscribeStopped = null;
 
+    ipc.listPreviews?.().then(result => {
+      const previews = result?.previews || [];
+      if (previews.length > 0) {
+        setPreviewSession(previews[0]);
+        followPreviewUrl(previews[0].url);
+        setSummaryPanelVisible(true);
+        setActiveInspectorTab('preview');
+        setPreviewStatus('ready');
+      }
+    }).catch(() => {});
+
     if (ipc.onPreviewStarted) {
       unsubscribeStarted = ipc.onPreviewStarted(preview => {
         setPreviewSession(preview);
@@ -1480,7 +1489,7 @@ function App() {
       unsubscribeStarted?.();
       unsubscribeStopped?.();
     };
-  }, [followPreviewUrl, ipc.isConnected, ipc.onPreviewStarted, ipc.onPreviewStopped, previewSession?.session_id]);
+  }, [followPreviewUrl, ipc.isConnected, ipc.listPreviews, ipc.onPreviewStarted, ipc.onPreviewStopped, previewSession?.session_id]);
   
   // 处理新建任务
   const handleNewTask = useCallback(() => {
@@ -1748,21 +1757,6 @@ function App() {
     document.addEventListener('click', handleClickOutside);
     return () => document.removeEventListener('click', handleClickOutside);
   }, [activeMenu]);
-  
-  // 监听主进程菜单事件
-  useEffect(() => {
-    if (!ipc.isConnected || !ipc.subscribe) {
-      return undefined;
-    }
-
-    const unsubscribe = ipc.subscribe('menu:click', async (event) => {
-      await handleMenuItemClick(event);
-    });
-
-    return () => {
-      unsubscribe?.();
-    };
-  }, [ipc.isConnected, ipc.subscribe, handleMenuItemClick]);
   
   // ================== 聊天输入处理 ==================
   
@@ -2134,7 +2128,7 @@ function App() {
           </div>
         ) : null}
 
-        {previewStatus === 'ready' && activePreviewUrl ? (
+        {activePreviewUrl ? (
           <iframe
             key={previewFrameKey}
             title="workspace-preview"
@@ -2205,23 +2199,17 @@ function App() {
   
   return (
     <div style={styles.container}>
-      {/* 顶部状态栏 */}
+      {/* 顶部菜单栏 */}
       <header style={{
-        display: 'flex',
-        alignItems: 'center',
-        minHeight: `${LAYOUT.headerHeight}px`,
-        paddingLeft: shouldReserveMacTrafficLightSpace ? '86px' : '12px',
-        paddingRight: '12px',
-        backgroundColor: '#11161e',
-        borderBottom: '1px solid var(--border-subtle)',
-        justifyContent: 'flex-end'
+        ...styles.menuBar,
+        paddingLeft: shouldReserveMacTrafficLightSpace ? '86px' : '12px'
       }}>
         {/* Logo */}
         <div style={{ 
           display: 'flex', 
           alignItems: 'center', 
           gap: '8px',
-          marginRight: 'auto',
+          marginRight: '12px',
           fontSize: '14px',
           fontWeight: '700',
           color: 'var(--primary-color)'
@@ -2241,8 +2229,63 @@ function App() {
           AI Agent
         </div>
         
+        {/* 菜单 */}
+        {MENU_ITEMS.map((menu) => (
+          <div key={menu.label} style={{ position: 'relative' }}>
+            <button
+              style={{
+                ...styles.menuItem,
+                ...(activeMenu === menu.label ? styles.menuItemActive : {})
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleMenuClick(menu.label);
+              }}
+              onMouseEnter={(e) => {
+                if (activeMenu !== null) {
+                  e.currentTarget.style.backgroundColor = 'var(--surface-hover)';
+                  e.currentTarget.style.color = 'var(--text-color)';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (activeMenu !== menu.label) {
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                  e.currentTarget.style.color = 'var(--text-muted)';
+                }
+              }}
+            >
+              {menu.label}
+            </button>
+            
+            {/* 下拉菜单 */}
+            {activeMenu === menu.label && (
+              <div style={styles.menuDropdown} onClick={(e) => e.stopPropagation()}>
+                {menu.items.map((item, index) => {
+                  if (item.type === 'divider') {
+                    return <div key={index} style={styles.menuDivider} />;
+                  }
+                  return (
+                    <button
+                      key={index}
+                      style={styles.menuDropdownItem}
+                      onClick={() => handleMenuItemClick(item)}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--surface-hover)'}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                    >
+                      <span>{item.label}</span>
+                      {item.shortcut && (
+                        <span style={styles.menuDropdownShortcut}>{item.shortcut}</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        ))}
+        
         {/* 右侧状态 */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px' }}>
           <div style={{
             display: 'flex',
             alignItems: 'center',
@@ -2269,50 +2312,17 @@ function App() {
           {!platformInfo?.isMac && (
             <div style={{ display: 'flex', gap: '4px', marginLeft: '8px' }}>
               <button 
-                style={{
-                  width: '32px',
-                  height: '32px',
-                  borderRadius: '6px',
-                  border: 'none',
-                  backgroundColor: 'transparent',
-                  color: 'var(--text-muted)',
-                  cursor: 'pointer',
-                  fontSize: '13px',
-                  fontWeight: '500',
-                  padding: 0
-                }}
+                style={{...styles.menuItem, width: '32px', height: '32px', padding: 0}}
                 onClick={handleMinimize}
                 title="最小化"
               >−</button>
               <button 
-                style={{
-                  width: '32px',
-                  height: '32px',
-                  borderRadius: '6px',
-                  border: 'none',
-                  backgroundColor: 'transparent',
-                  color: 'var(--text-muted)',
-                  cursor: 'pointer',
-                  fontSize: '13px',
-                  fontWeight: '500',
-                  padding: 0
-                }}
+                style={{...styles.menuItem, width: '32px', height: '32px', padding: 0}}
                 onClick={handleMaximize}
                 title={windowState.isMaximized ? '还原' : '最大化'}
               >{windowState.isMaximized ? '❐' : '□'}</button>
               <button 
-                style={{
-                  width: '32px',
-                  height: '32px',
-                  borderRadius: '6px',
-                  border: 'none',
-                  backgroundColor: 'transparent',
-                  color: 'var(--error-color)',
-                  cursor: 'pointer',
-                  fontSize: '13px',
-                  fontWeight: '500',
-                  padding: 0
-                }}
+                style={{...styles.menuItem, width: '32px', height: '32px', padding: 0, color: 'var(--error-color)'}}
                 onClick={handleClose}
                 title="关闭"
               >×</button>
@@ -2398,6 +2408,13 @@ function App() {
             <div style={{ display: 'flex', gap: '8px' }}>
               <button
                 style={styles.headerActionButton}
+                onClick={handleExport}
+                title="导出对话"
+              >
+                导出
+              </button>
+              <button
+                style={styles.headerActionButton}
                 onClick={() => {
                   setSummaryPanelVisible(true);
                   setActiveInspectorTab('preview');
@@ -2430,7 +2447,6 @@ function App() {
               status={runtime.status}
               onClear={runtime.clearMessages}
               onAskAgent={handleAskAgentFromMessage}
-              showHeader={false}
             />
           </div>
           
@@ -2464,17 +2480,15 @@ function App() {
               <button
                 style={{
                   ...styles.sendButton,
-                  ...(runtime.status === 'running' 
-                    ? styles.sendButtonStop 
-                    : !chatInput.trim() 
-                      ? styles.sendButtonDisabled 
-                      : {})
+                  ...(runtime.status === 'running' || !chatInput.trim() 
+                    ? styles.sendButtonDisabled 
+                    : {})
                 }}
-                onClick={runtime.status === 'running' ? runtime.stop : handleSendMessage}
-                disabled={!runtime.status && !chatInput.trim()}
-                title={runtime.status === 'running' ? "停止执行" : "发送消息 (Ctrl+Enter)"}
+                onClick={handleSendMessage}
+                disabled={runtime.status === 'running' || !chatInput.trim()}
+                title="发送消息 (Ctrl+Enter)"
               >
-                {runtime.status === 'running' ? '■' : '↑'}
+                ↑
               </button>
             </div>
             <div style={styles.inputHint}>
