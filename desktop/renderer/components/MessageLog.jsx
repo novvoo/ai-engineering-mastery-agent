@@ -210,15 +210,17 @@ const styles = {
 
   runtimeDetailsListCollapsed: {
     maxHeight: '620px',
-    overflow: 'hidden'
+    overflowY: 'auto'
   },
 
   runtimeDetailsListExpanded: {
-    maxHeight: 'min(50vh, 520px)'
+    maxHeight: 'min(50vh, 520px)',
+    overflowY: 'auto'
   },
 
   runtimeDetailsListLarge: {
-    maxHeight: 'min(72vh, 780px)'
+    maxHeight: 'min(72vh, 780px)',
+    overflowY: 'auto'
   },
 
   runtimeDetailItem: {
