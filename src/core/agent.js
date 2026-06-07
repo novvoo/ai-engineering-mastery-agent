@@ -1023,7 +1023,7 @@ export class ReActAgent {
   }
 
   #isWorkspaceInspectionTool(toolName, args) {
-    if (['list_dir', 'glob', 'search', 'semantic_search'].includes(toolName)) {
+    if (['list_dir', 'glob', 'search', 'semantic_search', 'tree', 'read_files'].includes(toolName)) {
       return true;
     }
     if (toolName === 'read_file') {

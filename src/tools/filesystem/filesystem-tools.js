@@ -6,12 +6,67 @@ import { readFile, writeFile, readdir, stat } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join, resolve } from 'path';
 import { ToolCategory } from '../../core/types.js';
+import { getFileCache } from './file-cache.js';
 
 export function createFileSystemTools() {
   return [
     {
+      name: 'read_files',
+      description: 'Read multiple files at once for efficiency. Returns contents of all files.',
+      category: ToolCategory.FILESYSTEM,
+      params: {
+        paths: { type: 'array', items: { type: 'string' }, description: 'Array of file paths to read' },
+      },
+      required: ['paths'],
+      handler: async ({ paths }, ctx) => {
+        if (!paths || !Array.isArray(paths)) {
+          return 'Error: paths must be an array of file paths.';
+        }
+
+        const cache = getFileCache();
+        const results = [];
+        const fromCache = [];
+
+        for (const path of paths) {
+          const fullPath = resolve(join(ctx.workingDirectory, path));
+          
+          if (!existsSync(fullPath)) {
+            results.push(`=== ${path} ===\nError: File not found\n`);
+            continue;
+          }
+
+          try {
+            // Check cache first
+            const cached = await cache.get(fullPath, ctx.workingDirectory, { readContent: true });
+            
+            let content;
+            if (cached.valid && cached.content !== null) {
+              content = cached.content;
+              fromCache.push(path);
+            } else {
+              content = await readFile(fullPath, 'utf-8');
+              await cache.set(fullPath, ctx.workingDirectory, content);
+            }
+            
+            const numbered = content.split('\n').map((line, i) => `${i + 1}: ${line}`).join('\n');
+            results.push(`=== ${path} ===\n${numbered}\n`);
+            await ctx.memoryManager.updateFileMap(path, 'read');
+          } catch (error) {
+            results.push(`=== ${path} ===\nError: ${error instanceof Error ? error.message : error}\n`);
+          }
+        }
+
+        if (fromCache.length > 0) {
+          results.unshift(`[Cached: ${fromCache.length}/${paths.length}] ${fromCache.join(', ')}\n`);
+        }
+        
+        return results.join('\n' + '='.repeat(40) + '\n\n');
+      },
+    },
+
+    {
       name: 'read_file',
-      description: 'Read the contents of a file. Returns the file content as text.',
+      description: 'Read the contents of a single file. For multiple files, use read_files for efficiency.',
       category: ToolCategory.FILESYSTEM,
       params: {
         path: { type: 'string', description: 'File path relative to working directory' },
@@ -21,10 +76,27 @@ export function createFileSystemTools() {
       required: ['path'],
       handler: async ({ path, offset, limit }, ctx) => {
         const fullPath = resolve(join(ctx.workingDirectory, path));
-        if (!existsSync(fullPath)) {return `Error: File not found: ${path}`;}
+        if (!existsSync(fullPath)) {
+          return `Error: File not found: ${path}`;
+        }
+
+        const cache = getFileCache();
 
         try {
-          let content = await readFile(fullPath, 'utf-8');
+          // Check cache first
+          const cached = await cache.get(fullPath, ctx.workingDirectory, { readContent: true });
+          
+          let content;
+          let fromCache = false;
+          
+          if (cached.valid && cached.content !== null) {
+            content = cached.content;
+            fromCache = true;
+          } else {
+            content = await readFile(fullPath, 'utf-8');
+            await cache.set(fullPath, ctx.workingDirectory, content);
+          }
+
           const lines = content.split('\n');
 
           if (offset || limit) {
@@ -39,7 +111,7 @@ export function createFileSystemTools() {
           // Update file map
           await ctx.memoryManager.updateFileMap(path, 'read');
 
-          return content;
+          return fromCache ? `[Cached]\n${content}` : content;
         } catch (error) {
           return `Error reading file: ${error instanceof Error ? error.message : error}`;
         }
@@ -66,6 +138,11 @@ export function createFileSystemTools() {
           }
 
           await writeFile(fullPath, content, 'utf-8');
+          
+          // Invalidate cache
+          const cache = getFileCache();
+          await cache.invalidate(fullPath, ctx.workingDirectory);
+          
           await ctx.memoryManager.updateFileMap(path, 'created/modified');
           return `File written successfully: ${path} (${content.split('\n').length} lines)`;
         } catch (error) {
@@ -86,16 +163,33 @@ export function createFileSystemTools() {
       required: ['path', 'old_text', 'new_text'],
       handler: async ({ path, old_text, new_text }, ctx) => {
         const fullPath = resolve(join(ctx.workingDirectory, path));
-        if (!existsSync(fullPath)) {return `Error: File not found: ${path}`;}
+        if (!existsSync(fullPath)) {
+          return `Error: File not found: ${path}`;
+        }
 
         try {
-          const content = await readFile(fullPath, 'utf-8');
+          const cache = getFileCache();
+          
+          // Check cache first for content
+          const cached = await cache.get(fullPath, ctx.workingDirectory, { readContent: true });
+          
+          let content;
+          if (cached.valid && cached.content !== null) {
+            content = cached.content;
+          } else {
+            content = await readFile(fullPath, 'utf-8');
+          }
+          
           if (!content.includes(old_text)) {
             return `Error: The specified old_text was not found in the file. Make sure it matches exactly.`;
           }
 
           const newContent = content.replace(old_text, new_text);
           await writeFile(fullPath, newContent, 'utf-8');
+          
+          // Invalidate cache
+          await cache.invalidate(fullPath, ctx.workingDirectory);
+          
           await ctx.memoryManager.updateFileMap(path, 'edited');
           return `File edited successfully: ${path}`;
         } catch (error) {
@@ -181,8 +275,65 @@ export function createFileSystemTools() {
     },
 
     {
+      name: 'tree',
+      description: 'Recursively list directory structure as a tree for efficient workspace inspection.',
+      category: ToolCategory.FILESYSTEM,
+      params: {
+        path: { type: 'string', description: 'Directory path (default: root)' },
+        max_depth: { type: 'number', description: 'Maximum depth to traverse (default: 3, max: 8)' },
+      },
+      required: [],
+      handler: async ({ path, max_depth }, ctx) => {
+        const rootPath = resolve(join(ctx.workingDirectory, path || '.'));
+        const maxDepth = Math.min(max_depth || 3, 8);
+        
+        const excludeDirs = new Set([
+          '.git', 'node_modules', '.agent-data', '.automation',
+          '.test-temp', 'dist', 'build', 'coverage', '.next', '.cache', '__pycache__'
+        ]);
+
+        try {
+          if (!existsSync(rootPath)) {
+            return `Error: Directory not found: ${path || '.'}`;
+          }
+
+          const results = [];
+          
+          async function traverse(currentPath, depth, prefix) {
+            if (depth > maxDepth) {return;}
+
+            const entries = await readdir(currentPath);
+            const sortedEntries = entries.filter(e => !excludeDirs.has(e));
+
+            for (let i = 0; i < sortedEntries.length; i++) {
+              const entry = sortedEntries[i];
+              const fullPath = join(currentPath, entry);
+              const s = await stat(fullPath);
+              const isLast = i === sortedEntries.length - 1;
+              const connector = isLast ? '└── ' : '├── ';
+              
+              results.push(`${prefix}${connector}${entry}${s.isDirectory() ? '/' : ''}`);
+              
+              if (s.isDirectory()) {
+                const newPrefix = prefix + (isLast ? '    ' : '│   ');
+                await traverse(fullPath, depth + 1, newPrefix);
+              }
+            }
+          }
+
+          results.push(`${rootPath.replace(ctx.workingDirectory + '/', '').replace(ctx.workingDirectory, '.')}/`);
+          await traverse(rootPath, 1, '');
+          
+          return results.join('\n');
+        } catch (error) {
+          return `Error building tree: ${error instanceof Error ? error.message : error}`;
+        }
+      },
+    },
+
+    {
       name: 'list_dir',
-      description: 'List files and directories at a given path.',
+      description: 'List files and directories at a given path. For full tree, use tree tool.',
       category: ToolCategory.FILESYSTEM,
       params: {
         path: { type: 'string', description: 'Directory path relative to working directory (default: root)' },
@@ -190,9 +341,19 @@ export function createFileSystemTools() {
       required: [],
       handler: async ({ path }, ctx) => {
         const dirPath = resolve(join(ctx.workingDirectory, (path) || '.'));
+        const cache = getFileCache();
 
         try {
-          if (!existsSync(dirPath)) {return `Error: Directory not found: ${path || '.'}`;}
+          if (!existsSync(dirPath)) {
+            return `Error: Directory not found: ${path || '.'}`;
+          }
+
+          // Check cache
+          const cached = await cache.getList(dirPath, ctx.workingDirectory);
+          if (cached) {
+            return `[Cached]\n${cached.join('\n')}`;
+          }
+
           const entries = await readdir(dirPath);
           /** @type {string[]} */
           const results = [];
@@ -203,6 +364,9 @@ export function createFileSystemTools() {
             const prefix = s.isDirectory() ? 'D ' : 'F ';
             results.push(`${prefix}${entry}`);
           }
+
+          // Cache result
+          await cache.setList(dirPath, ctx.workingDirectory, results);
 
           return results.length > 0 ? results.join('\n') : '(empty directory)';
         } catch (error) {
