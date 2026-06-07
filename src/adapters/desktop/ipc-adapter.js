@@ -436,7 +436,6 @@ export class MainProcessIPCAdapter extends IPCAdapterBase {
    */
   async initialize() {
     this.#setupIPCHandlers();
-    this.#setupEventForwarding();
     this.isConnected = true;
     this.startHeartbeat();
     
@@ -534,7 +533,7 @@ export class MainProcessIPCAdapter extends IPCAdapterBase {
 
     for (const channel of directInvokeChannels) {
       this.#ipcMain.handle(channel, async (event, ...args) => {
-        const payload = args.length <= 1 ? args[0] : args;
+        const payload = args.length <= 1 ? (args[0] ?? {}) : args;
         const message = new IPCMessage(IPCMessageType.REQUEST, payload, {
           metadata: { channel },
           source: 'renderer',
@@ -558,35 +557,6 @@ export class MainProcessIPCAdapter extends IPCAdapterBase {
     });
 
     // 处理事件取消订阅
-    this.#ipcMain.on('ipc:unsubscribe', (event, eventName) => {
-      this.#unsubscribeFromEvent(eventName, event.sender.id);
-    });
-  }
-
-  /**
-   * 设置事件转发
-   */
-  #setupEventForwarding() {
-    // 将运行时事件转发到渲染进程
-    const runtimeEvents = [
-      RuntimeEvent.AGENT_START,
-      RuntimeEvent.AGENT_STOP,
-      RuntimeEvent.AGENT_COMPLETE,
-      RuntimeEvent.AGENT_ERROR,
-      RuntimeEvent.TOOL_CALL,
-      RuntimeEvent.TOOL_RESULT,
-      RuntimeEvent.TOOL_ERROR,
-      RuntimeEvent.STATUS_UPDATE,
-      RuntimeEvent.CONFIG_CHANGE,
-      RuntimeEvent.MESSAGE_RECEIVED,
-      RuntimeEvent.MESSAGE_SENT
-    ];
-
-    for (const eventName of runtimeEvents) {
-      this.#eventBus.subscribe(eventName, (data) => {
-        this.broadcast(eventName, data);
-      });
-    }
   }
 
   /**

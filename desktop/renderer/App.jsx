@@ -39,6 +39,7 @@ const AGENT_HISTORY_UPDATED_EVENT = 'agent-history-updated';
 const AGENT_SESSIONS_STORAGE_KEY = 'agentConversationSessions';
 const ACTIVE_AGENT_SESSION_STORAGE_KEY = 'activeAgentConversationSessionId';
 const DESKTOP_LAYOUT_STORAGE_KEY = 'desktopWorkbenchLayout';
+const AGENT_SESSIONS_UPDATED_EVENT = 'agent-sessions-updated';
 const PREVIEW_URL_STORAGE_KEY = 'desktopPreviewUrl';
 const MAX_AGENT_HISTORY_ITEMS = 50;
 const MAX_AGENT_SESSIONS = 50;
@@ -562,7 +563,6 @@ const styles = {
     flex: 1,
     minHeight: 0,
     overflow: 'hidden',
-    padding: '0 20px'
   },
   
   // ================== 输入区域 ==================
@@ -819,76 +819,7 @@ const LLM_PROVIDER_OPTIONS = {
 };
 
 // Codex 风格的菜单定义
-const MENU_ITEMS = [
-  {
-    label: '文件',
-    items: [
-      { label: '新建任务', shortcut: 'Ctrl+N', command: 'newTask' },
-      { label: '切换工作目录...', shortcut: 'Ctrl+O', command: 'changeWorkspace' },
-      { type: 'divider' },
-      { label: '保存会话快照', shortcut: 'Ctrl+S', command: 'saveSession' },
-      { label: '导出对话 Markdown', shortcut: 'Ctrl+E', command: 'exportConversation' },
-      { type: 'divider' },
-      { label: '退出', shortcut: 'Ctrl+Q', command: 'quit' }
-    ]
-  },
-  {
-    label: '视图',
-    items: [
-      { label: '切换侧边栏', shortcut: 'Ctrl+B', command: 'toggleSidebar' },
-      { label: '切换 Inspector', shortcut: 'Ctrl+Shift+S', command: 'toggleSummary' },
-      { label: '最大化/还原窗口', shortcut: 'Ctrl+Shift+M', command: 'toggleMaximize' },
-      { type: 'divider' },
-      { label: 'Agent 面板', command: 'showAgent' },
-      { label: '工具面板', shortcut: 'Ctrl+T', command: 'showTools' }
-    ]
-  },
-  {
-    label: 'Agent',
-    items: [
-      { label: '聚焦输入', shortcut: 'Ctrl+Enter', command: 'focusInput' },
-      { label: '停止执行', shortcut: 'Ctrl+.', command: 'stopAgent' },
-      { type: 'divider' },
-      { label: '清除对话', command: 'clearConversation' },
-      { label: '历史记录', command: 'showHistory' },
-      { label: '文档搜索', command: 'insertDocSearch' },
-      { type: 'divider' },
-      { label: '模型配置...', shortcut: 'Ctrl+,', command: 'openModelConfig' }
-    ]
-  },
-  {
-    label: '技能',
-    items: [
-      { label: '诊断', command: 'insertCommand', value: '/diagnose symptom=' },
-      { label: '代码审查', command: 'insertCommand', value: '/review scope=' },
-      { label: 'TDD', command: 'insertCommand', value: '/tdd phase=red component=' },
-      { label: '架构设计', command: 'insertCommand', value: '/architect goal=' },
-      { label: '交接总结', command: 'insertCommand', value: '/handoff session_summary=' }
-    ]
-  },
-  {
-    label: '工具',
-    items: [
-      { label: '查看工具面板', shortcut: 'Ctrl+T', command: 'showTools' },
-      { label: '刷新项目文件', command: 'refreshProjectTree' },
-      { label: '刷新 RAG 文档', command: 'refreshRagDocs' },
-      { label: '预览当前项目', command: 'startPreview' },
-      { type: 'divider' },
-      { label: '插入 Shell 命令', command: 'insertCommand', value: '请运行命令：' },
-      { label: '插入 Web 搜索', command: 'insertCommand', value: '请搜索最新资料：' }
-    ]
-  },
-  {
-    label: '帮助',
-    items: [
-      { label: '文档', command: 'openDocs' },
-      { label: '快捷键', command: 'showShortcuts' },
-      { label: '报告问题', command: 'openIssues' },
-      { type: 'divider' },
-      { label: '关于', command: 'showAbout' }
-    ]
-  }
-];
+
 
 // 技能包定义 (Codex 2026 Style)
 const SKILL_BUNDLES = {
@@ -936,7 +867,6 @@ function App() {
   const [activeInspectorTab, setActiveInspectorTab] = useState(readStoredInspectorTab);
   const [inspectorPanelWidth, setInspectorPanelWidth] = useState(() => clampInspectorWidth(readDesktopLayout().inspectorPanelWidth));
   const [inspectorExpanded, setInspectorExpanded] = useState(() => Boolean(readDesktopLayout().inspectorExpanded));
-  const [activeMenu, setActiveMenu] = useState(null);
   const [chatInput, setChatInput] = useState('');
   const [inputFocused, setInputFocused] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -948,6 +878,7 @@ function App() {
   const [activeAgentSessionId, setActiveAgentSessionId] = useState(() => (
     localStorage.getItem(ACTIVE_AGENT_SESSION_STORAGE_KEY) || createAgentSessionId()
   ));
+  const [sessions, setSessions] = useState([]);
   
   // RAG (Retrieval-Augmented Generation) 面板状态
   const [ragDocs, setRagDocs] = useState([]); // { name, path }
@@ -1031,6 +962,20 @@ function App() {
     }
   }, []);
 
+  // 同步会话列表
+  useEffect(() => {
+    const syncSessions = () => {
+      setSessions(readAgentSessions());
+    };
+    syncSessions();
+    window.addEventListener(AGENT_SESSIONS_UPDATED_EVENT, syncSessions);
+    window.addEventListener(AGENT_HISTORY_UPDATED_EVENT, syncSessions);
+    return () => {
+      window.removeEventListener(AGENT_SESSIONS_UPDATED_EVENT, syncSessions);
+      window.removeEventListener(AGENT_HISTORY_UPDATED_EVENT, syncSessions);
+    };
+  }, []);
+
   useEffect(() => {
     if (!activeAgentSessionId || runtime.messages.length === 0) {
       return;
@@ -1052,6 +997,7 @@ function App() {
       messages: runtime.messages,
       updatedAt: Date.now()
     });
+    window.dispatchEvent(new CustomEvent(AGENT_SESSIONS_UPDATED_EVENT));
   }, [activeAgentSessionId, runtime.messages, workingDirectory]);
 
   const refreshRagDocuments = useCallback(async () => {
@@ -1497,6 +1443,61 @@ function App() {
     runtime.clearMessages();
     setChatInput('');
   }, [runtime]);
+
+const handleClearAgentHistory = useCallback(() => {
+    localStorage.removeItem(AGENT_HISTORY_STORAGE_KEY);
+    localStorage.removeItem(AGENT_SESSIONS_STORAGE_KEY);
+    localStorage.removeItem(ACTIVE_AGENT_SESSION_STORAGE_KEY);
+    skipNextSessionPersistRef.current = true;
+    setActiveAgentSessionId(createAgentSessionId());
+    window.dispatchEvent(new CustomEvent(AGENT_HISTORY_UPDATED_EVENT, {
+      detail: []
+    }));
+  }, []);
+
+
+
+  const renderSidebarContent = () => {
+    switch (activeTab) {
+      case 'agent':
+        return (
+          <AgentControl
+            runtime={runtime}
+            workingDirectory={workingDirectory}
+            onWorkingDirectoryChange={handleWorkingDirectoryChange}
+            agentOptions={agentOptions}
+            onOptionsChange={setAgentOptions}
+            onInsertText={handleInsertText}
+            sessions={sessions}
+            activeSessionId={activeAgentSessionId}
+            onSwitchSession={handleRestoreHistory}
+            onRestoreHistory={handleRestoreHistory}
+            onClearHistory={handleClearAgentHistory}
+            projectTree={{
+              directoryChildren,
+              expandedDirectories,
+              loadingDirectories,
+              status: projectTreeStatus,
+              error: projectTreeError,
+              onToggleDirectory: handleProjectDirectoryToggle,
+              onRefresh: handleProjectTreeRefresh
+            }}
+          />
+        );
+      
+      case 'tools':
+        return (
+          <ToolPanel
+            tools={runtime.tools}
+            loading={runtime.loading}
+            messages={runtime.messages}
+          />
+        );
+      
+      default:
+        return null;
+    }
+  };
   
   // 处理窗口控制
   const handleMinimize = useCallback(() => {
@@ -1551,6 +1552,105 @@ function App() {
     link.remove();
     URL.revokeObjectURL(url);
   }, [runtime.messages, workingDirectory]);
+
+  const handleSubmitAgentInput = useCallback(async (rawInput, options = {}) => {
+    const input = String(rawInput || '').trim();
+    if (!input || runtime.status === 'running') {
+      if (input && options.keepWhenBusy !== false) {
+        setChatInput(input);
+        chatInputRef.current?.focus();
+      }
+      return;
+    }
+    
+    try {
+      let sessionId = activeAgentSessionId;
+      if (!sessionId) {
+        sessionId = createAgentSessionId();
+        setActiveAgentSessionId(sessionId);
+      }
+
+      saveAgentInputHistory(input, sessionId);
+      const result = await runtime.processInput(input, agentOptions);
+      if (result?.command === '/debug' && typeof result.debug === 'boolean') {
+        setAgentOptions(prev => ({
+          ...prev,
+          debug: result.debug
+        }));
+      }
+      if (result?.command === '/preview' && result.url) {
+        setPreviewSession(result);
+        followPreviewUrl(result.url);
+        setSummaryPanelVisible(true);
+        setActiveInspectorTab('preview');
+        setPreviewStatus('ready');
+        setPreviewFrameKey(prev => prev + 1);
+      }
+      if (options.clearInput !== false) {
+        setChatInput('');
+      }
+    } catch (error) {
+      console.error('[App] 发送消息失败:', error);
+    }
+  }, [activeAgentSessionId, agentOptions, followPreviewUrl, runtime]);
+
+  const handleSendMessage = useCallback(async () => {
+    await handleSubmitAgentInput(chatInput);
+  }, [chatInput, handleSubmitAgentInput]);
+
+  const handleAskAgentFromMessage = useCallback(async (message) => {
+    const prompt = createAgentErrorPrompt(message);
+    await handleSubmitAgentInput(prompt);
+  }, [handleSubmitAgentInput]);
+
+  const handleChatInputChange = useCallback((value) => {
+    setChatInput(value);
+    setShowSuggestions(value.trimStart().startsWith('/'));
+  }, []);
+
+
+  const handleCommandSelect = useCallback((command) => {
+    setChatInput(command);
+    setShowSuggestions(false);
+    chatInputRef.current?.focus();
+  }, []);
+
+  const handleSuggestionsClose = useCallback(() => {
+    setShowSuggestions(false);
+  }, []);
+
+  const handleChatKeyDown = useCallback((e) => {
+    // Ctrl+Enter 发送消息
+    if (e.key === 'Enter' && e.ctrlKey) {
+      e.preventDefault();
+      handleSendMessage();
+    }
+    // 隐藏命令提示当按下 Escape 或 Enter(非 Ctrl)
+    if (e.key === 'Escape' || (e.key === 'Enter' && !e.ctrlKey && !showSuggestions)) {
+      setShowSuggestions(false);
+    }
+  }, [handleSendMessage, showSuggestions]);
+
+  const handleInspectorResizeStart = useCallback((event) => {
+    event.preventDefault();
+    inspectorResizeRef.current = {
+      startX: event.clientX,
+      startWidth: inspectorPanelWidth
+    };
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }, [inspectorPanelWidth]);
+
+  const handleInspectorExpandToggle = useCallback(() => {
+    setInspectorPanelWidth(prev => {
+      if (inspectorExpanded) {
+        return clampInspectorWidth(LAYOUT.inspectorPanelWidth);
+      }
+      return clampInspectorWidth(Math.max(prev, LAYOUT.inspectorExpandedWidth));
+    });
+    setInspectorExpanded(prev => !prev);
+    setSummaryPanelVisible(true);
+  }, [inspectorExpanded]);
 
   const handleLLMProviderChange = useCallback((provider) => {
     const option = LLM_PROVIDER_OPTIONS[provider] || LLM_PROVIDER_OPTIONS.openai;
@@ -1632,272 +1732,6 @@ function App() {
     setShowSuggestions(false);
   }, [handleInsertText, runtime]);
 
-  const handleClearAgentHistory = useCallback(() => {
-    localStorage.removeItem(AGENT_HISTORY_STORAGE_KEY);
-    localStorage.removeItem(AGENT_SESSIONS_STORAGE_KEY);
-    localStorage.removeItem(ACTIVE_AGENT_SESSION_STORAGE_KEY);
-    skipNextSessionPersistRef.current = true;
-    setActiveAgentSessionId(createAgentSessionId());
-    window.dispatchEvent(new CustomEvent(AGENT_HISTORY_UPDATED_EVENT, {
-      detail: []
-    }));
-  }, []);
-  
-  // ================== Codex 风格菜单处理 ==================
-  
-  const handleMenuClick = useCallback((label) => {
-    setActiveMenu(activeMenu === label ? null : label);
-  }, [activeMenu]);
-  
-  const handleMenuItemClick = useCallback(async (item) => {
-    setActiveMenu(null);
-
-    switch (item.command) {
-      case 'newTask':
-        handleNewTask();
-        break;
-      case 'changeWorkspace':
-        await handleWorkingDirectoryChange();
-        break;
-      case 'saveSession':
-        handleSaveTask();
-        break;
-      case 'exportConversation':
-        handleExport();
-        break;
-      case 'quit':
-        ipc.closeWindow();
-        break;
-      case 'toggleSidebar':
-        setSidebarCollapsed(prev => !prev);
-        break;
-      case 'toggleSummary':
-        setSummaryPanelVisible(prev => !prev);
-        break;
-      case 'toggleMaximize':
-        await ipc.maximizeWindow();
-        break;
-      case 'showAgent':
-        setSidebarCollapsed(false);
-        setActiveTab('agent');
-        break;
-      case 'showTools':
-        setSidebarCollapsed(false);
-        setActiveTab('tools');
-        break;
-      case 'focusInput':
-        chatInputRef.current?.focus();
-        break;
-      case 'stopAgent':
-        await runtime.stop();
-        break;
-      case 'clearConversation':
-        handleNewTask();
-        break;
-      case 'showHistory':
-        setSidebarCollapsed(false);
-        setActiveTab('agent');
-        break;
-      case 'insertDocSearch':
-        handleInsertText('/doc search ');
-        break;
-      case 'openModelConfig':
-        setShowLLMSetup(true);
-        break;
-      case 'insertCommand':
-        handleInsertText(item.value || '');
-        break;
-      case 'refreshProjectTree':
-        await handleProjectTreeRefresh();
-        break;
-      case 'refreshRagDocs':
-        await refreshRagDocuments();
-        break;
-      case 'startPreview':
-        await handleStartPreview('.');
-        break;
-      case 'openDocs':
-        await ipc.openExternal?.(`${REPOSITORY_URL}#readme`);
-        break;
-      case 'openIssues':
-        await ipc.openExternal?.(`${REPOSITORY_URL}/issues`);
-        break;
-      case 'showShortcuts':
-        window.alert('快捷键\n\nCtrl+Enter: 发送/聚焦输入\nCtrl+B: 切换侧边栏\nCtrl+Shift+S: 切换 Inspector\nCtrl+Shift+M: 最大化/还原窗口\nCtrl+T: 工具面板\nCtrl+.: 停止执行');
-        break;
-      case 'showAbout':
-        window.alert(`AI Agent Desktop\n\nVersion: ${platformInfo?.version || '1.0.15'}\nWorkspace: ${workingDirectory || '未设置'}`);
-        break;
-      default:
-        break;
-    }
-  }, [
-    handleExport,
-    handleInsertText,
-    handleNewTask,
-    handleProjectTreeRefresh,
-    handleSaveTask,
-    handleStartPreview,
-    handleWorkingDirectoryChange,
-    ipc,
-    platformInfo,
-    refreshRagDocuments,
-    runtime,
-    workingDirectory
-  ]);
-  
-  // 点击菜单外部关闭菜单
-  useEffect(() => {
-    const handleClickOutside = () => {
-      if (activeMenu !== null) {
-        setActiveMenu(null);
-      }
-    };
-    
-    document.addEventListener('click', handleClickOutside);
-    return () => document.removeEventListener('click', handleClickOutside);
-  }, [activeMenu]);
-  
-  // ================== 聊天输入处理 ==================
-  
-  const handleSubmitAgentInput = useCallback(async (rawInput, options = {}) => {
-    const input = String(rawInput || '').trim();
-    if (!input || runtime.status === 'running') {
-      if (input && options.keepWhenBusy !== false) {
-        setChatInput(input);
-        chatInputRef.current?.focus();
-      }
-      return;
-    }
-    
-    try {
-      let sessionId = activeAgentSessionId;
-      if (!sessionId) {
-        sessionId = createAgentSessionId();
-        setActiveAgentSessionId(sessionId);
-      }
-
-      saveAgentInputHistory(input, sessionId);
-      const result = await runtime.processInput(input, agentOptions);
-      if (result?.command === '/debug' && typeof result.debug === 'boolean') {
-        setAgentOptions(prev => ({
-          ...prev,
-          debug: result.debug
-        }));
-      }
-      if (result?.command === '/preview' && result.url) {
-        setPreviewSession(result);
-        followPreviewUrl(result.url);
-        setSummaryPanelVisible(true);
-        setActiveInspectorTab('preview');
-        setPreviewStatus('ready');
-        setPreviewFrameKey(prev => prev + 1);
-      }
-      if (options.clearInput !== false) {
-        setChatInput('');
-      }
-    } catch (error) {
-      console.error('[App] 发送消息失败:', error);
-    }
-  }, [activeAgentSessionId, agentOptions, followPreviewUrl, runtime]);
-
-  const handleSendMessage = useCallback(async () => {
-    await handleSubmitAgentInput(chatInput);
-  }, [chatInput, handleSubmitAgentInput]);
-
-  const handleAskAgentFromMessage = useCallback(async (message) => {
-    const prompt = createAgentErrorPrompt(message);
-    await handleSubmitAgentInput(prompt);
-  }, [handleSubmitAgentInput]);
-  
-  // 命令提示相关
-  const handleChatInputChange = useCallback((value) => {
-    setChatInput(value);
-    setShowSuggestions(value.trimStart().startsWith('/'));
-  }, []);
-  
-  const handleCommandSelect = useCallback((command) => {
-    setChatInput(command);
-    setShowSuggestions(false);
-    chatInputRef.current?.focus();
-  }, []);
-
-  const handleSuggestionsClose = useCallback(() => {
-    setShowSuggestions(false);
-  }, []);
-  
-  const handleChatKeyDown = useCallback((e) => {
-    // Ctrl+Enter 发送消息
-    if (e.key === 'Enter' && e.ctrlKey) {
-      e.preventDefault();
-      handleSendMessage();
-    }
-    // 隐藏命令提示当按下 Escape 或 Enter(非 Ctrl)
-    if (e.key === 'Escape' || (e.key === 'Enter' && !e.ctrlKey && !showSuggestions)) {
-      setShowSuggestions(false);
-    }
-  }, [handleSendMessage, showSuggestions]);
-
-  const handleInspectorResizeStart = useCallback((event) => {
-    event.preventDefault();
-    inspectorResizeRef.current = {
-      startX: event.clientX,
-      startWidth: inspectorPanelWidth
-    };
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-  }, [inspectorPanelWidth]);
-
-  const handleInspectorExpandToggle = useCallback(() => {
-    setInspectorPanelWidth(prev => {
-      if (inspectorExpanded) {
-        return clampInspectorWidth(LAYOUT.inspectorPanelWidth);
-      }
-      return clampInspectorWidth(Math.max(prev, LAYOUT.inspectorExpandedWidth));
-    });
-    setInspectorExpanded(prev => !prev);
-    setSummaryPanelVisible(true);
-  }, [inspectorExpanded]);
-  
-  // 渲染侧边栏内容
-  const renderSidebarContent = () => {
-    switch (activeTab) {
-      case 'agent':
-        return (
-          <AgentControl
-            runtime={runtime}
-            workingDirectory={workingDirectory}
-            onWorkingDirectoryChange={handleWorkingDirectoryChange}
-            agentOptions={agentOptions}
-            onOptionsChange={setAgentOptions}
-            onInsertText={handleInsertText}
-            onRestoreHistory={handleRestoreHistory}
-            onClearHistory={handleClearAgentHistory}
-            projectTree={{
-              directoryChildren,
-              expandedDirectories,
-              loadingDirectories,
-              status: projectTreeStatus,
-              error: projectTreeError,
-              onToggleDirectory: handleProjectDirectoryToggle,
-              onRefresh: handleProjectTreeRefresh
-            }}
-          />
-        );
-      
-      case 'tools':
-        return (
-          <ToolPanel
-            tools={runtime.tools}
-            loading={runtime.loading}
-            messages={runtime.messages}
-          />
-        );
-      
-      default:
-        return null;
-    }
-  };
 
   // ================== 渲染 Inspector 面板 ==================
   const renderSummaryPanel = () => {
@@ -2202,7 +2036,8 @@ function App() {
       {/* 顶部菜单栏 */}
       <header style={{
         ...styles.menuBar,
-        paddingLeft: shouldReserveMacTrafficLightSpace ? '86px' : '12px'
+        paddingLeft: shouldReserveMacTrafficLightSpace ? '86px' : '12px',
+        WebkitAppRegion: 'drag'
       }}>
         {/* Logo */}
         <div style={{ 
@@ -2212,7 +2047,8 @@ function App() {
           marginRight: '12px',
           fontSize: '14px',
           fontWeight: '700',
-          color: 'var(--primary-color)'
+          color: 'var(--primary-color)',
+          WebkitAppRegion: 'no-drag'
         }}>
           <span style={{
             width: '28px',
@@ -2229,63 +2065,8 @@ function App() {
           AI Agent
         </div>
         
-        {/* 菜单 */}
-        {MENU_ITEMS.map((menu) => (
-          <div key={menu.label} style={{ position: 'relative' }}>
-            <button
-              style={{
-                ...styles.menuItem,
-                ...(activeMenu === menu.label ? styles.menuItemActive : {})
-              }}
-              onClick={(e) => {
-                e.stopPropagation();
-                handleMenuClick(menu.label);
-              }}
-              onMouseEnter={(e) => {
-                if (activeMenu !== null) {
-                  e.currentTarget.style.backgroundColor = 'var(--surface-hover)';
-                  e.currentTarget.style.color = 'var(--text-color)';
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (activeMenu !== menu.label) {
-                  e.currentTarget.style.backgroundColor = 'transparent';
-                  e.currentTarget.style.color = 'var(--text-muted)';
-                }
-              }}
-            >
-              {menu.label}
-            </button>
-            
-            {/* 下拉菜单 */}
-            {activeMenu === menu.label && (
-              <div style={styles.menuDropdown} onClick={(e) => e.stopPropagation()}>
-                {menu.items.map((item, index) => {
-                  if (item.type === 'divider') {
-                    return <div key={index} style={styles.menuDivider} />;
-                  }
-                  return (
-                    <button
-                      key={index}
-                      style={styles.menuDropdownItem}
-                      onClick={() => handleMenuItemClick(item)}
-                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--surface-hover)'}
-                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-                    >
-                      <span>{item.label}</span>
-                      {item.shortcut && (
-                        <span style={styles.menuDropdownShortcut}>{item.shortcut}</span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        ))}
-        
         {/* 右侧状态 */}
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px', WebkitAppRegion: 'no-drag' }}>
           <div style={{
             display: 'flex',
             alignItems: 'center',
@@ -2376,13 +2157,24 @@ function App() {
           <aside style={styles.leftSidebar}>
             <div style={styles.sidebarHeader}>
               <span style={styles.sidebarTitle}>{activeTab === 'tools' ? '工具' : 'Agent'}</span>
-              <button
-                style={{ ...styles.button, width: '30px', height: '28px', padding: 0 }}
-                onClick={() => setSidebarCollapsed(true)}
-                title="收起侧边栏"
-              >
-                ×
-              </button>
+              <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                {activeTab !== 'tools' && (
+                  <button
+                    style={{ ...styles.button, width: '26px', height: '26px', padding: 0, fontSize: '14px' }}
+                    onClick={handleNewTask}
+                    title="新对话"
+                  >
+                    +
+                  </button>
+                )}
+                <button
+                  style={{ ...styles.button, width: '26px', height: '26px', padding: 0, fontSize: '14px' }}
+                  onClick={() => setSidebarCollapsed(true)}
+                  title="收起侧边栏"
+                >
+                  ×
+                </button>
+              </div>
             </div>
             {renderSidebarContent()}
           </aside>

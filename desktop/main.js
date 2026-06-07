@@ -136,15 +136,16 @@ class ElectronMainApp {
     // 等待 Electron app 就绪
     await app.whenReady();
 
-   // 创建菜单
-  this.#createMenu();
+    // 创建菜单
+    this.#createMenu();
 
-    // 初始化 Desktop Core 和 IPC 适配器（必须在窗口创建前完成）
-    // 确保渲染进程 preload 执行时 ipc:connect handler 已注册，
-    // 避免 "No handler registered for 'ipc:connect'" 错误。
+    // 先初始化 Desktop Core 和 IPC，再创建窗口
+    // 确保 ipc:connect 等处理器在渲染进程连接前已注册
     await this.#initializeDesktopCore();
     await this.#attachConfiguredModelProvider();
     await this.#initializeIPCAdapter();
+
+    // 创建主窗口
     this.#createMainWindow();
 
     // 创建托盘图标（如果启用）
@@ -181,6 +182,12 @@ class ElectronMainApp {
    * 创建应用菜单
    */
   #createMenu() {
+    const sendMenuAction = (command, payload) => {
+      const win = BrowserWindow.getAllWindows().find(w => !w.isDestroyed());
+      if (win) {
+        win.webContents.send('app:menuAction', { command, ...payload });
+      }
+    };
     const template = [
       // 应用菜单（macOS）
       ...(process.platform === 'darwin' ? [{
@@ -203,23 +210,28 @@ class ElectronMainApp {
         label: '文件',
         submenu: [
           {
-            label: '新建工作区',
+            label: '新建任务',
             accelerator: 'CmdOrCtrl+N',
-            click: () => this.#handleNewProject()
+            click: () => sendMenuAction('newTask')
           },
           {
-            label: '打开工作区',
+            label: '切换工作目录...',
             accelerator: 'CmdOrCtrl+O',
             click: () => this.#handleOpenProject()
           },
           { type: 'separator' },
           {
-            label: '保存配置',
+            label: '保存会话快照',
             accelerator: 'CmdOrCtrl+S',
-            click: () => this.#handleSaveConfig()
+            click: () => sendMenuAction('saveSession')
+          },
+          {
+            label: '导出对话',
+            accelerator: 'CmdOrCtrl+E',
+            click: () => sendMenuAction('exportConversation')
           },
           { type: 'separator' },
-          process.platform === 'darwin' ? { role: 'close' } : { role: 'quit' }
+          { role: 'quit', label: process.platform === 'darwin' ? '退出 AI Agent' : '退出' }
         ]
       },
       
@@ -236,6 +248,52 @@ class ElectronMainApp {
           { role: 'delete' },
           { type: 'separator' },
           { role: 'selectAll' }
+        ]
+      },
+      {
+        label: 'Agent',
+        submenu: [
+          {
+            label: '聚焦输入',
+            accelerator: 'CmdOrCtrl+Enter',
+            click: () => sendMenuAction('focusInput')
+          },
+          {
+            label: '停止执行',
+            accelerator: 'CmdOrCtrl+.',
+            click: () => sendMenuAction('stopAgent')
+          },
+          { type: 'separator' },
+          { label: '清除对话', click: () => sendMenuAction('clearConversation') },
+          { label: '文档搜索', click: () => sendMenuAction('insertDocSearch') },
+          { type: 'separator' },
+          { label: '模型配置...', accelerator: 'CmdOrCtrl+,', click: () => sendMenuAction('openModelConfig') }
+        ]
+      },
+      {
+        label: '技能',
+        submenu: [
+          { label: '诊断', click: () => sendMenuAction('insertCommand', { value: '/diagnose symptom=' }) },
+          { label: '代码审查', click: () => sendMenuAction('insertCommand', { value: '/review scope=' }) },
+          { label: 'TDD', click: () => sendMenuAction('insertCommand', { value: '/tdd phase=red component=' }) },
+          { label: '架构设计', click: () => sendMenuAction('insertCommand', { value: '/architect goal=' }) },
+          { label: '交接总结', click: () => sendMenuAction('insertCommand', { value: '/handoff session_summary=' }) }
+        ]
+      },
+      {
+        label: '视图',
+        submenu: [
+          { label: '切换侧边栏', accelerator: 'CmdOrCtrl+B', click: () => sendMenuAction('toggleSidebar') },
+          { label: '切换 Inspector', accelerator: 'CmdOrCtrl+Shift+S', click: () => sendMenuAction('toggleSummary') },
+          { label: 'Agent 面板', click: () => sendMenuAction('showAgent') },
+          { label: '工具面板', accelerator: 'CmdOrCtrl+T', click: () => sendMenuAction('showTools') },
+          { type: 'separator' },
+          { label: '刷新项目文件', click: () => sendMenuAction('refreshProjectTree') },
+          { label: '刷新 RAG 文档', click: () => sendMenuAction('refreshRagDocs') },
+          { label: '预览当前项目', click: () => sendMenuAction('startPreview') },
+          { type: 'separator' },
+          { role: 'toggleDevTools' },
+          { role: 'togglefullscreen' }
         ]
       },
       
@@ -418,6 +476,13 @@ class ElectronMainApp {
    * 处理窗口关闭
    */
   #handleWindowClose() {
+    // macOS: 点击红绿灯关闭按钮时直接隐藏窗口（macOS 标准行为）
+    if (process.platform === 'darwin') {
+      this.#mainWindow.hide();
+      return;
+    }
+
+    // Windows/Linux: 显示退出确认对话框
     const choice = dialog.showMessageBoxSync(this.#mainWindow, {
       type: 'question',
       buttons: ['最小化到托盘', '退出应用', '取消'],

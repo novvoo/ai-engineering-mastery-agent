@@ -13,22 +13,8 @@
 
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 
-const AGENT_HISTORY_STORAGE_KEY = 'agentHistory';
-const AGENT_HISTORY_UPDATED_EVENT = 'agent-history-updated';
-const AGENT_SESSIONS_STORAGE_KEY = 'agentConversationSessions';
+// removed
 const ACTIVE_AGENT_SESSION_STORAGE_KEY = 'activeAgentConversationSessionId';
-
-function readAgentHistory() {
-  try {
-    const savedHistory = localStorage.getItem(AGENT_HISTORY_STORAGE_KEY);
-    if (!savedHistory) return [];
-    const parsed = JSON.parse(savedHistory);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (error) {
-    console.error('[AgentControl] 加载历史记录失败:', error);
-    return [];
-  }
-}
 
 // 样式定义
 const styles = {
@@ -606,78 +592,25 @@ function AgentControl({
   agentOptions,
   onOptionsChange,
   onInsertText,
+  sessions,
+  activeSessionId,
+  onSwitchSession,
   onRestoreHistory,
   onClearHistory,
   projectTree
 }) {
   // 状态
-  const [history, setHistory] = useState([]);
-  const [historySearch, setHistorySearch] = useState('');
+
   const [showTemplates, setShowTemplates] = useState(false);
   const [hoveredHistoryItem, setHoveredHistoryItem] = useState(null);
   
-  // 加载历史记录
-  useEffect(() => {
-    const loadHistory = () => setHistory(readAgentHistory());
-    const handleHistoryUpdated = (event) => {
-      if (Array.isArray(event.detail)) {
-        setHistory(event.detail);
-        return;
-      }
-      loadHistory();
-    };
 
-    loadHistory();
-    window.addEventListener(AGENT_HISTORY_UPDATED_EVENT, handleHistoryUpdated);
-    return () => window.removeEventListener(AGENT_HISTORY_UPDATED_EVENT, handleHistoryUpdated);
-  }, []);
   
-  const handleHistoryClick = useCallback((item) => {
-    if (onRestoreHistory) {
-      onRestoreHistory(item);
-      return;
-    }
-    if (onInsertText) {
-      onInsertText(item.input);
-    }
-  }, [onInsertText, onRestoreHistory]);
+
   
-  const handleHistoryDelete = useCallback((targetItem) => {
-    const newHistory = history.filter(item => (
-      item !== targetItem &&
-      !(
-        item?.input === targetItem?.input &&
-        item?.timestamp === targetItem?.timestamp &&
-        item?.sessionId === targetItem?.sessionId
-      )
-    ));
-    setHistory(newHistory);
-    localStorage.setItem(AGENT_HISTORY_STORAGE_KEY, JSON.stringify(newHistory));
-    window.dispatchEvent(new CustomEvent(AGENT_HISTORY_UPDATED_EVENT, {
-      detail: newHistory
-    }));
-  }, [history]);
 
-  const handleHistoryClear = useCallback(() => {
-    if (history.length === 0) {
-      return;
-    }
 
-    setHistory([]);
-    setHistorySearch('');
 
-    if (onClearHistory) {
-      onClearHistory();
-      return;
-    }
-
-    localStorage.removeItem(AGENT_HISTORY_STORAGE_KEY);
-    localStorage.removeItem(AGENT_SESSIONS_STORAGE_KEY);
-    localStorage.removeItem(ACTIVE_AGENT_SESSION_STORAGE_KEY);
-    window.dispatchEvent(new CustomEvent(AGENT_HISTORY_UPDATED_EVENT, {
-      detail: []
-    }));
-  }, [history.length, onClearHistory]);
   
   const handleQuickCommandClick = useCallback((cmd) => {
     if (onInsertText) {
@@ -701,13 +634,7 @@ function AgentControl({
     }
   }, [onOptionsChange]);
   
-  // 过滤历史记录
-  const filteredHistory = useMemo(() => {
-    if (!historySearch) return history;
-    return history.filter(item => 
-      item.input.toLowerCase().includes(historySearch.toLowerCase())
-    );
-  }, [history, historySearch]);
+
   
   // 获取状态样式
   const getStatusStyle = () => {
@@ -948,92 +875,65 @@ function AgentControl({
         </div>
       </div>
       
-      {/* 历史记录 */}
+      {/* 历史会话 */}
       <div style={styles.section}>
         <div style={styles.sectionTitle}>
           <span>📜</span>
-          <span>历史记录</span>
+          <span>历史会话</span>
           <span style={{
             fontSize: '12px',
             color: 'var(--text-muted)',
             marginLeft: '4px'
           }}>
-            ({filteredHistory.length}/{history.length})
+            ({sessions.length})
           </span>
           <button
             type="button"
             style={{
               ...styles.clearButton,
               marginLeft: 'auto',
-              opacity: history.length === 0 ? 0.45 : 1,
-              cursor: history.length === 0 ? 'not-allowed' : 'pointer'
+              opacity: sessions.length === 0 ? 0.45 : 1,
+              cursor: sessions.length === 0 ? 'not-allowed' : 'pointer'
             }}
-            onClick={handleHistoryClear}
-            disabled={history.length === 0}
-            title="清空历史记录和可恢复会话"
+            onClick={onClearHistory}
+            disabled={sessions.length === 0}
+            title="清空所有会话"
           >
             清空
           </button>
         </div>
         
-        {/* 搜索 */}
-        <input
-          style={styles.historySearch}
-          value={historySearch}
-          onChange={(e) => setHistorySearch(e.target.value)}
-          placeholder="🔍 搜索历史记录..."
-          disabled={history.length === 0}
-        />
-        
         {/* 列表 */}
         <div style={styles.historySection}>
           <div style={styles.historyList}>
-            {filteredHistory.map((item, index) => (
-              <div
-                key={`${item.timestamp || index}-${item.input}`}
-                style={{
-                  ...styles.historyItem,
-                  ...(hoveredHistoryItem === index ? styles.historyItemHover : {})
-                }}
-                onClick={() => handleHistoryClick(item)}
-                onMouseEnter={() => setHoveredHistoryItem(index)}
-                onMouseLeave={() => setHoveredHistoryItem(null)}
-                title={item.sessionId ? `恢复会话: ${item.input}` : item.input}
-              >
-                <div style={styles.historyItemContent}>
-                  {item.input}
-                </div>
-                <div style={styles.historyItemTime}>
-                  {item.timestamp ? new Date(item.timestamp).toLocaleString() : ''}
-                  {item.sessionId ? ' · 可恢复' : ''}
-                </div>
-                <button
+            {sessions.map((session) => {
+              const isActive = session.id === activeSessionId;
+              return (
+                <div
+                  key={session.id}
                   style={{
-                    ...styles.historyItemDelete,
-                    ...(hoveredHistoryItem === index ? styles.historyItemDeleteVisible : {})
+                    ...styles.historyItem,
+                    ...(isActive ? styles.historyItemHover : {}),
+                    border: isActive ? '1px solid var(--primary-color)' : '1px solid transparent'
                   }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleHistoryDelete(item);
-                  }}
-                  title="删除此记录"
-                  onMouseEnter={(e) => e.currentTarget.style.color = 'var(--error-color)'}
-                  onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-muted)'}
+                  onClick={() => onSwitchSession(session.id)}
+                  title={'切换到会话: ' + (session.title || session.id)}
                 >
-                  ✖️
-                </button>
-              </div>
-            ))}
+                  <div style={styles.historyItemContent}>
+                    {session.title || '(未命名会话)'}
+                  </div>
+                  <div style={styles.historyItemTime}>
+                    {session.updatedAt ? new Date(session.updatedAt).toLocaleString() : ''}
+                    {' · ' + (session.messages ? session.messages.length : 0) + '条消息'}
+                    {isActive ? ' · 当前' : ''}
+                  </div>
+                </div>
+              );
+            })}
             
-            {history.length === 0 && (
+            {sessions.length === 0 && (
               <div style={styles.emptyHistory}>
-                暂无历史记录，发送第一条消息后会自动保存
-              </div>
-            )}
-
-            {filteredHistory.length === 0 && history.length > 0 && (
-              <div style={styles.emptyHistory}>
-                没有找到匹配的历史记录
+                暂无会话，发送一条消息后会自动创建
               </div>
             )}
           </div>

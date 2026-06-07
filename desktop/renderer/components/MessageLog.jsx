@@ -126,7 +126,7 @@ const styles = {
   messageList: {
     flex: 1,
     overflowY: 'auto',
-    padding: '14px',
+    padding: '14px 0',
     scrollBehavior: 'smooth'
   },
 
@@ -212,15 +212,15 @@ const styles = {
   },
 
   runtimeDetailsListCollapsed: {
-    maxHeight: '156px'
+    maxHeight: '240px'
   },
 
   runtimeDetailsListExpanded: {
-    maxHeight: 'min(50vh, 420px)'
+    maxHeight: 'min(65vh, 600px)'
   },
 
   runtimeDetailsListLarge: {
-    maxHeight: 'min(72vh, 680px)'
+    maxHeight: 'min(85vh, 960px)'
   },
 
   runtimeDetailItem: {
@@ -410,7 +410,7 @@ const styles = {
   messageContent: {
     fontSize: '13px',
     color: 'var(--text-color)',
-    lineHeight: '1.6',
+    lineHeight: '1.45',
     whiteSpace: 'pre-wrap',
     wordBreak: 'break-word',
     maxHeight: '300px',
@@ -916,6 +916,37 @@ function MessageLog({ messages, status, onClear, onAskAgent }) {
       return next;
     });
   }, []);
+
+  /**
+   * 导出运行详情为 JSON 文件
+   */
+  const handleExportRuntimeDetails = useCallback((group) => {
+    const details = group?.runtimeDetails || [];
+    if (details.length === 0) return;
+
+    const exportData = details.map(msg => ({
+      event: msg.event || msg.type || 'unknown',
+      type: msg.type || 'unknown',
+      timestamp: msg.timestamp ? new Date(msg.timestamp).toISOString() : null,
+      toolName: msg.toolName || null,
+      content: msg.content || msg.message || null,
+      args: msg.args || null,
+      result: msg.result || null,
+    }));
+
+    const blob = new Blob(
+      [JSON.stringify(exportData, null, 2)],
+      { type: 'application/json;charset=utf-8' }
+    );
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `runtime-details-${Date.now()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, []);
   
   // 处理自动滚动变更
   const handleAutoScrollChange = useCallback(() => {
@@ -1117,15 +1148,13 @@ function MessageLog({ messages, status, onClear, onAskAgent }) {
           ...styles.messageContent,
           ...(isCollapsed ? styles.messageContentCollapsed : {})
         }}>
-          {msg.type === 'agent' ? (
+          {msg.content || msg.message ? (
             <div className="markdown">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
                 {msg.content || msg.message || ''}
               </ReactMarkdown>
             </div>
-          ) : (
-            msg.content || msg.message || ''
-          )}
+          ) : null}
         </div>
         
         {/* 元数据 */}
@@ -1281,6 +1310,18 @@ function MessageLog({ messages, status, onClear, onAskAgent }) {
             <button
               type="button"
               style={styles.runtimeDetailsToggle}
+              title="导出运行详情为 JSON"
+              aria-label="导出运行详情"
+              onClick={(event) => {
+                event.stopPropagation();
+                handleExportRuntimeDetails(group);
+              }}
+            >
+              ↓
+            </button>
+            <button
+              type="button"
+              style={styles.runtimeDetailsToggle}
               title={isLarge ? '还原执行过程窗口' : '放大执行过程窗口'}
               aria-label={isLarge ? '还原执行过程窗口' : '放大执行过程窗口'}
               onClick={(event) => {
@@ -1342,34 +1383,69 @@ function MessageLog({ messages, status, onClear, onAskAgent }) {
               const typeDisplay = getTypeDisplay(msg.type);
               const isDebug = msg.type === 'debug';
               const content = getRuntimeDetailContent(msg);
+              const firstLine = content ? content.split('\n')[0].trim() : '(无内容)';
               return (
                 <div
                   key={runtimeDetailId}
                   style={{
                     ...styles.runtimeDetailItem,
                     ...styles.runtimeDetailItemInteractive,
-                    ...(isDebug ? styles.runtimeDetailItemDebug : styles.runtimeDetailItemStatus)
+                    ...(isDebug ? styles.runtimeDetailItemDebug : styles.runtimeDetailItemStatus),
+                    ...(isExpanded ? {} : { padding: '3px 8px' })
                   }}
                   onClick={() => handleRuntimeDetailToggle(runtimeDetailId)}
-                  title={isExpanded ? '收起这条运行消息' : '展开这条运行消息'}
+                  title={isExpanded ? '收起' : '展开'}
                 >
-                  <div style={styles.runtimeDetailMeta}>
-                    <span>{typeDisplay.text}</span>
-                    <span>
-                      {isExpanded ? '收起' : '展开'}
-                      {msg.timestamp ? ` · ${new Date(msg.timestamp).toLocaleTimeString()}` : ''}
+                  <div style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: '8px',
+                    color: 'var(--text-dark)',
+                    fontSize: '11px',
+                    ...(isExpanded ? { marginBottom: '4px' } : {})
+                  }}>
+                    <span style={{
+                      flex: isExpanded ? '0 0 auto' : 1,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}>
+                      <span style={{ flexShrink: 0 }}>{typeDisplay.text}</span>
+                      {!isExpanded && (
+                        <span style={{
+                          marginLeft: '4px',
+                          color: 'var(--text-muted)',
+                          fontWeight: 400,
+                          fontSize: '11px',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap'
+                        }}>
+                          {firstLine.substring(0, 120)}
+                        </span>
+                      )}
+                    </span>
+                    <span style={{ flexShrink: 0 }}>
+                      {msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString() : ''}
+                      <span style={{ marginLeft: '6px', cursor: 'pointer', color: 'var(--text-muted)' }}>
+                        {isExpanded ? '▾' : '▸'}
+                      </span>
                     </span>
                   </div>
-                  <div
-                    style={{
-                      ...styles.runtimeDetailContent,
-                      ...(isExpanded
-                        ? styles.runtimeDetailContentExpanded
-                        : styles.runtimeDetailContentCollapsed)
-                    }}
-                  >
-                    {content || '(无内容)'}
-                  </div>
+                  {isExpanded && (
+                    <div
+                      style={{
+                        ...styles.runtimeDetailContent,
+                        ...styles.runtimeDetailContentExpanded
+                      }}
+                    >
+                      {content || '(无内容)'}
+                    </div>
+                  )}
                 </div>
               );
             })}
