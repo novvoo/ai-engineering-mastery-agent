@@ -777,13 +777,6 @@ function AgentControl({
       
       {/* 快捷命令面板已移除 */}
       
-      {/* 输入区域 */}
-      <div style={styles.section}>
-        <div style={styles.sectionTitle}>
-          <span>输入任务</span>
-        </div>
-      </div>
-      
       {/* 执行选项 */}
       <div style={styles.section}>
         <div style={styles.sectionTitle}>
