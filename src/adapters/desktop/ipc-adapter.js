@@ -525,6 +525,9 @@ export class MainProcessIPCAdapter extends IPCAdapterBase {
       'app:openExternal',
       'workspace:setWorkingDirectory',
       'workspace:listDirectory',
+      'preview:start',
+      'preview:list',
+      'preview:stop',
       'llm:getConfigStatus',
       'llm:saveConfig'
     ];

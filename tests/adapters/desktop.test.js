@@ -25,7 +25,7 @@ import {
   createUIBridge
 } from '../../src/adapters/desktop/desktop-core.js';
 import { getEventBus, RuntimeEvent } from '../../src/runtime/index.js';
-import { stopAllPreviews } from '../../src/core/preview-server.js';
+import { listPreviews, startPreview, stopAllPreviews, stopPreview } from '../../src/core/preview-server.js';
 
 // ==================== IPCMessage 测试 ====================
 
@@ -471,6 +471,53 @@ describe('MainProcessIPCAdapter', () => {
 
       const html = await fetch(result.url).then(response => response.text());
       expect(html).toContain('Desktop Preview');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('应该为 Desktop preload 直接注册 preview invoke 通道', async () => {
+    await adapter.initialize();
+
+    const root = mkdtempSync(join(tmpdir(), 'desktop-preview-direct-'));
+    writeFileSync(join(root, 'index.html'), '<h1>Direct Preview</h1>');
+
+    const mockEngine = {
+      processInput: async () => ({ result: 'agent path' }),
+      getConfig: () => ({ workingDirectory: root, debug: false }),
+      stop: () => {},
+      getState: () => ({ status: 'idle' }),
+      getTools: () => []
+    };
+    adapter.attachEngine(mockEngine);
+    adapter.registerHandler('preview:start', async (options = {}) => startPreview({
+      workingDirectory: root,
+      ...options
+    }));
+    adapter.registerHandler('preview:list', async () => ({ success: true, previews: listPreviews() }));
+    adapter.registerHandler('preview:stop', async (sessionId) => stopPreview(sessionId));
+
+    try {
+      const startResult = await mockIpcMain.simulateHandle(
+        'preview:start',
+        { sender: { id: 123 } },
+        { target: 'index.html', kind: 'static' }
+      );
+      expect(startResult.url).toContain('127.0.0.1');
+
+      const listResult = await mockIpcMain.simulateHandle(
+        'preview:list',
+        { sender: { id: 123 } }
+      );
+      expect(listResult.success).toBe(true);
+      expect(listResult.previews.some(preview => preview.session_id === startResult.session_id)).toBe(true);
+
+      const stopResult = await mockIpcMain.simulateHandle(
+        'preview:stop',
+        { sender: { id: 123 } },
+        startResult.session_id
+      );
+      expect(stopResult.success).toBe(true);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
