@@ -5,14 +5,19 @@
 import { spawn } from 'child_process';
 import { once } from 'events';
 import net from 'net';
+import { resolve } from 'path';
 import { setTimeout as delay } from 'timers/promises';
+import { fileURLToPath } from 'url';
 
-const DEFAULT_DEV_SERVER_URL = process.env.DEV_SERVER_URL || 'http://127.0.0.1:5173';
+export const DESKTOP_RENDERER_HOST = '127.0.0.1';
+export const DESKTOP_RENDERER_PORT_START = 5173;
+export const DESKTOP_RENDERER_PORT_END = 5199;
+export const DEFAULT_DEV_SERVER_URL = `http://${DESKTOP_RENDERER_HOST}:${DESKTOP_RENDERER_PORT_START}/`;
 
 const children = new Set();
 let shuttingDown = false;
 
-function run(command, args, options = {}) {
+export function run(command, args, options = {}) {
   const child = spawn(command, args, {
     stdio: 'inherit',
     shell: process.platform === 'win32',
@@ -24,7 +29,7 @@ function run(command, args, options = {}) {
   return child;
 }
 
-async function waitForServer(url, timeoutMs = 30000) {
+export async function waitForServer(url, timeoutMs = 30000) {
   const startedAt = Date.now();
 
   while (Date.now() - startedAt < timeoutMs) {
@@ -41,7 +46,7 @@ async function waitForServer(url, timeoutMs = 30000) {
   throw new Error(`Renderer dev server did not start at ${url}`);
 }
 
-function isPortAvailable(port, host) {
+export function isPortAvailable(port, host) {
   return new Promise((resolve) => {
     const server = net.createServer();
 
@@ -53,12 +58,16 @@ function isPortAvailable(port, host) {
   });
 }
 
-async function resolveDevServerUrl() {
-  const url = new URL(DEFAULT_DEV_SERVER_URL);
+export async function resolveDevServerUrl({
+  defaultUrl = process.env.DEV_SERVER_URL || DEFAULT_DEV_SERVER_URL,
+  env = process.env,
+  isPortAvailableFn = isPortAvailable
+} = {}) {
+  const url = new URL(defaultUrl);
   const host = url.hostname || '127.0.0.1';
-  const requestedPort = Number(url.port || 5173);
+  const requestedPort = Number(url.port || DESKTOP_RENDERER_PORT_START);
 
-  if (process.env.DEV_SERVER_URL) {
+  if (env.DEV_SERVER_URL) {
     return {
       url: url.toString(),
       host,
@@ -67,9 +76,9 @@ async function resolveDevServerUrl() {
     };
   }
 
-  for (let offset = 0; offset < 20; offset += 1) {
-    const candidatePort = requestedPort + offset;
-    if (await isPortAvailable(candidatePort, host)) {
+  const lastPort = Math.max(requestedPort, DESKTOP_RENDERER_PORT_END);
+  for (let candidatePort = requestedPort; candidatePort <= lastPort; candidatePort += 1) {
+    if (await isPortAvailableFn(candidatePort, host)) {
       url.port = String(candidatePort);
       return {
         url: url.toString(),
@@ -80,7 +89,7 @@ async function resolveDevServerUrl() {
     }
   }
 
-  throw new Error(`No available renderer dev server port found from ${requestedPort} to ${requestedPort + 19}`);
+  throw new Error(`No available Electron renderer dev server port found from ${requestedPort} to ${lastPort}`);
 }
 
 function shutdown(code = 0) {
@@ -97,7 +106,7 @@ function shutdown(code = 0) {
 process.on('SIGINT', () => shutdown(0));
 process.on('SIGTERM', () => shutdown(0));
 
-async function main() {
+export async function main() {
   const devServer = await resolveDevServerUrl();
   const vite = run('npx', [
     'vite',
@@ -128,7 +137,11 @@ async function main() {
   shutdown(code || 0);
 }
 
-main().catch((error) => {
-  console.error(error);
-  shutdown(1);
-});
+const isDirectRun = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (isDirectRun) {
+  main().catch((error) => {
+    console.error(error);
+    shutdown(1);
+  });
+}

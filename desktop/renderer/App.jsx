@@ -17,6 +17,7 @@ import StatusBar from './components/StatusBar.jsx';
 import CommandSuggestions from './components/CommandSuggestions.jsx';
 import { useRuntime } from './hooks/useRuntime.js';
 import { useIPC } from './hooks/useIPC.js';
+import { formatPreviewUrlInput, normalizePreviewUrlInput } from './preview-url.js';
 import './index.css';
 
 // Codex 2026 风格布局常量
@@ -34,8 +35,29 @@ const AGENT_HISTORY_STORAGE_KEY = 'agentHistory';
 const AGENT_HISTORY_UPDATED_EVENT = 'agent-history-updated';
 const AGENT_SESSIONS_STORAGE_KEY = 'agentConversationSessions';
 const ACTIVE_AGENT_SESSION_STORAGE_KEY = 'activeAgentConversationSessionId';
+const DESKTOP_LAYOUT_STORAGE_KEY = 'desktopWorkbenchLayout';
+const PREVIEW_URL_STORAGE_KEY = 'desktopPreviewUrl';
 const MAX_AGENT_HISTORY_ITEMS = 50;
 const MAX_AGENT_SESSIONS = 50;
+
+function readDesktopLayout() {
+  try {
+    const raw = localStorage.getItem(DESKTOP_LAYOUT_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function readStoredPreviewUrl() {
+  try {
+    return normalizePreviewUrlInput(localStorage.getItem(PREVIEW_URL_STORAGE_KEY));
+  } catch {
+    return null;
+  }
+}
 
 function readAgentHistory() {
   try {
@@ -848,9 +870,9 @@ function App() {
   });
   
   // Codex 风格新状态
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [summaryPanelVisible, setSummaryPanelVisible] = useState(false);
-  const [activeInspectorTab, setActiveInspectorTab] = useState('rag');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => Boolean(readDesktopLayout().sidebarCollapsed));
+  const [summaryPanelVisible, setSummaryPanelVisible] = useState(() => Boolean(readDesktopLayout().summaryPanelVisible));
+  const [activeInspectorTab, setActiveInspectorTab] = useState(() => readDesktopLayout().activeInspectorTab || 'rag');
   const [activeMenu, setActiveMenu] = useState(null);
   const [chatInput, setChatInput] = useState('');
   const [inputFocused, setInputFocused] = useState(false);
@@ -889,6 +911,11 @@ function App() {
   const [previewSession, setPreviewSession] = useState(null);
   const [previewStatus, setPreviewStatus] = useState('idle');
   const [previewFrameKey, setPreviewFrameKey] = useState(0);
+  const [activePreviewUrl, setActivePreviewUrl] = useState(readStoredPreviewUrl);
+  const [previewUrlDraft, setPreviewUrlDraft] = useState(() => {
+    const storedUrl = readStoredPreviewUrl();
+    return storedUrl ? formatPreviewUrlInput(storedUrl) : '';
+  });
   
   // 使用自定义 Hooks
   const runtime = useRuntime();
@@ -901,6 +928,19 @@ function App() {
   useEffect(() => {
     directoryChildrenRef.current = directoryChildren;
   }, [directoryChildren]);
+
+  useEffect(() => {
+    localStorage.setItem(DESKTOP_LAYOUT_STORAGE_KEY, JSON.stringify({
+      sidebarCollapsed,
+      summaryPanelVisible,
+      activeInspectorTab
+    }));
+  }, [activeInspectorTab, sidebarCollapsed, summaryPanelVisible]);
+
+  useEffect(() => {
+    if (!activePreviewUrl) return;
+    localStorage.setItem(PREVIEW_URL_STORAGE_KEY, activePreviewUrl);
+  }, [activePreviewUrl]);
 
   useEffect(() => {
     localStorage.setItem(ACTIVE_AGENT_SESSION_STORAGE_KEY, activeAgentSessionId);
@@ -1184,6 +1224,13 @@ function App() {
     await loadProjectDirectory('');
   }, [loadProjectDirectory]);
 
+  const followPreviewUrl = useCallback((url) => {
+    const normalizedUrl = normalizePreviewUrlInput(url);
+    if (!normalizedUrl) return;
+    setActivePreviewUrl(normalizedUrl);
+    setPreviewUrlDraft(formatPreviewUrlInput(normalizedUrl));
+  }, []);
+
   const handleStartPreview = useCallback(async (target = '.') => {
     if (!ipc.startPreview) {
       return null;
@@ -1195,6 +1242,7 @@ function App() {
     try {
       const preview = await ipc.startPreview({ target, kind: 'auto' });
       setPreviewSession(preview);
+      followPreviewUrl(preview.url);
       setPreviewStatus('ready');
       setSummaryPanelVisible(true);
       setActiveInspectorTab('preview');
@@ -1208,7 +1256,7 @@ function App() {
       });
       return null;
     }
-  }, [ipc, runtime]);
+  }, [followPreviewUrl, ipc, runtime]);
 
   const handleStopPreview = useCallback(async () => {
     if (!previewSession?.session_id || !ipc.stopPreview) {
@@ -1219,6 +1267,19 @@ function App() {
     setPreviewSession(null);
     setPreviewStatus('idle');
   }, [ipc, previewSession]);
+
+  const handlePreviewUrlSubmit = useCallback((event) => {
+    event.preventDefault();
+    const normalizedUrl = normalizePreviewUrlInput(previewUrlDraft);
+    if (!normalizedUrl) {
+      setPreviewStatus('error');
+      return;
+    }
+    setPreviewStatus('ready');
+    setActivePreviewUrl(normalizedUrl);
+    setPreviewUrlDraft(formatPreviewUrlInput(normalizedUrl));
+    setPreviewFrameKey(prev => prev + 1);
+  }, [previewUrlDraft]);
 
   const refreshLoadedProjectDirectories = useCallback(async () => {
     if (!ipc.listDirectory) {
@@ -1319,6 +1380,7 @@ function App() {
       const previews = result?.previews || [];
       if (previews.length > 0) {
         setPreviewSession(previews[0]);
+        followPreviewUrl(previews[0].url);
         setSummaryPanelVisible(true);
         setActiveInspectorTab('preview');
         setPreviewStatus('ready');
@@ -1328,6 +1390,7 @@ function App() {
     if (ipc.onPreviewStarted) {
       unsubscribeStarted = ipc.onPreviewStarted(preview => {
         setPreviewSession(preview);
+        followPreviewUrl(preview.url);
         setSummaryPanelVisible(true);
         setActiveInspectorTab('preview');
         setPreviewStatus('ready');
@@ -1348,7 +1411,7 @@ function App() {
       unsubscribeStarted?.();
       unsubscribeStopped?.();
     };
-  }, [ipc.isConnected, ipc.listPreviews, ipc.onPreviewStarted, ipc.onPreviewStopped, previewSession?.session_id]);
+  }, [followPreviewUrl, ipc.isConnected, ipc.listPreviews, ipc.onPreviewStarted, ipc.onPreviewStopped, previewSession?.session_id]);
   
   // 处理新建任务
   const handleNewTask = useCallback(() => {
@@ -1639,6 +1702,7 @@ function App() {
       }
       if (result?.command === '/preview' && result.url) {
         setPreviewSession(result);
+        followPreviewUrl(result.url);
         setSummaryPanelVisible(true);
         setActiveInspectorTab('preview');
         setPreviewStatus('ready');
@@ -1648,7 +1712,7 @@ function App() {
     } catch (error) {
       console.error('[App] 发送消息失败:', error);
     }
-  }, [activeAgentSessionId, agentOptions, chatInput, runtime]);
+  }, [activeAgentSessionId, agentOptions, chatInput, followPreviewUrl, runtime]);
   
   // 命令提示相关
   const handleChatInputChange = useCallback((value) => {
@@ -1860,18 +1924,18 @@ function App() {
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap'
             }}>
-              {previewSession?.url || (previewStatus === 'starting' ? '正在启动...' : '尚未启动')}
+              {activePreviewUrl || (previewStatus === 'starting' ? '正在启动...' : '尚未启动')}
             </div>
           </div>
           <button
             style={styles.button}
             onClick={() => setPreviewFrameKey(prev => prev + 1)}
-            disabled={!previewSession?.url}
+            disabled={!activePreviewUrl}
           >刷新</button>
           <button
             style={styles.button}
-            onClick={() => previewSession?.url && ipc.openExternal?.(previewSession.url)}
-            disabled={!previewSession?.url}
+            onClick={() => activePreviewUrl && ipc.openExternal?.(activePreviewUrl)}
+            disabled={!activePreviewUrl}
           >浏览器</button>
           {previewSession?.session_id ? (
             <button style={styles.button} onClick={handleStopPreview}>停止</button>
@@ -1880,11 +1944,39 @@ function App() {
           )}
         </div>
 
-        {previewSession?.url ? (
+        <form
+          style={{
+            display: 'flex',
+            gap: '8px',
+            padding: '8px 10px',
+            borderBottom: '1px solid var(--border-subtle)'
+          }}
+          onSubmit={handlePreviewUrlSubmit}
+        >
+          <input
+            style={{
+              flex: 1,
+              minWidth: 0,
+              height: '30px',
+              borderRadius: '6px',
+              border: '1px solid var(--border-subtle)',
+              backgroundColor: 'var(--background-color)',
+              color: 'var(--text-color)',
+              padding: '0 10px',
+              fontSize: '12px'
+            }}
+            value={previewUrlDraft}
+            onChange={(event) => setPreviewUrlDraft(event.target.value)}
+            placeholder="127.0.0.1:41730"
+          />
+          <button style={styles.button} type="submit">前往</button>
+        </form>
+
+        {activePreviewUrl ? (
           <iframe
             key={previewFrameKey}
             title="workspace-preview"
-            src={previewSession.url}
+            src={activePreviewUrl}
             style={styles.previewFrame}
             sandbox="allow-scripts allow-same-origin allow-forms allow-modals"
           />

@@ -6,9 +6,9 @@ import { basename, dirname, extname, join, relative, resolve, sep } from 'path';
 import { URL } from 'url';
 
 const sessions = new Map();
-const DEFAULT_HOST = '127.0.0.1';
-const DEFAULT_PORT_START = 41730;
-const DEFAULT_PORT_END = 42730;
+export const PREVIEW_HOST = '127.0.0.1';
+export const PREVIEW_PORT_START = 41730;
+export const PREVIEW_PORT_END = 42730;
 const SERVER_READY_TIMEOUT_MS = 15000;
 
 const MIME_TYPES = {
@@ -89,7 +89,7 @@ function detectNodeCommand(projectRoot, explicitCommand, port) {
 
   const manager = choosePackageManager(projectRoot);
   const passthroughArgs = ['dev', 'preview'].includes(scriptName)
-    ? ` -- --host ${DEFAULT_HOST} --port ${port}`
+    ? ` -- --host ${PREVIEW_HOST} --port ${port}`
     : '';
 
   if (manager === 'bun') {
@@ -123,7 +123,7 @@ async function findAvailablePort(preferredPort) {
     return Number(preferredPort);
   }
 
-  for (let port = DEFAULT_PORT_START; port <= DEFAULT_PORT_END; port += 1) {
+  for (let port = PREVIEW_PORT_START; port <= PREVIEW_PORT_END; port += 1) {
     try {
       await assertPortAvailable(port);
       return port;
@@ -141,7 +141,7 @@ function assertPortAvailable(port) {
     probe.once('listening', () => {
       probe.close(() => resolvePort(port));
     });
-    probe.listen(port, DEFAULT_HOST);
+    probe.listen(port, PREVIEW_HOST);
   });
 }
 
@@ -232,7 +232,7 @@ async function startStaticPreview({ workingDirectory, target, port }) {
 
   await new Promise((resolveListen, rejectListen) => {
     server.once('error', rejectListen);
-    server.listen(previewPort, DEFAULT_HOST, resolveListen);
+    server.listen(previewPort, PREVIEW_HOST, resolveListen);
   });
 
   const session = {
@@ -242,8 +242,8 @@ async function startStaticPreview({ workingDirectory, target, port }) {
     root,
     entry,
     port: previewPort,
-    host: DEFAULT_HOST,
-    url: `http://${DEFAULT_HOST}:${previewPort}/${encodeURIComponent(entry)}`,
+    host: PREVIEW_HOST,
+    url: `http://${PREVIEW_HOST}:${previewPort}/${encodeURIComponent(entry)}`,
     process: null,
     server,
     command: null,
@@ -267,9 +267,9 @@ async function startNodePreview({ workingDirectory, target, command, port }) {
     cwd: projectRoot,
     env: {
       ...process.env,
-      HOST: DEFAULT_HOST,
+      HOST: PREVIEW_HOST,
       PORT: String(previewPort),
-      VITE_HOST: DEFAULT_HOST,
+      VITE_HOST: PREVIEW_HOST,
       VITE_PORT: String(previewPort),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -292,8 +292,8 @@ async function startNodePreview({ workingDirectory, target, command, port }) {
     root: projectRoot,
     entry: '',
     port: previewPort,
-    host: DEFAULT_HOST,
-    url: `http://${DEFAULT_HOST}:${previewPort}/`,
+    host: PREVIEW_HOST,
+    url: `http://${PREVIEW_HOST}:${previewPort}/`,
     process: child,
     server: null,
     command: nodeCommand,
