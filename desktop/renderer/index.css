@@ -295,3 +295,126 @@ pre code {
   padding: 0;
   color: var(--text-color);
 }
+
+/* Markdown 样式 */
+.markdown {
+  color: var(--text-color);
+  line-height: 1.6;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+  font-weight: 600;
+  color: var(--text-color);
+}
+
+.markdown h1 {
+  font-size: 1.8em;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 0.3em;
+}
+
+.markdown h2 {
+  font-size: 1.5em;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 0.3em;
+}
+
+.markdown h3 {
+  font-size: 1.25em;
+}
+
+.markdown h4 {
+  font-size: 1.1em;
+}
+
+.markdown p {
+  margin-top: 0.8em;
+  margin-bottom: 0.8em;
+}
+
+.markdown ul,
+.markdown ol {
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+  padding-left: 2em;
+}
+
+.markdown li {
+  margin-top: 0.25em;
+  margin-bottom: 0.25em;
+}
+
+.markdown blockquote {
+  margin: 1em 0;
+  padding: 0.5em 1em;
+  border-left: 4px solid var(--primary-color);
+  background-color: var(--surface-raised);
+  color: var(--text-muted);
+}
+
+.markdown a {
+  color: var(--primary-color);
+  text-decoration: none;
+}
+
+.markdown a:hover {
+  text-decoration: underline;
+}
+
+.markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+}
+
+.markdown th,
+.markdown td {
+  padding: 0.5em 1em;
+  border: 1px solid var(--border-color);
+}
+
+.markdown th {
+  background-color: var(--surface-raised);
+  font-weight: 600;
+}
+
+.markdown img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-md);
+}
+
+.markdown hr {
+  margin: 1.5em 0;
+  border: none;
+  border-top: 1px solid var(--border-color);
+}
+
+.markdown code {
+  background-color: var(--surface-raised);
+  color: var(--primary-color);
+  padding: 0.2em 0.4em;
+  border-radius: var(--radius-sm);
+  font-size: 0.9em;
+}
+
+.markdown pre {
+  background-color: var(--accent-color);
+  padding: 1em;
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+  margin: 1em 0;
+}
+
+.markdown pre code {
+  background: none;
+  padding: 0;
+  color: var(--text-color);
+}

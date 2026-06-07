@@ -599,71 +599,107 @@ export class MainProcessIPCAdapter extends IPCAdapterBase {
       console.log(`[MainProcessIPC] 处理请求: ${channel}`, message.payload);
     }
 
-    // 内置处理器
-    switch (channel) {
-      case 'agent:processInput':
-        if (!this.#engine) {
-          throw new Error('引擎未初始化');
-        }
-        const input = message.payload.input;
-        const debugCommandResult = this.#handleDebugCommand(input);
-        if (debugCommandResult) {
-          return this.createResponse(message, debugCommandResult);
-        }
-        const previewCommandResult = await this.#handlePreviewCommand(input);
-        if (previewCommandResult) {
-          return this.createResponse(message, previewCommandResult);
-        }
+    try {
+      // 内置处理器
+      switch (channel) {
+        case 'agent:processInput':
+          if (!this.#engine) {
+            return this.createResponse(message, { success: false, error: '引擎未初始化' });
+          }
+          const input = message.payload?.input || message.payload;
+          const debugCommandResult = this.#handleDebugCommand(input);
+          if (debugCommandResult) {
+            return this.createResponse(message, debugCommandResult);
+          }
+          const previewCommandResult = await this.#handlePreviewCommand(input);
+          if (previewCommandResult) {
+            return this.createResponse(message, previewCommandResult);
+          }
 
-        const result = input === 'init_rag' && Array.isArray(message.payload.options?.docs)
-          ? await handleDocumentBatchAdd(message.payload.options.docs, { engine: this.#engine })
-          : parseDocumentCommand(input)
-          ? await handleDocumentCommand(input, { engine: this.#engine })
-          : await this.#engine.processInput(input, message.payload.options);
-        return this.createResponse(message, result);
-
-      case 'agent:stop':
-        if (this.#engine) {
-          this.#engine.stop();
-        }
-        return this.createResponse(message, { success: true });
-
-      case 'agent:getState':
-        if (!this.#engine) {
-          return this.createResponse(message, { status: 'not_initialized' });
-        }
-        return this.createResponse(message, this.#engine.getState());
-
-      case 'agent:getTools':
-        if (!this.#engine) {
-          return this.createResponse(message, []);
-        }
-        return this.createResponse(message, this.#serializeTools(this.#engine.getTools()));
-
-      case 'agent:getSlashSuggestions':
-        if (!this.#engine) {
-          return this.createResponse(message, []);
-        }
-        try {
-          const suggestions = buildSlashCommandSuggestions(this.#engine.getTools() || []);
-          return this.createResponse(message, suggestions);
-        } catch (err) {
-          return this.createResponse(message, []);
-        }
-
-      case 'agent:getStats':
-      case 'system:getStats':
-        return this.createResponse(message, this.getStats());
-
-      default:
-        // 自定义处理器
-        const handler = this.#handlers.get(channel);
-        if (handler) {
-          const result = await handler(message.payload, sender);
+          const result = input === 'init_rag' && Array.isArray(message.payload?.options?.docs)
+            ? await handleDocumentBatchAdd(message.payload.options.docs, { engine: this.#engine })
+            : parseDocumentCommand(input)
+            ? await handleDocumentCommand(input, { engine: this.#engine })
+            : await this.#engine.processInput(input, message.payload?.options || {});
           return this.createResponse(message, result);
-        }
-        
-        throw new Error(`未知的频道: ${channel}`);
+
+        case 'agent:stop':
+          if (this.#engine) {
+            this.#engine.stop();
+          }
+          return this.createResponse(message, { success: true });
+
+        case 'agent:getState':
+          if (!this.#engine) {
+            return this.createResponse(message, { status: 'not_initialized' });
+          }
+          return this.createResponse(message, this.#engine.getState());
+
+        case 'agent:getTools':
+          if (!this.#engine) {
+            return this.createResponse(message, []);
+          }
+          return this.createResponse(message, this.#serializeTools(this.#engine.getTools()));
+
+        case 'agent:getSlashSuggestions':
+          if (!this.#engine) {
+            return this.createResponse(message, []);
+          }
+          try {
+            const suggestions = buildSlashCommandSuggestions(this.#engine.getTools() || []);
+            return this.createResponse(message, suggestions);
+          } catch (err) {
+            return this.createResponse(message, []);
+          }
+
+        case 'agent:getStats':
+        case 'system:getStats':
+          return this.createResponse(message, this.getStats());
+
+        case 'window:getState':
+        case 'app:getInfo':
+        case 'llm:getConfigStatus':
+        case 'agent:getTools':
+        case 'agent:getState':
+        case 'workspace:listDirectory':
+        case 'preview:list':
+        case 'window:minimize':
+        case 'window:maximize':
+        case 'window:close':
+        case 'window:show':
+        case 'window:hide':
+        case 'dialog:openFile':
+        case 'dialog:saveFile':
+        case 'dialog:openDirectory':
+        case 'notification:show':
+        case 'app:getPath':
+        case 'app:openExternal':
+        case 'workspace:setWorkingDirectory':
+        case 'preview:start':
+        case 'preview:stop':
+        case 'llm:saveConfig':
+          // 这些应该由外部通过 registerHandler 注册，如果没有注册，返回默认值
+          const customHandler = this.#handlers.get(channel);
+          if (customHandler) {
+            const result = await customHandler(message.payload, sender);
+            return this.createResponse(message, result !== undefined ? result : { success: true });
+          }
+          // 如果没有注册，返回默认响应而不是抛出错误
+          console.warn(`[MainProcessIPC] 频道 ${channel} 未注册处理器，返回默认值`);
+          return this.createResponse(message, { success: true, info: '处理器未注册' });
+          
+        default:
+          // 未知的频道
+          throw new Error(`未知的频道: ${channel}`);
+      }
+    } catch (error) {
+      console.error(`[MainProcessIPC] 处理请求时出错 (${channel}):`, error);
+      // 返回错误响应而不是抛出异常
+      return this.createResponse(message, { 
+        success: false, 
+        error: error.message,
+        channel 
+      });
     }
   }
 

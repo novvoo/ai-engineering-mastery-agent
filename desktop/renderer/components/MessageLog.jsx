@@ -12,6 +12,8 @@
  */
 
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 // 样式定义
 const styles = {
@@ -21,10 +23,7 @@ const styles = {
     flexDirection: 'column',
     height: '100%',
     overflow: 'hidden',
-    backgroundColor: '#11161e',
-    borderRadius: '8px',
-    border: '1px solid var(--border-subtle)',
-    boxShadow: 'var(--shadow-sm)'
+    backgroundColor: 'var(--background-color)'
   },
   
   header: {
@@ -124,7 +123,7 @@ const styles = {
   messageList: {
     flex: 1,
     overflowY: 'auto',
-    padding: '14px',
+    padding: '8px 12px',
     scrollBehavior: 'smooth'
   },
 
@@ -210,22 +209,23 @@ const styles = {
   },
 
   runtimeDetailsListCollapsed: {
-    maxHeight: '156px'
+    maxHeight: '620px',
+    overflow: 'hidden'
   },
 
   runtimeDetailsListExpanded: {
-    maxHeight: 'min(50vh, 420px)'
+    maxHeight: 'min(50vh, 520px)'
   },
 
   runtimeDetailsListLarge: {
-    maxHeight: 'min(72vh, 680px)'
+    maxHeight: 'min(72vh, 780px)'
   },
 
   runtimeDetailItem: {
     borderRadius: '6px',
     border: '1px solid rgba(148, 163, 184, 0.12)',
     backgroundColor: 'rgba(17, 22, 30, 0.68)',
-    padding: '8px',
+    padding: '4px 8px',
     color: 'var(--text-muted)',
     fontSize: '12px',
     lineHeight: '1.5'
@@ -250,24 +250,27 @@ const styles = {
     justifyContent: 'space-between',
     alignItems: 'center',
     gap: '8px',
-    marginBottom: '4px',
+    marginBottom: '2px',
     color: 'var(--text-dark)',
     fontSize: '11px'
   },
 
   runtimeDetailContent: {
-    whiteSpace: 'pre-wrap',
+    whiteSpace: 'nowrap',
+    textOverflow: 'ellipsis',
+    overflow: 'hidden',
     wordBreak: 'break-word',
     color: 'var(--text-muted)',
     transition: 'max-height 0.18s ease'
   },
 
   runtimeDetailContentCollapsed: {
-    maxHeight: '42px',
+    maxHeight: '18px',
     overflow: 'hidden'
   },
 
   runtimeDetailContentExpanded: {
+    whiteSpace: 'pre-wrap',
     maxHeight: '240px',
     overflowY: 'auto'
   },
@@ -623,7 +626,7 @@ const styles = {
  * @param {Function} props.onClear - 清空消息回调
  * @param {Function} props.onAskAgent - 将错误消息交给 Agent 处理
  */
-function MessageLog({ messages, status, onClear, onAskAgent }) {
+function MessageLog({ messages, status, onClear, onAskAgent, showHeader = true }) {
   // 状态
   const [filter, setFilter] = useState('all');
   const [autoScroll, setAutoScroll] = useState(true);
@@ -1115,7 +1118,17 @@ function MessageLog({ messages, status, onClear, onAskAgent }) {
           ...styles.messageContent,
           ...(isCollapsed ? styles.messageContentCollapsed : {})
         }}>
-          {msg.content || msg.message || ''}
+          {(msg.type === 'agent' || msg.type === 'result' || msg.type === 'info') ? (
+            <div className="markdown">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {msg.content || msg.message || ''}
+              </ReactMarkdown>
+            </div>
+          ) : (
+            <div style={{ whiteSpace: 'pre-wrap' }}>
+              {msg.content || msg.message || ''}
+            </div>
+          )}
         </div>
         
         {/* 元数据 */}
@@ -1343,23 +1356,45 @@ function MessageLog({ messages, status, onClear, onAskAgent }) {
                   onClick={() => handleRuntimeDetailToggle(runtimeDetailId)}
                   title={isExpanded ? '收起这条运行消息' : '展开这条运行消息'}
                 >
-                  <div style={styles.runtimeDetailMeta}>
-                    <span>{typeDisplay.text}</span>
-                    <span>
-                      {isExpanded ? '收起' : '展开'}
-                      {msg.timestamp ? ` · ${new Date(msg.timestamp).toLocaleTimeString()}` : ''}
-                    </span>
-                  </div>
-                  <div
-                    style={{
-                      ...styles.runtimeDetailContent,
-                      ...(isExpanded
-                        ? styles.runtimeDetailContentExpanded
-                        : styles.runtimeDetailContentCollapsed)
-                    }}
-                  >
-                    {content || '(无内容)'}
-                  </div>
+                  {isExpanded ? (
+                    <>
+                      <div style={styles.runtimeDetailMeta}>
+                        <span>{typeDisplay.text}</span>
+                        <span>
+                          {isExpanded ? '收起' : '展开'}
+                          {msg.timestamp ? ` · ${new Date(msg.timestamp).toLocaleTimeString()}` : ''}
+                        </span>
+                      </div>
+                      <div
+                        style={{
+                          ...styles.runtimeDetailContent,
+                          ...styles.runtimeDetailContentExpanded
+                        }}
+                      >
+                        {content || '(无内容)'}
+                      </div>
+                    </>
+                  ) : (
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      <span style={{ color: 'var(--text-dark)', fontSize: '11px', whiteSpace: 'nowrap' }}>
+                        {typeDisplay.text}
+                      </span>
+                      <span style={{
+                        ...styles.runtimeDetailContent,
+                        flex: 1,
+                        minWidth: 0
+                      }}>
+                        {content || '(无内容)'}
+                      </span>
+                      <span style={{
+                        color: 'var(--text-dark)',
+                        fontSize: '11px',
+                        whiteSpace: 'nowrap'
+                      }}>
+                        {msg.timestamp ? ` · ${new Date(msg.timestamp).toLocaleTimeString()}` : ''}
+                      </span>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -1423,110 +1458,112 @@ function MessageLog({ messages, status, onClear, onAskAgent }) {
   return (
     <div style={styles.container}>
       {/* 头部 */}
-      <div style={styles.header}>
-        <div style={styles.title}>
-          <span>消息日志</span>
-          <span style={{
-            fontSize: '12px',
-            color: 'var(--text-muted)',
-            marginLeft: '4px'
-          }}>
-            ({filteredMessages.length}/{messages.length})
-          </span>
-        </div>
-        
-        <div style={styles.headerButtons}>
-          {/* 搜索 */}
-          <div style={styles.searchContainer}>
-            {searchExpanded && (
-              <input
-                ref={searchRef}
+      {showHeader && (
+        <div style={styles.header}>
+          <div style={styles.title}>
+            <span>消息日志</span>
+            <span style={{
+              fontSize: '12px',
+              color: 'var(--text-muted)',
+              marginLeft: '4px'
+            }}>
+              ({filteredMessages.length}/{messages.length})
+            </span>
+          </div>
+          
+          <div style={styles.headerButtons}>
+            {/* 搜索 */}
+            <div style={styles.searchContainer}>
+              {searchExpanded && (
+                <input
+                  ref={searchRef}
+                  style={{
+                    ...styles.searchInput,
+                    ...styles.searchInputExpanded
+                  }}
+                  value={searchQuery}
+                  onChange={handleSearch}
+                  placeholder="搜索消息..."
+                  onBlur={() => {
+                    if (!searchQuery) setSearchExpanded(false);
+                  }}
+                />
+              )}
+              <button
+                style={styles.button}
+                onClick={handleSearchToggle}
+                title="搜索消息"
+              >
+                🔍
+              </button>
+            </div>
+            
+            {/* 视图切换 */}
+            <div style={styles.viewToggle}>
+              <button
                 style={{
-                  ...styles.searchInput,
-                  ...styles.searchInputExpanded
+                  ...styles.viewButton,
+                  ...(viewMode === 'list' ? styles.viewButtonActive : {})
                 }}
-                value={searchQuery}
-                onChange={handleSearch}
-                placeholder="搜索消息..."
-                onBlur={() => {
-                  if (!searchQuery) setSearchExpanded(false);
+                onClick={() => handleViewChange('list')}
+                title="列表视图"
+              >
+                📋
+              </button>
+              <button
+                style={{
+                  ...styles.viewButton,
+                  ...(viewMode === 'timeline' ? styles.viewButtonActive : {})
                 }}
-              />
-            )}
+                onClick={() => handleViewChange('timeline')}
+                title="时间线视图"
+              >
+                📅
+              </button>
+            </div>
+            
+            {/* 过滤按钮 */}
+            <select
+              style={{
+                ...styles.button,
+                padding: '4px 8px',
+                cursor: 'pointer'
+              }}
+              value={filter}
+              onChange={(e) => handleFilterChange(e.target.value)}
+            >
+              <option value="all">全部</option>
+              <option value="user">👤 用户</option>
+              <option value="info">ℹ️ 信息</option>
+              <option value="success">✅ 成功</option>
+              <option value="error">❌ 错误</option>
+              <option value="tool">🔧 工具</option>
+              <option value="result">📊 结果</option>
+            </select>
+            
+            {/* 自动滚动按钮 */}
+            <button
+              style={{
+                ...styles.button,
+                ...(autoScroll ? styles.buttonActive : {})
+              }}
+              onClick={handleAutoScrollChange}
+              title={autoScroll ? '停止自动滚动' : '启用自动滚动'}
+            >
+              {autoScroll ? '📍 自动' : '📌 手动'}
+            </button>
+            
+            {/* 清空按钮 */}
             <button
               style={styles.button}
-              onClick={handleSearchToggle}
-              title="搜索消息"
+              onClick={handleClear}
+              title="清空消息"
             >
-              🔍
+              🗑️ 清空
             </button>
           </div>
-          
-          {/* 视图切换 */}
-          <div style={styles.viewToggle}>
-            <button
-              style={{
-                ...styles.viewButton,
-                ...(viewMode === 'list' ? styles.viewButtonActive : {})
-              }}
-              onClick={() => handleViewChange('list')}
-              title="列表视图"
-            >
-              📋
-            </button>
-            <button
-              style={{
-                ...styles.viewButton,
-                ...(viewMode === 'timeline' ? styles.viewButtonActive : {})
-              }}
-              onClick={() => handleViewChange('timeline')}
-              title="时间线视图"
-            >
-              📅
-            </button>
-          </div>
-          
-          {/* 过滤按钮 */}
-          <select
-            style={{
-              ...styles.button,
-              padding: '4px 8px',
-              cursor: 'pointer'
-            }}
-            value={filter}
-            onChange={(e) => handleFilterChange(e.target.value)}
-          >
-            <option value="all">全部</option>
-            <option value="user">👤 用户</option>
-            <option value="info">ℹ️ 信息</option>
-            <option value="success">✅ 成功</option>
-            <option value="error">❌ 错误</option>
-            <option value="tool">🔧 工具</option>
-            <option value="result">📊 结果</option>
-          </select>
-          
-          {/* 自动滚动按钮 */}
-          <button
-            style={{
-              ...styles.button,
-              ...(autoScroll ? styles.buttonActive : {})
-            }}
-            onClick={handleAutoScrollChange}
-            title={autoScroll ? '停止自动滚动' : '启用自动滚动'}
-          >
-            {autoScroll ? '📍 自动' : '📌 手动'}
-          </button>
-          
-          {/* 清空按钮 */}
-          <button
-            style={styles.button}
-            onClick={handleClear}
-            title="清空消息"
-          >
-            🗑️ 清空
-          </button>
         </div>
-      </div>
+      )}
       
       {/* 消息列表 */}
       <div ref={listRef} style={styles.messageList}>

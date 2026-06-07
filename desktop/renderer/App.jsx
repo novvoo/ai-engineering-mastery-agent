@@ -562,7 +562,7 @@ const styles = {
     flex: 1,
     minHeight: 0,
     overflow: 'hidden',
-    padding: '0 20px'
+    padding: 0
   },
   
   // ================== 输入区域 ==================
@@ -621,6 +621,11 @@ const styles = {
     backgroundColor: 'var(--border-subtle)',
     color: 'var(--text-dark)',
     cursor: 'not-allowed'
+  },
+  
+  sendButtonStop: {
+    backgroundColor: '#ff4444',
+    color: '#ffffff'
   },
   
   inputHint: {
@@ -2440,6 +2445,7 @@ function App() {
               status={runtime.status}
               onClear={runtime.clearMessages}
               onAskAgent={handleAskAgentFromMessage}
+              showHeader={false}
             />
           </div>
           
@@ -2473,15 +2479,17 @@ function App() {
               <button
                 style={{
                   ...styles.sendButton,
-                  ...(runtime.status === 'running' || !chatInput.trim() 
-                    ? styles.sendButtonDisabled 
-                    : {})
+                  ...(runtime.status === 'running' 
+                    ? styles.sendButtonStop 
+                    : !chatInput.trim() 
+                      ? styles.sendButtonDisabled 
+                      : {})
                 }}
-                onClick={handleSendMessage}
-                disabled={runtime.status === 'running' || !chatInput.trim()}
-                title="发送消息 (Ctrl+Enter)"
+                onClick={runtime.status === 'running' ? runtime.stop : handleSendMessage}
+                disabled={!runtime.status && !chatInput.trim()}
+                title={runtime.status === 'running' ? "停止执行" : "发送消息 (Ctrl+Enter)"}
               >
-                ↑
+                {runtime.status === 'running' ? '■' : '↑'}
               </button>
             </div>
             <div style={styles.inputHint}>
