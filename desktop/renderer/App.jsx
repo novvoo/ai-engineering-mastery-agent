@@ -1459,17 +1459,6 @@ function App() {
     let unsubscribeStarted = null;
     let unsubscribeStopped = null;
 
-    ipc.listPreviews?.().then(result => {
-      const previews = result?.previews || [];
-      if (previews.length > 0) {
-        setPreviewSession(previews[0]);
-        followPreviewUrl(previews[0].url);
-        setSummaryPanelVisible(true);
-        setActiveInspectorTab('preview');
-        setPreviewStatus('ready');
-      }
-    }).catch(() => {});
-
     if (ipc.onPreviewStarted) {
       unsubscribeStarted = ipc.onPreviewStarted(preview => {
         setPreviewSession(preview);
@@ -1494,7 +1483,7 @@ function App() {
       unsubscribeStarted?.();
       unsubscribeStopped?.();
     };
-  }, [followPreviewUrl, ipc.isConnected, ipc.listPreviews, ipc.onPreviewStarted, ipc.onPreviewStopped, previewSession?.session_id]);
+  }, [followPreviewUrl, ipc.isConnected, ipc.onPreviewStarted, ipc.onPreviewStopped, previewSession?.session_id]);
   
   // 处理新建任务
   const handleNewTask = useCallback(() => {

@@ -761,6 +761,42 @@ function MessageLog({ messages, status, onClear, onAskAgent, showHeader = true }
       '状态更新'
     );
   }
+
+  // 导出运行详情
+  function handleExportRuntimeDetails(group) {
+    const runtimeDetails = group?.runtimeDetails || [];
+    const visibleRuntimeDetails = runtimeDetails.filter(msg => !isStatusUpdateMessage(msg));
+    
+    if (visibleRuntimeDetails.length === 0) {
+      alert('没有可导出的运行详情');
+      return;
+    }
+
+    // 格式化导出内容
+    let content = `=== 运行详情导出 ===\n`;
+    content += `导出时间: ${new Date().toLocaleString()}\n`;
+    content += `消息数量: ${visibleRuntimeDetails.length}\n`;
+    content += `\n==================\n\n`;
+
+    visibleRuntimeDetails.forEach((msg, index) => {
+      const typeDisplay = getTypeDisplay(msg.type);
+      content += `[${index + 1}] ${typeDisplay.text}\n`;
+      content += `时间: ${msg.timestamp ? new Date(msg.timestamp).toLocaleString() : '未知时间'}\n`;
+      content += `内容:\n${getRuntimeDetailContent(msg)}\n`;
+      content += `\n------------------\n\n`;
+    });
+
+    // 创建并下载文件
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `运行详情_${new Date().getTime()}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
   
   // 搜索焦点
   useEffect(() => {
@@ -1281,6 +1317,18 @@ function MessageLog({ messages, status, onClear, onAskAgent, showHeader = true }
           </span>
           <span style={styles.runtimeDetailsActions}>
             <span>{visibleRuntimeDetails.length} 条</span>
+            <button
+              type="button"
+              style={styles.runtimeDetailsToggle}
+              title="导出运行详情"
+              aria-label="导出运行详情"
+              onClick={(event) => {
+                event.stopPropagation();
+                handleExportRuntimeDetails(group);
+              }}
+            >
+              📥
+            </button>
             <button
               type="button"
               style={styles.runtimeDetailsToggle}

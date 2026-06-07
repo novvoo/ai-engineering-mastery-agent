@@ -862,6 +862,7 @@ export class MainProcessIPCAdapter extends IPCAdapterBase {
 
   /**
    * 发送消息到指定窗口
+   * 如果没有指定 windowId，则广播到所有窗口
    */
   async send(message, windowId) {
     if (!this.isConnected) {
@@ -873,14 +874,24 @@ export class MainProcessIPCAdapter extends IPCAdapterBase {
       this.#processQueue();
     }
 
-    // 查找窗口
-    const window = this.#getWindow(windowId);
-    if (!window) {
-      throw new Error(`窗口未找到: ${windowId}`);
+    if (windowId !== undefined && windowId !== null) {
+      // 发送到指定窗口
+      const window = this.#getWindow(windowId);
+      if (!window) {
+        throw new Error(`窗口未找到: ${windowId}`);
+      }
+      window.send(message.type, message.toJSON());
+      return message;
+    } else {
+      // 广播到所有窗口
+      for (const winId of this.#windows) {
+        const window = this.#getWindow(winId);
+        if (window) {
+          window.send(message.type, message.toJSON());
+        }
+      }
+      return message;
     }
-
-    window.send(message.type, message.toJSON());
-    return message;
   }
 
   /**
@@ -926,6 +937,11 @@ export class MainProcessIPCAdapter extends IPCAdapterBase {
    * 获取窗口
    */
   #getWindow(windowId) {
+    if (windowId === undefined || windowId === null) {
+      // 对于 undefined 或 null 窗口 ID，直接返回 null，调用者应该处理广播逻辑
+      return null;
+    }
+
     const sender = this.#windowSenders.get(windowId);
     if (sender && typeof sender.send === 'function') {
       return sender;
