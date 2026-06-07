@@ -72,7 +72,8 @@ const ALLOWED_CHANNELS = {
     'tool:call',
     'tool:result',
     'status:update',
-    'window:state'
+    'window:state',
+    'menu:click'
   ]
 };
 
