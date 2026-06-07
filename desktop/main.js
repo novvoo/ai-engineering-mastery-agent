@@ -136,18 +136,16 @@ class ElectronMainApp {
     // 等待 Electron app 就绪
     await app.whenReady();
 
-    // 创建菜单
-    this.#createMenu();
+   // 创建菜单
+  this.#createMenu();
 
-    // 创建主窗口
-    this.#createMainWindow();
-
-    // 初始化 Desktop Core
+    // 初始化 Desktop Core 和 IPC 适配器（必须在窗口创建前完成）
+    // 确保渲染进程 preload 执行时 ipc:connect handler 已注册，
+    // 避免 "No handler registered for 'ipc:connect'" 错误。
     await this.#initializeDesktopCore();
     await this.#attachConfiguredModelProvider();
-
-    // 初始化 IPC 适配器
     await this.#initializeIPCAdapter();
+    this.#createMainWindow();
 
     // 创建托盘图标（如果启用）
     if (this.#config.tray) {
