@@ -5,6 +5,7 @@
  * - Fast detection: mtime + size first, hash only when needed
  * - Space efficient: LRU with size limit
  * - Low IO: batch reads, async operations
+ * - Smart: only cache relevant files, exclude common build directories
  */
 
 import { readFile, writeFile, stat, mkdir } from 'fs/promises';
@@ -17,6 +18,31 @@ const DEFAULT_CACHE_DIR = join(homedir(), '.agent-cache', 'files');
 const DEFAULT_MAX_SIZE = 100 * 1024 * 1024; // 100MB
 const META_FILE = 'cache-meta.json';
 
+// Common directories to exclude from caching
+const EXCLUDED_DIRECTORIES = new Set([
+  'node_modules',
+  'dist',
+  'release',
+  'logs',
+  'build',
+  'out',
+  'target',
+  'bin',
+  '.git',
+  '.svn',
+  '.hg',
+  '__pycache__',
+  '.next',
+  '.nuxt',
+  '.cache',
+  'coverage',
+  '.nyc_output',
+  '.idea',
+  '.vscode',
+  '.DS_Store',
+  'thumbs.db'
+]);
+
 export class FileCache {
   constructor(options = {}) {
     this.cacheDir = options.cacheDir || DEFAULT_CACHE_DIR;
@@ -25,6 +51,19 @@ export class FileCache {
     this.contentCache = new Map(); // path -> content
     this.currentSize = 0;
     this.initialized = false;
+  }
+
+  /**
+   * Check if a path should be excluded from caching
+   */
+  _shouldExcludePath(fullPath) {
+    const parts = fullPath.split(/[/\\]/);
+    for (const part of parts) {
+      if (EXCLUDED_DIRECTORIES.has(part)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   async init() {
@@ -140,6 +179,21 @@ export class FileCache {
   async get(fullPath, workingDir, { readContent = false } = {}) {
     await this.init();
     
+    // Check if path should be excluded
+    if (this._shouldExcludePath(fullPath)) {
+      return { valid: false, content: null, fromCache: false, excluded: true };
+    }
+    
+    // Check if file still exists
+    if (!existsSync(fullPath)) {
+      const key = this._getCacheKey(fullPath, workingDir);
+      // Remove old cache entry if file no longer exists
+      if (this.meta.has(key)) {
+        await this.invalidate(fullPath, workingDir);
+      }
+      return { valid: false, content: null, fromCache: false };
+    }
+    
     const key = this._getCacheKey(fullPath, workingDir);
     
     // Check if file changed
@@ -188,6 +242,21 @@ export class FileCache {
 
   async set(fullPath, workingDir, content) {
     await this.init();
+    
+    // Check if path should be excluded
+    if (this._shouldExcludePath(fullPath)) {
+      return;
+    }
+    
+    // Check if file still exists
+    if (!existsSync(fullPath)) {
+      const key = this._getCacheKey(fullPath, workingDir);
+      // Remove old cache entry if file no longer exists
+      if (this.meta.has(key)) {
+        await this.invalidate(fullPath, workingDir);
+      }
+      return;
+    }
     
     const key = this._getCacheKey(fullPath, workingDir);
     const info = await this._getFileInfo(fullPath);
@@ -241,6 +310,21 @@ export class FileCache {
   async getList(fullPath, workingDir) {
     await this.init();
     
+    // Check if path should be excluded
+    if (this._shouldExcludePath(fullPath)) {
+      return null;
+    }
+    
+    // Check if directory still exists
+    if (!existsSync(fullPath)) {
+      const key = `__list__:${this._getCacheKey(fullPath, workingDir)}`;
+      // Remove old cache entry if directory no longer exists
+      if (this.meta.has(key)) {
+        await this.invalidate(fullPath, workingDir);
+      }
+      return null;
+    }
+    
     const key = `__list__:${this._getCacheKey(fullPath, workingDir)}`;
     const cached = this.meta.get(key);
     
@@ -251,10 +335,31 @@ export class FileCache {
       
       // Check if directory mtime changed
       if (Math.abs(stats.mtimeMs - cached.mtimeMs) < 100) {
+        // Check memory cache first
+        if (this.contentCache.has(key)) {
+          const cachedData = this.contentCache.get(key);
+          cachedData.lastAccessed = Date.now();
+          return cachedData.data;
+        }
+        
+        // Check disk cache
         const cachePath = this._getFileCachePath(key);
         if (existsSync(cachePath)) {
           const content = await readFile(cachePath, 'utf-8');
-          return JSON.parse(content);
+          const data = JSON.parse(content);
+          
+          // Update memory cache
+          this.contentCache.set(key, {
+            data,
+            lastAccessed: Date.now()
+          });
+          
+          // Update meta
+          cached.lastAccessed = Date.now();
+          this.meta.set(key, cached);
+          await this._saveMeta();
+          
+          return data;
         }
       }
     } catch {
@@ -267,6 +372,21 @@ export class FileCache {
   async setList(fullPath, workingDir, entries) {
     await this.init();
     
+    // Check if path should be excluded
+    if (this._shouldExcludePath(fullPath)) {
+      return;
+    }
+    
+    // Check if directory still exists
+    if (!existsSync(fullPath)) {
+      const key = `__list__:${this._getCacheKey(fullPath, workingDir)}`;
+      // Remove old cache entry if directory no longer exists
+      if (this.meta.has(key)) {
+        await this.invalidate(fullPath, workingDir);
+      }
+      return;
+    }
+    
     const key = `__list__:${this._getCacheKey(fullPath, workingDir)}`;
     
     try {
@@ -278,6 +398,12 @@ export class FileCache {
         hash: '',
         lastAccessed: Date.now(),
         hasContent: true
+      });
+      
+      // Update memory cache
+      this.contentCache.set(key, {
+        data: entries,
+        lastAccessed: Date.now()
       });
       
       const cachePath = this._getFileCachePath(key);

@@ -220,13 +220,28 @@ class ElectronMainApp {
           },
           { type: 'separator' },
           {
-            label: '打开缓存目录',
-            accelerator: 'CmdOrCtrl+Shift+C',
-            click: () => this.#handleOpenCacheDir()
-          },
-          {
-            label: '清理所有缓存',
-            click: () => this.#handleClearCache()
+            label: '缓存管理',
+            submenu: [
+              {
+                label: '打开缓存目录',
+                accelerator: 'CmdOrCtrl+Shift+C',
+                click: () => this.#handleOpenCacheDir()
+              },
+              {
+                label: '清理所有缓存',
+                click: () => this.#handleClearCache()
+              },
+              { type: 'separator' },
+              {
+                label: '同步工作目录缓存',
+                accelerator: 'CmdOrCtrl+Shift+S',
+                click: () => this.#handleSyncCache()
+              },
+              {
+                label: '显示缓存统计',
+                click: () => this.#handleShowCacheStats()
+              }
+            ]
           },
           { type: 'separator' },
           {
@@ -1169,6 +1184,62 @@ class ElectronMainApp {
       } catch (error) {
         dialog.showErrorBox('清理失败', error.message);
       }
+    }
+  }
+
+  /**
+   * 处理同步缓存
+   */
+  async #handleSyncCache() {
+    try {
+      dialog.showMessageBox(this.#mainWindow, {
+        type: 'info',
+        title: '同步缓存',
+        message: '缓存将自动与工作目录同步。当文件发生变更时，缓存会自动失效并重新读取。',
+        buttons: ['确定']
+      });
+    } catch (error) {
+      dialog.showErrorBox('同步失败', error.message);
+    }
+  }
+
+  /**
+   * 处理显示缓存统计
+   */
+  async #handleShowCacheStats() {
+    try {
+      let fileCount = 0;
+      let totalSize = 0;
+      
+      if (fs.existsSync(CACHE_DIR)) {
+        const countFiles = (dir) => {
+          if (fs.existsSync(dir)) {
+            fs.readdirSync(dir).forEach((file) => {
+              const curPath = path.join(dir, file);
+              const stats = fs.lstatSync(curPath);
+              if (stats.isDirectory()) {
+                countFiles(curPath);
+              } else {
+                fileCount++;
+                totalSize += stats.size;
+              }
+            });
+          }
+        };
+        
+        countFiles(CACHE_DIR);
+      }
+      
+      const sizeMB = (totalSize / (1024 * 1024)).toFixed(2);
+      
+      dialog.showMessageBox(this.#mainWindow, {
+        type: 'info',
+        title: '缓存统计',
+        message: `缓存文件数量: ${fileCount}\n缓存总大小: ${sizeMB} MB\n缓存目录: ${CACHE_DIR}`,
+        buttons: ['确定']
+      });
+    } catch (error) {
+      dialog.showErrorBox('获取统计失败', error.message);
     }
   }
 

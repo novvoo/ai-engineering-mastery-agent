@@ -153,6 +153,14 @@ export class ReActAgent {
     this.#ui = customUI;
     this.#contextPruner = config.contextPruner || new DynamicContextPruning();
     this.#tokenJuice = config.tokenJuice || null;
+    
+    // 接受外部传入的工具调用历史和缓存
+    if (config.toolCallHistory) {
+      this.#toolCallHistory = config.toolCallHistory;
+    }
+    if (config.toolResultCache) {
+      this.#toolResultCache = config.toolResultCache;
+    }
   }
 
   /**
@@ -578,9 +586,9 @@ export class ReActAgent {
       return { name, result: cachedResult || null, skipped: true };
     }
     this.#toolCallHistory.push(callSignature);
-    // Keep history manageable
-    if (this.#toolCallHistory.length > 50) {
-      this.#toolCallHistory = this.#toolCallHistory.slice(-25);
+    // Keep history manageable - increased to 200
+    if (this.#toolCallHistory.length > 200) {
+      this.#toolCallHistory = this.#toolCallHistory.slice(-100);
     }
 
     this.#ui.toolCall(name, args);
