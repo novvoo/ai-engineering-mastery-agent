@@ -425,6 +425,30 @@ function extractAgentAnswer(data) {
   return '';
 }
 
+
+
+/**
+ * 收敛 Agent 回答：移除 RAG chunk 原文等冗余内容
+ * 策略：1) [文件名] → XX% match 模式之前 2) 第一个空行前 3) 300 字符截断
+ */
+function truncateAnswer(text) {
+  if (!text) return text;
+  // 1) RAG chunk 标记行：匹配 [filename.ext] → XX% match
+  const chunkMatch = text.match(/\n\[[^\]]+\] → \d+% match/);
+  if (chunkMatch && chunkMatch.index > 0) {
+    return text.substring(0, chunkMatch.index).trim();
+  }
+  // 2) 空行分隔
+  const firstPara = text.split('\n\n')[0].trim();
+  if (firstPara !== text) return firstPara;
+  // 3) 超过 300 字则截断到句尾
+  if (text.length > 300) {
+    const cut = Math.max(text.lastIndexOf('。', 300), text.lastIndexOf('\n', 300));
+    return cut > 50 ? text.substring(0, cut + 1).trim() : text.substring(0, 300) + '...';
+  }
+  return text;
+}
+
 /**
  * 获取模拟工具列表
  * @returns {Array} 模拟工具列表
