@@ -287,6 +287,84 @@ describe('Desktop Event Forwarding', () => {
     adapter.disconnect();
     resetEventBus();
   });
+  test('DesktopCore state transitions: idle -> ready -> disposed', async () => {
+    const { createDesktopCore, DesktopState } = await import('../../src/adapters/desktop/desktop-core.js');
+
+    const core = createDesktopCore({ workingDirectory: '/tmp', debug: false });
+
+    // Initial state idle
+    const initialState = core.getState();
+    if (initialState.desktopState !== DesktopState.IDLE) {
+      throw new Error('Expected IDLE state after creation, got ' + initialState.desktopState);
+    }
+
+    // After initialize, state becomes READY
+    await core.initialize();
+    const readyState = core.getState();
+    if (readyState.desktopState !== DesktopState.READY) {
+      throw new Error('Expected READY state after initialize, got ' + readyState.desktopState);
+    }
+
+    // After dispose, state becomes DISPOSED
+    await core.dispose();
+    const disposedState = core.getState();
+    if (disposedState.desktopState !== DesktopState.DISPOSED) {
+      throw new Error('Expected DISPOSED state after dispose, got ' + disposedState.desktopState);
+    }
+  });
+
+  test('DesktopCore getState returns expected fields', async () => {
+    const { createDesktopCore, DesktopState } = await import('../../src/adapters/desktop/desktop-core.js');
+
+    const core = createDesktopCore({ workingDirectory: '/tmp', debug: false });
+    await core.initialize();
+
+    const state = core.getState();
+    if (typeof state.desktopState !== 'string') {
+      throw new Error('Expected desktopState to be a string, got ' + typeof state.desktopState);
+    }
+    if (typeof state.initialized !== 'boolean') {
+      throw new Error('Expected initialized to be a boolean, got ' + typeof state.initialized);
+    }
+    if (typeof state.ipcConnected !== 'boolean') {
+      throw new Error('Expected ipcConnected to be a boolean, got ' + typeof state.ipcConnected);
+    }
+
+    // After attach with mock, ipcConnected should be true
+    const mockIpcMain = { handle: () => {}, on: () => {} };
+    core.attachIPCAdapter(mockIpcMain);
+    const afterAttach = core.getState();
+    if (afterAttach.ipcConnected !== false) {
+      throw new Error('Expected ipcConnected to be false (adapter not initialized), got ' + afterAttach.ipcConnected);
+    }
+
+    await core.dispose();
+  });
+
+  test('DesktopCore can attach and access IPC adapter', async () => {
+    const { createDesktopCore } = await import('../../src/adapters/desktop/desktop-core.js');
+
+    const core = createDesktopCore({ workingDirectory: '/tmp', debug: false });
+    await core.initialize();
+
+    const mockIpcMain = { handle: () => {}, on: () => {} };
+    const adapter = core.attachIPCAdapter(mockIpcMain);
+
+    if (typeof adapter.broadcast !== 'function') {
+      throw new Error('Expected adapter to have broadcast method');
+    }
+    if (typeof adapter.initialize !== 'function') {
+      throw new Error('Expected adapter to have initialize method');
+    }
+
+    // Adapter is not connected by default
+    if (adapter.isConnected !== false) {
+      throw new Error('Expected adapter isConnected to be false, got ' + adapter.isConnected);
+    }
+
+    await core.dispose();
+    adapter.disconnect();
+  });
 });
 
 });
