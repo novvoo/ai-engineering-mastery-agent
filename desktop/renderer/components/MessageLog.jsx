@@ -723,7 +723,11 @@ function MessageLog({ messages, status, onClear, onAskAgent }) {
 
     const resultText = formatRuntimeDetailValue(msg.result);
     if (resultText) {
-      sections.push(`结果:\n${resultText}`);
+      // 收敛工具结果：移除首行的匹配率
+      const lines = resultText.split('\n');
+      const isScoreLine = lines.length > 1 && /^\[.+?\] → \d+% match/.test(lines[0].trim());
+      const clean = isScoreLine ? lines.slice(1).join('\n').trim() : resultText;
+      sections.push(`结果:\n${clean}`);
     }
 
     const payloadText = formatRuntimeDetailValue(msg.payload || msg.raw);
@@ -1384,6 +1388,9 @@ function MessageLog({ messages, status, onClear, onAskAgent }) {
               const isDebug = msg.type === 'debug';
               const content = getRuntimeDetailContent(msg);
               const firstLine = content ? content.split('\n')[0].trim() : '(无内容)';
+              const scoreInfo = msg.type === 'tool_result' && typeof msg.result === 'string'
+                ? ((m) => m ? { file: m[1], score: parseInt(m[2]) } : null)(msg.result.match(/^\[(.+?)\] → (\d+)% match/))
+                : null;
               return (
                 <div
                   key={runtimeDetailId}
@@ -1415,6 +1422,11 @@ function MessageLog({ messages, status, onClear, onAskAgent }) {
                       gap: '4px'
                     }}>
                       <span style={{ flexShrink: 0 }}>{typeDisplay.text}</span>
+                      {scoreInfo && (
+                        <span style={{padding:'1px 6px',borderRadius:'3px',backgroundColor:'var(--primary-soft)',color:'var(--primary-color)',fontSize:'10px',fontWeight:'700',flexShrink:0,marginRight:'2px'}}>
+                          {scoreInfo.score}%
+                        </span>
+                      )}
                       {!isExpanded && (
                         <span style={{
                           marginLeft: '4px',
