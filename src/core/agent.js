@@ -13,6 +13,8 @@ import { ExecutionPlan, TaskStatus } from '../planner/graph-planner.js';
 import { DynamicContextPruning } from './dynamic-context-pruning.js';
 import { WorkspaceIndex } from './workspace-index.js';
 import { selectToolsForRequest, shouldUseIntentClassifier } from './tool-router.js';
+import { WorkspaceState } from './workspace-state.js';
+import { ObservationSummarizer } from './observation-summarizer.js';
 
 const TERMINATION_KEYWORDS = ['FINAL_ANSWER:', 'Answer:', 'TASK_COMPLETE'];
 const MAX_ITERATIONS_DEFAULT = 120;
@@ -157,6 +159,18 @@ export class ReActAgent {
   #tokenJuice = null;
   /** @type {WorkspaceIndex|null} */
   #workspaceIndex = null;
+  
+  // ============ 工作区状态追踪（新功能）============
+  /** @type {WorkspaceState|null} */
+  #workspaceState = null;
+  /** @type {ObservationSummarizer|null} */
+  #observationSummarizer = null;
+  /** @type {boolean} */
+  #workspaceStateEnabled = true;
+  /** @type {number} */
+  #lastWorkspaceHintUpdate = 0;
+  /** @type {string} */
+  #cachedWorkspaceHint = '';
 
   constructor(modelProvider, toolRegistry, memoryManager, config = {}, customUI = ui) {
     this.#modelProvider = modelProvider;
@@ -185,6 +199,29 @@ export class ReActAgent {
     this.#contextPruner = config.contextPruner || new DynamicContextPruning();
     this.#tokenJuice = config.tokenJuice || null;
     this.#workspaceIndex = new WorkspaceIndex(this.#config.workingDirectory);
+    
+    // 初始化工作区状态追踪
+    this.#initializeWorkspaceState(config);
+  }
+  
+  /**
+   * 初始化工作区状态追踪
+   */
+  #initializeWorkspaceState(config) {
+    if (config.workspaceState instanceof WorkspaceState) {
+      // 允许外部注入
+      this.#workspaceState = config.workspaceState;
+    } else {
+      this.#workspaceState = new WorkspaceState();
+    }
+    
+    this.#observationSummarizer = new ObservationSummarizer(this.#workspaceState);
+    
+    this.#debugEvent('Workspace state initialized', {
+      enabled: this.#workspaceStateEnabled,
+      files: 0,
+      directories: 0,
+    });
   }
 
   /**
@@ -645,6 +682,26 @@ export class ReActAgent {
       this.#toolCallHistory = this.#toolCallHistory.slice(-25);
     }
 
+    // ============ 基于工作区状态的智能预测（新功能）============
+    if (this.#workspaceStateEnabled && this.#workspaceState) {
+      const prediction = this.#workspaceState.predictToolResult(name, args);
+      if (prediction.canSkip) {
+        this.#ui.warn(`⚠️  Skipping ${name}: ${prediction.reason}`);
+        this.#debugEvent('Tool call skipped (workspace prediction)', {
+          tool: name,
+          arguments: args,
+          reason: prediction.reason,
+          prediction: prediction.type,
+        });
+        const observation = `Based on previous exploration:\n${prediction.reason}\n\nThis operation would fail. Consider a different approach or check workspace_knowledge first.`;
+        this.#addToolObservation(id, name, observation, resultMode);
+        
+        // 记录为失败的操作
+        this.#recordToolEvent(name, args, false, prediction.reason);
+        return { name, result: prediction.predicted || { error: prediction.reason }, skipped: true, predicted: true };
+      }
+    }
+
     this.#ui.toolCall(name, args);
 
     const tool = this.#toolRegistry.get(name);
@@ -732,6 +789,19 @@ export class ReActAgent {
       this.#ui.toolResult(name, finalResult);
       this.#recordToolEvent(name, args, true, finalResult);
       this.#toolResultCache.set(callSignature, typeof finalResult === 'string' ? finalResult : JSON.stringify(finalResult));
+      
+      // ============ 记录到工作区状态（新功能）============
+      if (this.#workspaceStateEnabled && this.#observationSummarizer) {
+        const processed = this.#observationSummarizer.processToolResult(name, args, finalResult);
+        this.#debugEvent('Workspace state updated', {
+          tool: name,
+          summary: processed.summary,
+          factsCount: processed.facts?.length || 0,
+        });
+        // 清除缓存的工作区提示
+        this.#cachedWorkspaceHint = '';
+      }
+      
       this.#addToolObservation(id, name, finalResult, resultMode);
       this.#advanceAutomaticPlan(name, args, finalResult);
       return { name, result: finalResult };
@@ -746,6 +816,13 @@ export class ReActAgent {
       this.#ui.toolError(name, errorMsg);
       this.#recordToolEvent(name, args, false, `Error: ${errorMsg}`);
       this.#toolResultCache.set(callSignature, `Error: ${errorMsg}`);
+      
+      // ============ 记录错误到工作区状态（新功能）============
+      if (this.#workspaceStateEnabled && this.#observationSummarizer) {
+        this.#observationSummarizer.processToolResult(name, args, { error: errorMsg });
+        this.#cachedWorkspaceHint = '';
+      }
+      
       this.#addToolObservation(id, name, `Error: ${errorMsg}`, resultMode);
       return { name, result: `Error: ${errorMsg}`, error: errorMsg };
     }
@@ -1351,18 +1428,122 @@ export class ReActAgent {
         messagesAfter: this.#sessionManager.getHistory().length,
         stats,
       });
+      
+      // ============ 注入工作区状态摘要（新功能）============
+      // 在上下文裁剪后，注入工作区状态摘要，确保关键信息不会丢失
+      this.#injectWorkspaceStateSummary();
     }
+  }
+  
+  /**
+   * 注入工作区状态摘要到会话上下文
+   * 确保在上下文裁剪后，关键的工作区发现仍然可用
+   */
+  #injectWorkspaceStateSummary() {
+    if (!this.#workspaceStateEnabled || !this.#workspaceState) {
+      return;
+    }
+    
+    // 检查是否需要更新缓存
+    const now = Date.now();
+    const cacheAge = now - this.#lastWorkspaceHintUpdate;
+    
+    if (cacheAge < 30000 && this.#cachedWorkspaceHint) {
+      // 30秒内使用缓存
+      if (this.#cachedWorkspaceHint) {
+        this.#sessionManager.addSystemMessage(this.#cachedWorkspaceHint);
+      }
+      return;
+    }
+    
+    // 生成新的摘要
+    const hint = this.#generateWorkspaceHint();
+    this.#cachedWorkspaceHint = hint;
+    this.#lastWorkspaceHintUpdate = now;
+    
+    if (hint) {
+      this.#sessionManager.addSystemMessage(hint);
+      this.#debugEvent('Workspace state hint injected', {
+        hintLength: hint.length,
+      });
+    }
+  }
+  
+  /**
+   * 生成工作区状态提示
+   */
+  #generateWorkspaceHint() {
+    if (!this.#workspaceState || !this.#observationSummarizer) {
+      return '';
+    }
+    
+    const summary = this.#workspaceState.getSummary();
+    
+    // 如果没有足够的探索数据，不生成提示
+    if (summary.trackedFiles === 0 && summary.trackedDirectories === 0) {
+      return '';
+    }
+    
+    const criticalFacts = this.#workspaceState.getCriticalFacts();
+    const knownNonExistent = criticalFacts
+      .filter(f => f.type === 'path_not_found')
+      .map(f => f.value?.path)
+      .filter(Boolean);
+    
+    const workspaceDescription = this.#observationSummarizer.generateWorkspaceDescription();
+    
+    const parts = [];
+    parts.push('## 工作区探索状态 (Context Trimmed)');
+    parts.push('');
+    parts.push(workspaceDescription);
+    
+    if (knownNonExistent.length > 0) {
+      parts.push('');
+      parts.push('### 已知不存在的路径 (避免重复尝试)');
+      for (const path of knownNonExistent.slice(0, 10)) {
+        parts.push(`- ${path}`);
+      }
+    }
+    
+    // 添加关键事实
+    const importantFacts = criticalFacts
+      .filter(f => f.type !== 'path_not_found')
+      .slice(-5);
+    
+    if (importantFacts.length > 0) {
+      parts.push('');
+      parts.push('### 关键发现');
+      for (const fact of importantFacts) {
+        const value = typeof fact.value === 'object' 
+          ? JSON.stringify(fact.value).substring(0, 100)
+          : fact.value;
+        parts.push(`- ${fact.type}: ${value}`);
+      }
+    }
+    
+    parts.push('');
+    parts.push('这些信息来自之前的探索，在上下文裁剪后保留。请利用这些信息避免重复探索。');
+    
+    return parts.join('\n');
   }
 
   /**
    * Clear conversation history (keep system prompt and memory)
+   * @param {boolean} clearWorkspace - 是否清除工作区状态，默认 false 保留
    */
-  clearSession() {
+  clearSession(clearWorkspace = false) {
     this.#sessionManager.clear();
     this.#lastResponse = '';
     this.#repeatCount = 0;
 
     this.#toolCallHistory = [];
+    
+    // 可选清除工作区状态
+    if (clearWorkspace && this.#workspaceState) {
+      this.#workspaceState.clear();
+      this.#cachedWorkspaceHint = '';
+    }
+    
     this.#ui.info?.('Session cleared. Memory preserved.');
   }
 
@@ -1396,6 +1577,32 @@ export class ReActAgent {
 
   get sessionManager() {
     return this.#sessionManager;
+  }
+
+  // ============ 工作区状态 getter (新功能) ============
+  get workspaceState() {
+    return this.#workspaceState;
+  }
+
+  get observationSummarizer() {
+    return this.#observationSummarizer;
+  }
+
+  /**
+   * 获取工作区状态摘要
+   */
+  getWorkspaceSummary() {
+    if (!this.#workspaceState) {
+      return null;
+    }
+    return {
+      state: this.#workspaceState.getSummary(),
+      criticalFacts: this.#workspaceState.getCriticalFacts().map(f => ({
+        type: f.type,
+        value: f.value,
+      })),
+      workspaceDescription: this.#observationSummarizer?.generateWorkspaceDescription() || '',
+    };
   }
 
   getLastRunResult() {

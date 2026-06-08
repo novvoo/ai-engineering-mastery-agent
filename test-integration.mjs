@@ -7674,6 +7674,315 @@ coreEngineTests.test('Regex patterns - JWT matches token format', async () => {
   if (!JWT.test(token)) {throw new Error('JWT should match valid token');}
 });
 
+// ============ State Graph Architecture Tests ============
+const stateGraphTests = new TestRunner('State Graph Architecture');
+
+stateGraphTests.test('ContentAddressableStore - basic storage and retrieval', async () => {
+  const { ContentAddressableStore } = await import('./src/core/harness/state-graph-core.js');
+
+  const store = new ContentAddressableStore();
+
+  const testObj = { type: 'blob', content: 'Hello, State Graph!', metadata: { timestamp: Date.now() } };
+  const objId = store.put(testObj);
+
+  // Verify the object exists
+  if (!store.has(objId)) {
+    throw new Error('Object should exist after put');
+  }
+
+  // Retrieve the object
+  const retrieved = store.get(objId);
+  if (!retrieved) {
+    throw new Error('Object could not be retrieved');
+  }
+
+  // Verify content matches
+  if (retrieved.content !== testObj.content) {
+    throw new Error(`Content mismatch: expected "${testObj.content}", got "${retrieved.content}"`);
+  }
+
+  // Verify same content produces same ID (content addressing works)
+  const sameObj = { type: 'blob', content: 'Hello, State Graph!', metadata: { timestamp: Date.now() } };
+  const sameId = store.put(sameObj);
+
+  if (objId !== sameId) {
+    throw new Error('Same content should produce same ID (content addressing failed)');
+  }
+
+  console.log('     ContentAddressableStore basic storage works');
+});
+
+stateGraphTests.test('StateGraph - initialization and basic operations', async () => {
+  const { StateGraph } = await import('./src/core/harness/state-graph-core.js');
+
+  const graph = new StateGraph();
+
+  // Initial state check
+  const headId = graph.getHead();
+  if (!headId) {
+    throw new Error('StateGraph should have an initial head');
+  }
+
+  // Create a commit
+  const commitId = graph.commit(
+    [{ type: 'add', nodeId: 'node1', data: { type: 'file', path: 'test.js', content: 'console.log(1);' } }],
+    'Initial commit',
+    'test-agent'
+  );
+
+  // Verify the new commit becomes head
+  const newHeadId = graph.getHead();
+  if (newHeadId !== commitId) {
+    throw new Error('New commit should be head');
+  }
+
+  // Retrieve the commit node
+  const commitNode = graph.getNode(commitId);
+  if (!commitNode) {
+    throw new Error('Commit node should exist');
+  }
+  if (commitNode.data?.message !== 'Initial commit') {
+    throw new Error('Commit message not stored correctly');
+  }
+
+  console.log('     StateGraph basic operations work');
+});
+
+stateGraphTests.test('StateGraph - rollback to previous state', async () => {
+  const { StateGraph } = await import('./src/core/harness/state-graph-core.js');
+
+  const graph = new StateGraph();
+
+  // Get initial state
+  const initialHead = graph.getHead();
+
+  // Make some commits
+  const commit1 = graph.commit([{ type: 'add', nodeId: 'node1' }], 'Commit 1', 'test-agent');
+  const commit2 = graph.commit([{ type: 'update', nodeId: 'node1' }], 'Commit 2', 'test-agent');
+
+  // Current head should be commit2
+  if (graph.getHead() !== commit2) {
+    throw new Error('Head should be at commit2 before rollback');
+  }
+
+  // Rollback to initial state
+  const rollbackSuccess = graph.rollbackTo(initialHead);
+  if (!rollbackSuccess) {
+    throw new Error('Rollback should succeed');
+  }
+
+  // Head should now be initial
+  if (graph.getHead() !== initialHead) {
+    throw new Error('Head should be at initial after rollback');
+  }
+
+  console.log('     StateGraph rollback works');
+});
+
+stateGraphTests.test('ContextProjectionGenerator - basic projection', async () => {
+  const { ContentAddressableStore, StateGraph } = await import('./src/core/harness/state-graph-core.js');
+  const { ContextProjectionGenerator } = await import('./src/core/harness/context-projection.js');
+
+  const store = new ContentAddressableStore();
+  const graph = new StateGraph(store);
+  const generator = new ContextProjectionGenerator(graph);
+
+  // Generate a minimal projection
+  const projection = generator.projectSmart('minimal', { priority: 'fast' });
+
+  if (!projection) {
+    throw new Error('Projection should be generated');
+  }
+
+  // Verify projection contains basic info
+  if (!projection.includes('State Graph')) {
+    throw new Error('Projection should reference State Graph');
+  }
+
+  console.log('     ContextProjectionGenerator basic projection works');
+});
+
+stateGraphTests.test('Content addressing provides stable object identity', async () => {
+  const { ContentAddressableStore } = await import('./src/core/harness/state-graph-core.js');
+
+  const store = new ContentAddressableStore();
+
+  // Same content should always produce same ID
+  const obj = { type: 'test', value: 42 };
+  const id1 = store.put({ ...obj });
+  const id2 = store.put({ ...obj });
+
+  if (id1 !== id2) {
+    throw new Error('Same content should produce same object ID');
+  }
+
+  // Different content should produce different IDs
+  const obj2 = { type: 'test', value: 43 };
+  const id3 = store.put(obj2);
+
+  if (id1 === id3) {
+    throw new Error('Different content should produce different object IDs');
+  }
+
+  console.log('     Content addressing stable identity works');
+});
+
+stateGraphTests.test('State Graph history maintains continuity', async () => {
+  const { StateGraph } = await import('./src/core/harness/state-graph-core.js');
+
+  const graph = new StateGraph();
+
+  // Create a chain of commits
+  const commits = [];
+  commits.push(graph.commit([{ type: 'add', nodeId: 'node1' }], 'Commit 1', 'test-agent'));
+  commits.push(graph.commit([{ type: 'add', nodeId: 'node2' }], 'Commit 2', 'test-agent'));
+  commits.push(graph.commit([{ type: 'update', nodeId: 'node1' }], 'Commit 3', 'test-agent'));
+
+  // Verify the history chain
+  const history = graph.getHistory(10);
+  if (history.length < 4) { // 3 new commits + initial
+    throw new Error(`History should have at least 4 commits, got ${history.length}`);
+  }
+
+  // Verify the commit messages are in reverse chronological order
+  if (history[0].data?.message !== 'Commit 3') {
+    throw new Error('Latest commit should be first in history');
+  }
+  if (history[history.length - 2].data?.message !== 'Commit 1') {
+    throw new Error('First commit should be last (except initial) in history');
+  }
+
+  console.log('     State Graph history continuity works');
+});
+
+
+// ============ Agent Runtime System Analysis - Advanced Tests ============
+const runtimeAnalysisTests = new TestRunner('Agent Runtime System Analysis');
+
+runtimeAnalysisTests.test('WorkspaceState - directory and path existence', async () => {
+  const { WorkspaceState } = await import('./src/core/workspace-state.js');
+  const state = new WorkspaceState();
+  state.recordDirectoryListing('/test/dir', ['f1.js','f2.js','sub'], 'list_dir');
+  if (state.checkPathExists('/test/dir') !== 'exists') throw new Error('dir');
+  if (state.checkPathExists('/test/dir/f1.js') !== 'exists') throw new Error('child');
+  if (state.checkPathExists('/x') !== 'unknown') throw new Error('unknown');
+  if (state.directoryHasEntry('/test/dir','f1.js') !== true) throw new Error('hasEntry');
+  console.log('     WorkspaceState directory tracking works');
+});
+
+runtimeAnalysisTests.test('WorkspaceState - file lifecycle: read/write/not-found', async () => {
+  const { WorkspaceState } = await import('./src/core/workspace-state.js');
+  const state = new WorkspaceState();
+  state.recordFileRead('/a.js', true, {});
+  if (state.checkPathExists('/a.js') !== 'exists') throw new Error('read');
+  state.recordPathNotFound('/b.js', 'ENOENT');
+  if (state.checkPathExists('/b.js') !== 'not_found') throw new Error('not_found');
+  state.recordFileWrite('/b.js');
+  if (state.checkPathExists('/b.js') !== 'exists') throw new Error('write');
+  state.recordFileRead('/c.js', false, { error: 'X' });
+  if (state.checkPathExists('/c.js') !== 'not_found') throw new Error('fail');
+  console.log('     WorkspaceState file lifecycle works');
+});
+
+runtimeAnalysisTests.test('WorkspaceState - glob recording', async () => {
+  const { WorkspaceState } = await import('./src/core/workspace-state.js');
+  const state = new WorkspaceState();
+  state.recordGlobResults('**/*.js',['a.js','b.js']);
+  if (state.checkPathExists('a.js') !== 'exists') throw new Error('glob');
+  console.log('     WorkspaceState glob works');
+});
+
+runtimeAnalysisTests.test('WorkspaceState - tool result prediction', async () => {
+  const { WorkspaceState } = await import('./src/core/workspace-state.js');
+  const state = new WorkspaceState();
+  state.recordPathNotFound('/m.json','NF');
+  var p = state.predictToolResult('read_file',{path:'/m.json'});
+  if (!p.canSkip) throw new Error('skip');
+  state.recordFileRead('/e.js',true,{});
+  var e = state.predictToolResult('read_file',{path:'/e.js'});
+  if (e.type !== 'will_succeed') throw new Error('succeed');
+  var s = state.predictToolResult('shell',{command:'cat /m.json'});
+  if (!s.canSkip) throw new Error('shell skip');
+  if (state.predictToolResult('x',{}).canSkip) throw new Error('no skip');
+  console.log('     WorkspaceState prediction works');
+});
+
+runtimeAnalysisTests.test('WorkspaceState - facts management', async () => {
+  const { WorkspaceState } = await import('./src/core/workspace-state.js');
+  const state = new WorkspaceState();
+  state.addFact('t','a','high'); state.addFact('u','b','medium');
+  if (state.getCriticalFacts().length < 1) throw new Error('crit');
+  if (state.queryFacts('a').length===0) throw new Error('query');
+  state.addFact('t','a','high');
+  var d = state.getCriticalFacts().filter(f=>f.type==='t');
+  if (d.length>1) throw new Error('dedup');
+  if (state.getSummary().facts < 2) throw new Error('summary');
+  if (!state.export().facts) throw new Error('export');
+  state.clear();
+  if (state.getSummary().facts !== 0) throw new Error('clear');
+  console.log('     WorkspaceState facts works');
+});
+
+runtimeAnalysisTests.test('ObservationSummarizer - read_file handler', async () => {
+  const { WorkspaceState } = await import('./src/core/workspace-state.js');
+  const { ObservationSummarizer } = await import('./src/core/observation-summarizer.js');
+  const state = new WorkspaceState();
+  const sum = new ObservationSummarizer(state);
+  var r = sum.processToolResult('read_file',{path:'/a.js'},'hello');
+  if (!r.summary) throw new Error('summary');
+  if (r.facts.length===0) throw new Error('facts');
+  if (state.checkPathExists('/a.js')!=='exists') throw new Error('recorded');
+  console.log('     ObservationSummarizer read_file works');
+});
+
+runtimeAnalysisTests.test('ObservationSummarizer - glob and shell handlers', async () => {
+  const { WorkspaceState } = await import('./src/core/workspace-state.js');
+  const { ObservationSummarizer } = await import('./src/core/observation-summarizer.js');
+  const state = new WorkspaceState();
+  const sum = new ObservationSummarizer(state);
+  var g = sum.processToolResult('glob',{pattern:'*.js'},['a.js','b.js','c.js']);
+  if (!g.summary||!g.summary.includes('3')) throw new Error('glob');
+  var s = sum.processToolResult('shell',{command:'ls'},'f.js');
+  if (!s.summary||s.facts.length===0) throw new Error('shell');
+  console.log('     ObservationSummarizer glob/shell works');
+});
+
+runtimeAnalysisTests.test('ObservationSummarizer - context summary', async () => {
+  const { WorkspaceState } = await import('./src/core/workspace-state.js');
+  const { ObservationSummarizer } = await import('./src/core/observation-summarizer.js');
+  const state = new WorkspaceState();
+  const sum = new ObservationSummarizer(state);
+  sum.processToolResult('read_file',{path:'/a.js'},'x');
+  sum.processToolResult('read_file',{path:'/b.json'},'{}');
+  var c = sum.generateContextSummary(5);
+  if (typeof c!=='string'||c.length===0) throw new Error('ctx');
+  var d = sum.generateWorkspaceDescription();
+  if (typeof d!=='string'||d.length===0) throw new Error('desc');
+  console.log('     ObservationSummarizer context works');
+});
+
+runtimeAnalysisTests.test('WorkspaceKnowledge tool - query facts and check paths', async () => {
+  const { WorkspaceState } = await import('./src/core/workspace-state.js');
+  const { createWorkspaceKnowledgeTools } = await import('./src/tools/system/workspace-knowledge.js');
+  const state = new WorkspaceState();
+  state.addFact('tool','bun','high');
+  state.recordFileRead('/m.js', true, {});
+  state.recordPathNotFound('/x.js', 'ENOENT');
+  var tools = createWorkspaceKnowledgeTools(state);
+  if (tools.length===0) throw new Error('tools');
+  var t = tools[0];
+  if (t.name !== 'workspace_knowledge') throw new Error('name');
+  var ctx = { observationSummarizer: { generateWorkspaceDescription: ()=>'desc' } };
+  var f = await t.handler({ action: 'get_facts' }, ctx);
+  if (!f||f.count<1) throw new Error('facts');
+  var s = await t.handler({ action: 'get_summary' }, ctx);
+  if (!s||!s.summary) throw new Error('summary');
+  var c = await t.handler({ action: 'check_path', path: '/m.js' }, ctx);
+  if (!c||!c.exists) throw new Error('check');
+  var q = await t.handler({ action: 'query', query: 'bun' }, ctx);
+  if (!q||q.count===0) throw new Error('query');
+  console.log('     WorkspaceKnowledge tool works');
+});
 // ============ 10. Adapter & Desktop Unit Tests ============
 const adapterUnitTests = new TestRunner("Adapter \u0026 Desktop Unit Tests");
 
@@ -7748,7 +8057,8 @@ async function runAllTests() {
     await webSearchTests.run();
     await productionReadinessTests.run();
     await coreEngineTests.run();
-    await adapterUnitTests.run();
+        await runtimeAnalysisTests.run();
+await adapterUnitTests.run();
   } catch (error) {
     console.error('\nTest suite failed:', error.message);
   }

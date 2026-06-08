@@ -30,6 +30,8 @@ import { Embedder } from '../core/embedder.js';
 import { createFileSystemTools } from '../tools/filesystem/filesystem-tools.js';
 import { createShellTool } from '../tools/system/shell.js';
 import { createPtyTools } from '../tools/system/pty.js';
+import { createWorkspaceKnowledgeTools } from '../tools/system/workspace-knowledge.js';
+import { createStateCentricTools } from '../tools/harness/state-centric-tools.js';
 import { createSemanticSearchTool } from '../tools/memory/semantic-search.js';
 import { createDocumentRagTools } from '../tools/memory/document-rag.js';
 import { createGitTools } from '../tools/git/git-tools.js';
@@ -316,6 +318,28 @@ export class AgentEngine {
       registeredTools.push(shellTool.name);
     } catch (error) {
       console.warn('Shell 工具注册失败:', error.message);
+    }
+
+    // 2.1 工作区知识工具（用于查询工作区状态）
+    try {
+      const workspaceKnowledgeTools = createWorkspaceKnowledgeTools(null); // 传入 null，稍后在 Agent 中设置
+      for (const tool of workspaceKnowledgeTools) {
+        this.#toolRegistry.register(tool);
+        registeredTools.push(tool.name);
+      }
+    } catch (error) {
+      console.warn('工作区知识工具注册失败:', error.message);
+    }
+
+    // 2.2 State-Centric 编辑工具（基于哈希锚点的状态驱动编辑）
+    try {
+      const stateCentricTools = createStateCentricTools();
+      for (const tool of stateCentricTools) {
+        this.#toolRegistry.register(tool);
+        registeredTools.push(tool.name);
+      }
+    } catch (error) {
+      console.warn('状态驱动编辑工具注册失败:', error.message);
     }
 
     // 3. PTY 工具（交互式终端）
