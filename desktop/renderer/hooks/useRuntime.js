@@ -153,15 +153,14 @@ export function useRuntime() {
       if (window.electronAPI) {
         const result = await window.electronAPI.processInput(input, options);
         const answer = extractAgentAnswer(result);
-        const converged = answer ? truncateAnswer(answer) : answer;
         const needsUserInput = result?.status === 'needs_user_input';
         
-        // 添加结果消息（已收敛）
-        if (converged && converged !== lastAnswerRef.current) {
-          lastAnswerRef.current = converged;
+        // 添加结果消息
+        if (answer && answer !== lastAnswerRef.current) {
+          lastAnswerRef.current = answer;
           addMessage({
             type: needsUserInput ? 'warning' : 'result',
-            content: converged,
+            content: answer,
             ...result
           });
         } else if (!answer) {
@@ -257,12 +256,11 @@ export function useRuntime() {
 
         if (eventName === 'agent:complete') {
           const answer = extractAgentAnswer(payload);
-          const dedup = answer ? truncateAnswer(answer) : answer;
-          if (dedup && dedup === lastAnswerRef.current) {
+          if (answer && answer === lastAnswerRef.current) {
             return;
           }
-          if (dedup) {
-            lastAnswerRef.current = dedup;
+          if (answer) {
+            lastAnswerRef.current = answer;
           }
         }
 
@@ -320,13 +318,11 @@ export function normalizeRuntimeEventMessage(eventName, payload = {}) {
     case 'agent:complete': {
       const answer = extractAgentAnswer(payload);
       const needsUserInput = payload?.result?.status === 'needs_user_input' || payload?.status === 'needs_user_input';
-      // 收敛 Agent 回答：只取第一段（FINAL_ANSWER 后的冗余内容不显示）
-      const converged = answer ? truncateAnswer(answer) : answer;
       return {
         message: {
           ...base,
-          type: needsUserInput ? 'warning' : (converged ? 'result' : 'success'),
-          content: converged || (needsUserInput ? '需要你补充信息后继续' : 'Agent 执行完成'),
+          type: needsUserInput ? 'warning' : (answer ? 'result' : 'success'),
+          content: answer || (needsUserInput ? '需要你补充信息后继续' : 'Agent 执行完成'),
         },
       };
     }
@@ -423,22 +419,6 @@ function extractAgentAnswer(data) {
   }
 
   return '';
-}
-
-
-
-/**
- * 收敛 Agent 回答：移除 RAG chunk 原文等冗余内容
- * 策略：1) [文件名] → XX% match 模式之前 2) 第一个空行前 3) 300 字符截断
- */
-function truncateAnswer(text) {
-  if (!text) return text;
-  // 仅在检测到 RAG chunk 标记时收敛，非 RAG 结果原文返回
-  const chunkMatch = text.match(/(?:\n|^)\[[^\]]+\] → \d+% match/);
-  if (chunkMatch && chunkMatch.index > 0) {
-    return text.substring(0, chunkMatch.index).trim();
-  }
-  return text;
 }
 
 /**
