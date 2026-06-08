@@ -1,9 +1,9 @@
 /**
  * State Graph Core System
- * 
+ *
  * 核心思想：
  * 将 Agent 的系统状态从 Token Context 中提升为 Runtime 维护的显式 State Graph
- * 
+ *
  * - 内容寻址提供稳定的对象身份
  * - 状态图提供长期的状态连续性
  * - 上下文仅作为状态图在当前任务下的局部投影（Context Projection）
@@ -11,67 +11,28 @@
 
 import { createHash } from 'crypto';
 
-// ==================== 类型定义 ====================
-
-type ObjectType = 'blob' | 'tree' | 'node' | 'commit' | 'symbol' | 'dependency';
-
-interface ContentAddressableObject {
-  type: ObjectType;
-  data: any;
-  hash: string;
+/**
+ * 计算内容哈希
+ */
+function computeHash(data, type) {
+  const serialized = JSON.stringify({ type, data });
+  return createHash('sha256').update(serialized).digest('hex');
 }
 
-interface StateNode {
-  id: string;             // 稳定的内容哈希
-  type: 'file' | 'symbol' | 'dependency' | 'commit';
-  data: any;
-  parentIds: string[];   // 父节点（形成 DAG）
-  timestamp: number;
-  metadata: Record<string, any>;
-}
-
-interface ContextProjection {
-  taskId: string;
-  nodes: string[];      // 投影到当前任务的节点 ID
-  purpose: string;      // 投影的目的（编辑、理解、调试等）
-  timestamp: number;
-  context: string;      // 生成的上下文字符串
-}
-
-interface Commit {
-  id: string;
-  parentIds: string[];
-  changes: ChangeOp[];
-  timestamp: number;
-  author: string;
-  message: string;
-}
-
-type ChangeOp = {
-  type: 'add' | 'update' | 'delete';
-  nodeId: string;
-  previousId?: string;
-};
-
-// ==================== 内容寻址存储 ====================
-
+/**
+ * 内容寻址存储
+ */
 export class ContentAddressableStore {
-  private objects: Map<string, ContentAddressableObject> = new Map();
-  private refs: Map<string, string> = new Map();
-
-  /**
-   * 计算内容哈希
-   */
-  static computeHash(data: any, type: ObjectType): string {
-    const serialized = JSON.stringify({ type, data });
-    return createHash('sha256').update(serialized).digest('hex');
+  constructor() {
+    this.objects = new Map();
+    this.refs = new Map();
   }
 
   /**
    * 存储对象，返回哈希
    */
-  store(type: ObjectType, data: any): string {
-    const hash = ContentAddressableStore.computeHash(data, type);
+  store(type, data) {
+    const hash = computeHash(data, type);
     if (!this.objects.has(hash)) {
       this.objects.set(hash, { type, data, hash });
     }
@@ -81,21 +42,21 @@ export class ContentAddressableStore {
   /**
    * 按哈希获取对象
    */
-  get(hash: string): ContentAddressableObject | null {
+  get(hash) {
     return this.objects.get(hash) || null;
   }
 
   /**
    * 存储 BLOB（文件内容）
    */
-  storeBlob(content: string): string {
+  storeBlob(content) {
     return this.store('blob', { content });
   }
 
   /**
    * 获取 BLOB 内容
    */
-  getBlob(hash: string): string | null {
+  getBlob(hash) {
     const obj = this.get(hash);
     return obj && obj.type === 'blob' ? obj.data.content : null;
   }
@@ -103,28 +64,28 @@ export class ContentAddressableStore {
   /**
    * 设置引用
    */
-  setRef(name: string, hash: string): void {
+  setRef(name, hash) {
     this.refs.set(name, hash);
   }
 
   /**
    * 获取引用
    */
-  getRef(name: string): string | null {
+  getRef(name) {
     return this.refs.get(name) || null;
   }
 
   /**
    * 删除引用
    */
-  deleteRef(name: string): void {
+  deleteRef(name) {
     this.refs.delete(name);
   }
 
   /**
    * 导出存储
    */
-  export(): { objects: [string, ContentAddressableObject][], refs: [string, string][] } {
+  export() {
     return {
       objects: Array.from(this.objects.entries()),
       refs: Array.from(this.refs.entries())
@@ -134,7 +95,7 @@ export class ContentAddressableStore {
   /**
    * 导入存储
    */
-  import(data: { objects: [string, ContentAddressableObject][], refs: [string, string][] }): void {
+  import(data) {
     for (const [hash, obj] of data.objects) {
       this.objects.set(hash, obj);
     }
@@ -146,7 +107,7 @@ export class ContentAddressableStore {
   /**
    * 获取统计
    */
-  getStats(): { objects: number, refs: number } {
+  getStats() {
     return {
       objects: this.objects.size,
       refs: this.refs.size
@@ -154,38 +115,37 @@ export class ContentAddressableStore {
   }
 }
 
-// ==================== 状态图 ====================
-
+/**
+ * 状态图
+ */
 export class StateGraph {
-  private store: ContentAddressableStore;
-  private nodes: Map<string, StateNode> = new Map();
-  private headRef: string = 'HEAD';
-  private initialCommitId: string | null = null;
-
-  constructor(store?: ContentAddressableStore) {
+  constructor(store) {
     this.store = store || new ContentAddressableStore();
+    this.nodes = new Map();
+    this.headRef = 'HEAD';
+    this.initialCommitId = null;
   }
 
   /**
    * 创建初始状态
    */
-  initialize(initialData: any = {}): string {
+  initialize(initialData = {}) {
     const initialNode = this.createNode('commit', {
       message: 'Initial state',
       data: initialData
     }, []);
-    
+
     this.initialCommitId = initialNode.id;
     this.store.setRef(this.headRef, initialNode.id);
-    
+
     return initialNode.id;
   }
 
   /**
    * 创建节点
    */
-  createNode(type: StateNode['type'], data: any, parentIds: string[] = [], metadata: Record<string, any> = {}): StateNode {
-    const node: StateNode = {
+  createNode(type, data, parentIds = [], metadata = {}) {
+    const node = {
       id: this.store.store(type, data),
       type,
       data,
@@ -193,7 +153,7 @@ export class StateGraph {
       timestamp: Date.now(),
       metadata
     };
-    
+
     this.nodes.set(node.id, node);
     return node;
   }
@@ -201,20 +161,16 @@ export class StateGraph {
   /**
    * 获取节点
    */
-  getNode(id: string): StateNode | null {
+  getNode(id) {
     return this.nodes.get(id) || null;
   }
 
   /**
    * 创建提交（应用变更）
    */
-  commit(
-    changes: ChangeOp[], 
-    message: string, 
-    author: string = 'agent'
-  ): string {
+  commit(changes, message, author = 'agent') {
     const currentHead = this.store.getRef(this.headRef);
-    
+
     const commitNode = this.createNode('commit', {
       message,
       changes,
@@ -232,14 +188,14 @@ export class StateGraph {
 
     // 更新 HEAD
     this.store.setRef(this.headRef, commitNode.id);
-    
+
     return commitNode.id;
   }
 
   /**
    * 回滚到指定提交
    */
-  rollbackTo(commitId: string): boolean {
+  rollbackTo(commitId) {
     const node = this.getNode(commitId);
     if (!node) {
       return false;
@@ -252,76 +208,76 @@ export class StateGraph {
   /**
    * 获取当前 HEAD 提交
    */
-  getHead(): string | null {
+  getHead() {
     return this.store.getRef(this.headRef);
   }
 
   /**
    * 获取历史记录
    */
-  getHistory(limit: number = 10): StateNode[] {
-    const history: StateNode[] = [];
+  getHistory(limit = 10) {
+    const history = [];
     let currentId = this.getHead();
-    
+
     while (currentId && history.length < limit) {
       const node = this.getNode(currentId);
       if (!node) break;
-      
+
       history.push(node);
-      
+
       if (node.parentIds.length > 0) {
         currentId = node.parentIds[0];
       } else {
         break;
       }
     }
-    
+
     return history;
   }
 
   /**
    * 获取两个提交之间的差异
    */
-  getDiff(fromCommitId: string, toCommitId: string): ChangeOp[] {
+  getDiff(fromCommitId, toCommitId) {
     const fromNode = this.getNode(fromCommitId);
     const toNode = this.getNode(toCommitId);
-    
+
     if (!fromNode || !toNode) {
       return [];
     }
 
-    const changes: ChangeOp[] = [];
+    const changes = [];
     const fromIds = new Set(this.collectNodeIds(fromCommitId));
     const toIds = new Set(this.collectNodeIds(toCommitId));
-    
+
     // 新增的节点
     for (const id of toIds) {
       if (!fromIds.has(id)) {
         changes.push({ type: 'add', nodeId: id });
       }
     }
-    
+
     // 删除的节点
     for (const id of fromIds) {
       if (!toIds.has(id)) {
         changes.push({ type: 'delete', nodeId: id });
       }
     }
-    
+
     return changes;
   }
 
   /**
    * 收集节点及其祖先的 ID
    */
-  private collectNodeIds(nodeId: string): Set<string> {
-    const ids = new Set<string>();
-    const toVisit: string[] = [nodeId];
-    
+  collectNodeIds(nodeId) {
+    const ids = new Set();
+    const toVisit = [nodeId];
+
     while (toVisit.length > 0) {
-      const id = toVisit.shift()!;
+      const id = toVisit.shift();
       if (ids.has(id)) continue;
-      
+
       ids.add(id);
       const node = this.getNode(id);
       if (node) {
@@ -330,21 +286,21 @@ export class StateGraph {
         }
       }
     }
-    
+
     return ids;
   }
 
   /**
    * 获取存储
    */
-  getStore(): ContentAddressableStore {
+  getStore() {
     return this.store;
   }
 
   /**
    * 获取统计
    */
-  getStats(): { nodes: number, head: string | null } {
+  getStats() {
     return {
       nodes: this.nodes.size,
       head: this.getHead()
@@ -352,37 +308,31 @@ export class StateGraph {
   }
 }
 
-// ==================== 上下文投影 ====================
-
+/**
+ * 上下文投影引擎
+ */
 export class ContextProjectionEngine {
-  private graph: StateGraph;
-  private projections: Map<string, ContextProjection> = new Map();
-
-  constructor(graph: StateGraph) {
+  constructor(graph) {
     this.graph = graph;
+    this.projections = new Map();
   }
 
   /**
    * 创建上下文投影
-   * 
+   *
    * Context Projection: 状态图在当前任务下的局部视图
    */
-  project(
-    taskId: string, 
-    purpose: string, 
-    nodeIds: string[],
-    additionalContext: string = ''
-  ): ContextProjection {
+  project(taskId, purpose, nodeIds, additionalContext = '') {
     const context = this.generateContextFromNodes(nodeIds, purpose);
-    
-    const projection: ContextProjection = {
+
+    const projection = {
       taskId,
       nodes: nodeIds,
       purpose,
       timestamp: Date.now(),
       context: context + additionalContext
     };
-    
+
     this.projections.set(taskId, projection);
     return projection;
   }
@@ -390,21 +340,21 @@ export class ContextProjectionEngine {
   /**
    * 从节点生成上下文字符串
    */
-  private generateContextFromNodes(nodeIds: string[], purpose: string): string {
-    const lines: string[] = [];
-    
+  generateContextFromNodes(nodeIds, purpose) {
+    const lines = [];
+
     lines.push(`## Context Projection: ${purpose}`);
     lines.push(`Generated at: ${new Date().toISOString()}`);
     lines.push('');
-    
+
     for (const nodeId of nodeIds) {
       const node = this.graph.getNode(nodeId);
       if (!node) continue;
-      
+
       lines.push(`---`);
       lines.push(`Node ID: ${nodeId.substring(0, 16)}...`);
       lines.push(`Type: ${node.type}`);
-      
+
       if (node.type === 'file') {
         lines.push(`File: ${node.data.path || 'unknown'}`);
         if (node.data.content) {
@@ -429,29 +379,29 @@ export class ContextProjectionEngine {
         }
       }
     }
-    
+
     lines.push('');
     lines.push('---');
     lines.push('End of Context Projection');
-    
+
     return lines.join('\n');
   }
 
   /**
    * 获取投影
    */
-  getProjection(taskId: string): ContextProjection | null {
+  getProjection(taskId) {
     return this.projections.get(taskId) || null;
   }
 
   /**
    * 更新投影
    */
-  updateProjection(taskId: string, updates: Partial<ContextProjection>): ContextProjection | null {
+  updateProjection(taskId, updates) {
     const existing = this.getProjection(taskId);
     if (!existing) return null;
-    
-    const updated: ContextProjection = { ...existing, ...updates, timestamp: Date.now() };
+
+    const updated = { ...existing, ...updates, timestamp: Date.now() };
     this.projections.set(taskId, updated);
     return updated;
   }
@@ -459,33 +409,26 @@ export class ContextProjectionEngine {
   /**
    * 删除投影
    */
-  deleteProjection(taskId: string): boolean {
+  deleteProjection(taskId) {
     return this.projections.delete(taskId);
   }
 
   /**
    * 获取所有投影
    */
-  getAllProjections(): ContextProjection[] {
+  getAllProjections() {
     return Array.from(this.projections.values());
   }
 
   /**
    * 智能投影：基于相关性自动选择节点
    */
-  smartProject(
-    taskId: string,
-    purpose: string,
-    query: string,
-    relevanceThreshold: number = 0.5
-  ): ContextProjection {
+  smartProject(taskId, purpose, query, relevanceThreshold = 0.5) {
     // TODO: 实现智能选择算法（基于语义相似度）
     // 暂时返回空投影
     return this.project(taskId, purpose, []);
   }
 }
-
-// ==================== 导出 ====================
 
 export default {
   ContentAddressableStore,

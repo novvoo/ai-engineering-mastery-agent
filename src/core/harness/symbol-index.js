@@ -1,6 +1,6 @@
 /**
  * Symbol Index - 符号索引系统
- * 
+ *
  * 提供代码中所有符号（函数、类、变量、导入等）的快速查找能力
  * 支持按需上下文扩展，理解"为什么这样改"
  */
@@ -9,46 +9,28 @@ import { readFile } from 'fs/promises';
 import { resolve, join } from 'path';
 import { existsSync } from 'fs';
 
-interface SymbolInfo {
-  name: string;
-  type: 'function' | 'class' | 'method' | 'variable' | 'import' | 'export' | 'interface' | 'type';
-  file: string;
-  line: number;
-  column: number;
-  endLine: number;
-  visibility: 'public' | 'private' | 'protected';
-  signature?: string;
-  docComment?: string;
-  hash: string;  // 内容哈希用于锚点
-}
-
-interface FileSymbols {
-  file: string;
-  symbols: SymbolInfo[];
-  hash: string;
-  timestamp: number;
-}
-
 /**
  * 符号索引器
  */
 export class SymbolIndex {
-  private _index: Map<string, FileSymbols> = new Map();
-  private _nameIndex: Map<string, SymbolInfo[]> = new Map();
-  private _typeIndex: Map<string, SymbolInfo[]> = new Map();
-  
+  constructor() {
+    this._index = new Map();
+    this._nameIndex = new Map();
+    this._typeIndex = new Map();
+  }
+
   /**
    * 索引文件
    */
-  async indexFile(filePath: string): Promise<SymbolInfo[]> {
+  async indexFile(filePath) {
     if (!existsSync(filePath)) {
       throw new Error(`File not found: ${filePath}`);
     }
 
     const content = await readFile(filePath, 'utf-8');
     const symbols = this._extractSymbols(filePath, content);
-    
-    const fileSymbols: FileSymbols = {
+
+    const fileSymbols = {
       file: filePath,
       symbols,
       hash: this._hashContent(content),
@@ -62,13 +44,13 @@ export class SymbolIndex {
       if (!this._nameIndex.has(symbol.name)) {
         this._nameIndex.set(symbol.name, []);
       }
-      this._nameIndex.get(symbol.name)!.push(symbol);
+      this._nameIndex.get(symbol.name).push(symbol);
 
       // 更新类型索引
       if (!this._typeIndex.has(symbol.type)) {
         this._typeIndex.set(symbol.type, []);
       }
-      this._typeIndex.get(symbol.type)!.push(symbol);
+      this._typeIndex.get(symbol.type).push(symbol);
     }
 
     return symbols;
@@ -77,21 +59,21 @@ export class SymbolIndex {
   /**
    * 根据名称查找符号
    */
-  findByName(name: string): SymbolInfo[] {
+  findByName(name) {
     return this._nameIndex.get(name) || [];
   }
 
   /**
    * 根据类型查找符号
    */
-  findByType(type: SymbolInfo['type']): SymbolInfo[] {
+  findByType(type) {
     return this._typeIndex.get(type) || [];
   }
 
   /**
    * 查找文件中的符号
    */
-  findInFile(filePath: string): SymbolInfo[] {
+  findInFile(filePath) {
     const fileSymbols = this._index.get(filePath);
     return fileSymbols ? fileSymbols.symbols : [];
   }
@@ -99,11 +81,7 @@ export class SymbolIndex {
   /**
    * 获取符号上下文（符号及其周围的代码）
    */
-  async getSymbolContext(
-    filePath: string, 
-    line: number, 
-    contextLines: number = 20
-  ): Promise<{ symbol: SymbolInfo; context: string } | null> {
+  async getSymbolContext(filePath, line, contextLines = 20) {
     const fileSymbols = this._index.get(filePath);
     if (!fileSymbols) {
       return null;
@@ -119,7 +97,7 @@ export class SymbolIndex {
 
     const content = await readFile(filePath, 'utf-8');
     const lines = content.split('\n');
-    
+
     const startLine = Math.max(0, symbol.line - contextLines);
     const endLine = Math.min(lines.length, symbol.endLine + contextLines);
     const context = lines.slice(startLine, endLine).join('\n');
@@ -130,18 +108,11 @@ export class SymbolIndex {
   /**
    * 获取符号的完整定义（包括依赖）
    */
-  async getSymbolWithDependencies(
-    symbol: SymbolInfo,
-    maxDepth: number = 2
-  ): Promise<{
-    symbol: SymbolInfo;
-    dependencies: SymbolInfo[];
-    context: string;
-  }> {
-    const dependencies: SymbolInfo[] = [];
-    const visited = new Set<string>();
+  async getSymbolWithDependencies(symbol, maxDepth = 2) {
+    const dependencies = [];
+    const visited = new Set();
 
-    const collectDependencies = async (sym: SymbolInfo, depth: number) => {
+    const collectDependencies = async (sym, depth) => {
       if (depth > maxDepth || visited.has(sym.hash)) return;
       visited.add(sym.hash);
 
@@ -167,8 +138,8 @@ export class SymbolIndex {
   /**
    * 提取符号（简单实现，支持 JS/TS）
    */
-  private _extractSymbols(filePath: string, content: string): SymbolInfo[] {
-    const symbols: SymbolInfo[] = [];
+  _extractSymbols(filePath, content) {
+    const symbols = [];
     const lines = content.split('\n');
 
     for (let i = 0; i < lines.length; i++) {
@@ -299,7 +270,7 @@ export class SymbolIndex {
   /**
    * 查找代码块结束行
    */
-  private _findBlockEnd(lines: string[], startLine: number): number {
+  _findBlockEnd(lines, startLine) {
     let braceCount = 0;
     let foundOpen = false;
 
@@ -313,7 +284,7 @@ export class SymbolIndex {
           braceCount--;
         }
       }
-      
+
       if (foundOpen && braceCount === 0) {
         return i + 1;
       }
@@ -325,7 +296,7 @@ export class SymbolIndex {
   /**
    * 提取函数签名
    */
-  private _extractSignature(line: string): string {
+  _extractSignature(line) {
     const match = line.match(/\([^)]*\)/);
     return match ? match[0] : '';
   }
@@ -333,7 +304,7 @@ export class SymbolIndex {
   /**
    * 获取可见性
    */
-  private _getVisibility(line: string): 'public' | 'private' | 'protected' {
+  _getVisibility(line) {
     if (line.includes('private') || line.startsWith('_')) return 'private';
     if (line.includes('protected')) return 'protected';
     return 'public';
@@ -342,7 +313,7 @@ export class SymbolIndex {
   /**
    * 内容哈希
    */
-  private _hashContent(content: string): string {
+  _hashContent(content) {
     const { createHash } = require('crypto');
     return createHash('sha256').update(content).digest('hex');
   }
@@ -350,9 +321,9 @@ export class SymbolIndex {
   /**
    * 获取索引统计
    */
-  getStats(): { files: number; symbols: number; byType: Record<string, number> } {
-    const byType: Record<string, number> = {};
-    
+  getStats() {
+    const byType = {};
+
     for (const [type, symbols] of this._typeIndex.entries()) {
       byType[type] = symbols.length;
     }

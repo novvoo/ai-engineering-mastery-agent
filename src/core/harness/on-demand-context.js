@@ -1,11 +1,11 @@
 /**
  * On-Demand Context Expansion System - 按需上下文扩展系统
- * 
+ *
  * 核心架构：
  * Hash Anchor 解决"改哪里"，动态上下文扩展解决"为什么这样改"
- * 
+ *
  * 只有两者同时存在，才能既降低编辑成本，又不牺牲代码理解能力
- * 
+ *
  * 核心洞察：
  * - Hash Anchor 的价值不是"减少上下文"，而是**按需加载（load on demand）**
  * - 减少上下文只是副作用
@@ -15,75 +15,22 @@
 import { readFile } from 'fs/promises';
 import { resolve, join } from 'path';
 import { existsSync } from 'fs';
-import { SymbolIndex, SymbolInfo } from './symbol-index.js';
-import { DependencyGraph, Dependency } from './dependency-graph.js';
-import { ASTMetadataExtractor, FunctionMetadata, ClassMetadata } from './ast-metadata.js';
+import { SymbolIndex } from './symbol-index.js';
+import { DependencyGraph } from './dependency-graph.js';
+import { ASTMetadataExtractor } from './ast-metadata.js';
 import { ContentAddressableStore } from './content-addressing.js';
 
-type ConfidenceLevel = 'high' | 'medium' | 'low' | 'unknown';
-
-interface ExpansionRequest {
-  anchorHash?: string;
-  file?: string;
-  line?: number;
-  symbolName?: string;
-  dependencyLevel?: number;
-  contextLines?: number;
-}
-
-interface ExpandedContext {
-  confidence: ConfidenceLevel;
-  confidenceReason: string;
-  primaryContent: {
-    type: 'function' | 'class' | 'file' | 'symbol';
-    name?: string;
-    definition: string;
-    hash: string;
-  };
-  supportingContext: Array<{
-    type: 'dependency' | 'reference' | 'caller' | 'callee' | 'type_definition';
-    name: string;
-    file: string;
-    preview: string;
-    importance: 'critical' | 'helpful' | 'optional';
-  }>;
-  dependencies: Array<{
-    file: string;
-    symbols: string[];
-    distance: number;
-  }>;
-  recommendations: string[];
-  tokens: number;  // 扩展上下文的 token 数量
-}
-
-interface EvidenceBasedChangeIntent {
-  target: {
-    anchorHash?: string;
-    file: string;
-    line?: number;
-    symbolName?: string;
-  };
-  intent: 'modify' | 'extend' | 'delete' | 'replace' | 'refactor';
-  evidence: {
-    reason: string;
-    confidence: ConfidenceLevel;
-    supportingFacts: string[];
-    missingInformation: string[];
-  };
-  requiredContext: {
-    toLoad: string[];
-    reason: string;
-  };
-  potentialSideEffects: Array<{
-    file: string;
-    reason: string;
-    severity: 'high' | 'medium' | 'low';
-  }>;
-}
+/**
+ * 置信度级别
+ */
+const CONFIDENCE_HIGH = 'high';
+const CONFIDENCE_MEDIUM = 'medium';
+const CONFIDENCE_LOW = 'low';
+const CONFIDENCE_UNKNOWN = 'unknown';
 
 /**
  * 按需上下文扩展器
- * 
+ *
  * 核心职责：
  * 1. 检测模型对当前上下文的置信度
  * 2. 按需扩展上下文（而非预加载）
@@ -91,41 +38,29 @@ interface EvidenceBasedChangeIntent {
  * 4. 识别潜在副作用
  */
 export class OnDemandContextExpansion {
-  private _symbolIndex: SymbolIndex;
-  private _dependencyGraph: DependencyGraph;
-  private _astExtractor: ASTMetadataExtractor;
-  private _contentStore: ContentAddressableStore;
-  
-  // 置信度阈值
-  private _confidenceThresholds = {
-    high: 0.9,   // 90% 以上的置信度
-    medium: 0.6, // 60% - 90%
-    low: 0.3     // 30% - 60%
-  };
-
-  // 扩展缓存
-  private _expansionCache: Map<string, ExpandedContext> = new Map();
-
-  constructor(options?: {
-    symbolIndex?: SymbolIndex;
-    dependencyGraph?: DependencyGraph;
-    astExtractor?: ASTMetadataExtractor;
-  }) {
+  constructor(options) {
     this._symbolIndex = options?.symbolIndex || new SymbolIndex();
     this._dependencyGraph = options?.dependencyGraph || new DependencyGraph();
     this._astExtractor = options?.astExtractor || new ASTMetadataExtractor();
     this._contentStore = new ContentAddressableStore();
+
+    // 置信度阈值
+    this._confidenceThresholds = {
+      high: 0.9,   // 90% 以上的置信度
+      medium: 0.6, // 60% - 90%
+      low: 0.3     // 30% - 60%
+    };
+
+    // 扩展缓存
+    this._expansionCache = new Map();
   }
 
   /**
    * 索引项目文件
    */
-  async indexProject(workingDirectory: string, filePatterns: string[] = ['**/*.{js,ts,jsx,tsx}']): Promise<{
-    filesIndexed: number;
-    symbolsFound: number;
-  }> {
+  async indexProject(workingDirectory, filePatterns = ['**/*.{js,ts,jsx,tsx}']) {
     const { glob } = await import('glob');
-    
+
     let filesIndexed = 0;
     let symbolsFound = 0;
 
@@ -137,12 +72,12 @@ export class OnDemandContextExpansion {
 
       for (const file of files) {
         const fullPath = resolve(workingDirectory, file);
-        
+
         try {
           await this._symbolIndex.indexFile(fullPath);
           await this._dependencyGraph.addFile(fullPath);
           await this._astExtractor.extract(fullPath);
-          
+
           filesIndexed++;
           const symbols = this._symbolIndex.findInFile(fullPath);
           symbolsFound += symbols.length;
@@ -157,22 +92,12 @@ export class OnDemandContextExpansion {
 
   /**
    * 检测上下文置信度
-   * 
+   *
    * 这是避免幻觉的关键：
    * 当置信度不足时，自动触发上下文扩展
    */
-  assessConfidence(request: {
-    anchorHash?: string;
-    file?: string;
-    line?: number;
-    symbolName?: string;
-  }): {
-    level: ConfidenceLevel;
-    reason: string;
-    expansionNeeded: boolean;
-    suggestions: string[];
-  } {
-    const suggestions: string[] = [];
+  assessConfidence(request) {
+    const suggestions = [];
     let confidence = this._calculateConfidence(request);
     let reason = '';
 
@@ -205,13 +130,13 @@ export class OnDemandContextExpansion {
 
   /**
    * 按需扩展上下文
-   * 
+   *
    * 核心原则：
    * - 只加载实际需要的上下文
    * - 返回结构化的、可验证的信息
    * - 附带置信度评估
    */
-  async expandContext(request: ExpansionRequest): Promise<ExpandedContext> {
+  async expandContext(request) {
     // 检查缓存
     const cacheKey = this._generateCacheKey(request);
     const cached = this._expansionCache.get(cacheKey);
@@ -219,8 +144,8 @@ export class OnDemandContextExpansion {
       return cached;
     }
 
-    const result: ExpandedContext = {
-      confidence: 'unknown',
+    const result = {
+      confidence: CONFIDENCE_UNKNOWN,
       confidenceReason: '',
       primaryContent: {
         type: 'file',
@@ -261,7 +186,7 @@ export class OnDemandContextExpansion {
         request.file,
         request.dependencyLevel
       );
-      
+
       result.dependencies = deps.map(d => ({
         file: d.path,
         symbols: d.dependencies.map(dep => dep.target).filter(Boolean),
@@ -294,26 +219,20 @@ export class OnDemandContextExpansion {
 
   /**
    * 生成基于证据的修改意图
-   * 
+   *
    * 这是避免幻觉的核心：
    * - 模型生成的是"基于证据的修改意图"
    * - 而非"基于不完整上下文的代码臆测"
    */
-  async generateEvidenceBasedIntent(request: {
-    anchorHash?: string;
-    targetFile: string;
-    changeType: 'modify' | 'extend' | 'delete' | 'replace' | 'refactor';
-    changeDescription: string;
-    currentContext?: string;
-  }): Promise<EvidenceBasedChangeIntent> {
-    const intent: EvidenceBasedChangeIntent = {
+  async generateEvidenceBasedIntent(request) {
+    const intent = {
       target: {
         file: request.targetFile
       },
       intent: request.changeType,
       evidence: {
         reason: request.changeDescription,
-        confidence: 'unknown',
+        confidence: CONFIDENCE_UNKNOWN,
         supportingFacts: [],
         missingInformation: []
       },
@@ -325,13 +244,13 @@ export class OnDemandContextExpansion {
     };
 
     // 1. 收集证据
-    const facts: string[] = [];
-    const missingInfo: string[] = [];
+    const facts = [];
+    const missingInfo = [];
 
     // 检查文件是否存在
     if (existsSync(request.targetFile)) {
       facts.push(`文件 ${request.targetFile} 存在`);
-      
+
       // 检查符号定义
       const symbols = this._symbolIndex.findInFile(request.targetFile);
       if (symbols.length > 0) {
@@ -347,7 +266,7 @@ export class OnDemandContextExpansion {
         intent.potentialSideEffects.push(...impact.transitivelyAffectedBy.slice(0, 3).map(f => ({
           file: f.path,
           reason: '此文件被修改可能影响依赖方',
-          severity: 'medium' as const
+          severity: 'medium'
         })));
       }
     } else {
@@ -372,20 +291,14 @@ export class OnDemandContextExpansion {
   /**
    * 批量扩展上下文（用于复杂修改）
    */
-  async expandContextBatch(requests: ExpansionRequest[]): Promise<ExpandedContext[]> {
+  async expandContextBatch(requests) {
     return Promise.all(requests.map(r => this.expandContext(r)));
   }
 
   /**
    * 获取符号的完整上下文（包括定义、调用者、被调用者）
    */
-  async getSymbolFullContext(symbolName: string, filePath?: string): Promise<{
-    definition: SymbolInfo | null;
-    callers: SymbolInfo[];
-    callees: SymbolInfo[];
-    typeInfo: FunctionMetadata | ClassMetadata | null;
-    context: string;
-  }> {
+  async getSymbolFullContext(symbolName, filePath) {
     // 查找定义
     let definitions = this._symbolIndex.findByName(symbolName);
     if (filePath) {
@@ -394,14 +307,14 @@ export class OnDemandContextExpansion {
     const definition = definitions[0] || null;
 
     // 查找调用者
-    const callers: SymbolInfo[] = [];
-    const callees: SymbolInfo[] = [];
+    const callers = [];
+    const callees = [];
 
     if (definition) {
       // 获取 AST 元数据
       const astData = await this._astExtractor.extract(definition.file);
       const funcMeta = astData.functions.find(f => f.name === symbolName);
-      
+
       if (funcMeta) {
         // 查找调用者
         for (const called of funcMeta.calls) {
@@ -436,7 +349,7 @@ export class OnDemandContextExpansion {
     }
 
     // 获取类型信息
-    let typeInfo: FunctionMetadata | ClassMetadata | null = null;
+    let typeInfo = null;
     if (definition) {
       const astData = await this._astExtractor.extract(definition.file);
       typeInfo = astData.functions.find(f => f.name === symbolName) ||
@@ -455,22 +368,18 @@ export class OnDemandContextExpansion {
   /**
    * 加载文件上下文
    */
-  private async _loadFileContext(
-    filePath: string,
-    line?: number,
-    contextLines?: number
-  ): Promise<ExpandedContext['primaryContent']> {
+  async _loadFileContext(filePath, line, contextLines) {
     const content = await readFile(filePath, 'utf-8');
     const lines = content.split('\n');
-    
+
     let definition = content;
-    let type: 'file' | 'function' | 'class' | 'symbol' = 'file';
+    let type = 'file';
 
     // 如果指定了行号，提取局部上下文
     if (line !== undefined) {
       const symbols = this._symbolIndex.findInFile(filePath);
       const symbol = symbols.find(s => s.line <= line && s.endLine >= line);
-      
+
       if (symbol) {
         const start = Math.max(0, symbol.line - 1);
         const end = Math.min(lines.length, symbol.endLine);
@@ -498,12 +407,7 @@ export class OnDemandContextExpansion {
   /**
    * 计算置信度
    */
-  private _calculateConfidence(request: {
-    anchorHash?: string;
-    file?: string;
-    line?: number;
-    symbolName?: string;
-  }): number {
+  _calculateConfidence(request) {
     let score = 0;
     let maxScore = 0;
 
@@ -546,24 +450,24 @@ export class OnDemandContextExpansion {
   /**
    * 获取置信度级别
    */
-  private _getConfidenceLevel(score: number): ConfidenceLevel {
-    if (score >= this._confidenceThresholds.high) return 'high';
-    if (score >= this._confidenceThresholds.medium) return 'medium';
-    if (score >= this._confidenceThresholds.low) return 'low';
-    return 'unknown';
+  _getConfidenceLevel(score) {
+    if (score >= this._confidenceThresholds.high) return CONFIDENCE_HIGH;
+    if (score >= this._confidenceThresholds.medium) return CONFIDENCE_MEDIUM;
+    if (score >= this._confidenceThresholds.low) return CONFIDENCE_LOW;
+    return CONFIDENCE_UNKNOWN;
   }
 
   /**
    * 生成缓存键
    */
-  private _generateCacheKey(request: ExpansionRequest): string {
+  _generateCacheKey(request) {
     return JSON.stringify(request);
   }
 
   /**
    * 估算 token 数量
    */
-  private _estimateTokens(text: string): number {
+  _estimateTokens(text) {
     // 简单估算：中文约 1.5 tokens/字符，英文约 0.25 tokens/字符
     const chineseChars = (text.match(/[\u4e00-\u9fa5]/g) || []).length;
     const otherChars = text.length - chineseChars;
@@ -573,11 +477,7 @@ export class OnDemandContextExpansion {
   /**
    * 获取统计信息
    */
-  getStats(): {
-    symbolIndex: ReturnType<SymbolIndex['getStats']>;
-    dependencyGraph: ReturnType<DependencyGraph['getStats']>;
-    expansionCache: number;
-  } {
+  getStats() {
     return {
       symbolIndex: this._symbolIndex.getStats(),
       dependencyGraph: this._dependencyGraph.getStats(),
@@ -588,7 +488,7 @@ export class OnDemandContextExpansion {
   /**
    * 清除缓存
    */
-  clearCache(): void {
+  clearCache() {
     this._expansionCache.clear();
   }
 }

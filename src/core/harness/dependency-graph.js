@@ -1,6 +1,6 @@
 /**
  * Dependency Graph - 依赖关系图
- * 
+ *
  * 构建和维护代码库中模块/文件之间的依赖关系
  * 支持按需加载，理解"为什么这样改"需要的所有依赖信息
  */
@@ -9,41 +9,27 @@ import { readFile } from 'fs/promises';
 import { resolve, join, relative } from 'path';
 import { existsSync } from 'fs';
 
-interface Dependency {
-  source: string;      // 依赖来源文件
-  target: string;      // 被依赖的目标文件
-  type: 'import' | 'require' | 'extends' | 'implements' | 'decorator';
-  symbols?: string[]; // 导入的具体符号
-  isExternal: boolean; // 是否是外部依赖
-}
-
-interface FileNode {
-  path: string;
-  dependencies: Dependency[];
-  dependents: string[];  // 反向索引：谁依赖这个文件
-  hash: string;
-  timestamp: number;
-}
-
 /**
  * 依赖关系图
  */
 export class DependencyGraph {
-  private _nodes: Map<string, FileNode> = new Map();
-  private _externalModules: Set<string> = new Set();
-  
+  constructor() {
+    this._nodes = new Map();
+    this._externalModules = new Set();
+  }
+
   /**
    * 添加文件到依赖图
    */
-  async addFile(filePath: string): Promise<Dependency[]> {
+  async addFile(filePath) {
     if (!existsSync(filePath)) {
       throw new Error(`File not found: ${filePath}`);
     }
 
     const content = await readFile(filePath, 'utf-8');
     const dependencies = this._extractDependencies(filePath, content);
-    
-    const node: FileNode = {
+
+    const node = {
       path: filePath,
       dependencies,
       dependents: [],
@@ -70,7 +56,7 @@ export class DependencyGraph {
   /**
    * 获取文件的所有依赖（直接依赖）
    */
-  getDirectDependencies(filePath: string): Dependency[] {
+  getDirectDependencies(filePath) {
     const node = this._nodes.get(filePath);
     return node ? node.dependencies : [];
   }
@@ -78,15 +64,11 @@ export class DependencyGraph {
   /**
    * 获取文件的传递依赖（所有层级的依赖）
    */
-  getTransitiveDependencies(filePath: string, maxDepth: number = 5): {
-    depth: number;
-    path: string;
-    dependencies: Dependency[];
-  }[] {
-    const visited = new Set<string>();
-    const result: { depth: number; path: string; dependencies: Dependency[] }[] = [];
-    
-    const traverse = (currentPath: string, depth: number) => {
+  getTransitiveDependencies(filePath, maxDepth = 5) {
+    const visited = new Set();
+    const result = [];
+
+    const traverse = (currentPath, depth) => {
       if (depth > maxDepth || visited.has(currentPath)) return;
       visited.add(currentPath);
 
@@ -112,7 +94,7 @@ export class DependencyGraph {
   /**
    * 获取依赖这个文件的所有文件
    */
-  getDependents(filePath: string): string[] {
+  getDependents(filePath) {
     const node = this._nodes.get(filePath);
     return node ? node.dependents : [];
   }
@@ -120,14 +102,11 @@ export class DependencyGraph {
   /**
    * 获取传递依赖者（所有依赖这个文件的文件）
    */
-  getTransitiveDependents(filePath: string, maxDepth: number = 5): {
-    depth: number;
-    path: string;
-  }[] {
-    const visited = new Set<string>();
-    const result: { depth: number; path: string }[] = [];
-    
-    const traverse = (currentPath: string, depth: number) => {
+  getTransitiveDependents(filePath, maxDepth = 5) {
+    const visited = new Set();
+    const result = [];
+
+    const traverse = (currentPath, depth) => {
       if (depth > maxDepth || visited.has(currentPath)) return;
       visited.add(currentPath);
 
@@ -147,12 +126,7 @@ export class DependencyGraph {
   /**
    * 检查修改是否会影响其他文件
    */
-  analyzeImpact(filePath: string): {
-    directlyAffects: string[];
-    transitivelyAffects: { depth: number; path: string }[];
-    directlyAffectedBy: string[];
-    transitivelyAffectedBy: { depth: number; path: string }[];
-  } {
+  analyzeImpact(filePath) {
     const directlyAffects = this.getDirectDependencies(filePath)
       .filter(d => !d.isExternal)
       .map(d => d.target);
@@ -175,15 +149,13 @@ export class DependencyGraph {
   /**
    * 查找两个文件之间的最短路径
    */
-  findPath(from: string, to: string): string[] | null {
-    const visited = new Set<string>();
-    const queue: { path: string[]; current: string }[] = [
-      { path: [from], current: from }
-    ];
+  findPath(from, to) {
+    const visited = new Set();
+    const queue = [{ path: [from], current: from }];
 
     while (queue.length > 0) {
-      const { path, current } = queue.shift()!;
-      
+      const { path, current } = queue.shift();
+
       if (current === to) {
         return path;
       }
@@ -210,8 +182,8 @@ export class DependencyGraph {
   /**
    * 提取依赖关系
    */
-  private _extractDependencies(filePath: string, content: string): Dependency[] {
-    const dependencies: Dependency[] = [];
+  _extractDependencies(filePath, content) {
+    const dependencies = [];
     const lines = content.split('\n');
 
     for (let i = 0; i < lines.length; i++) {
@@ -222,10 +194,10 @@ export class DependencyGraph {
       const es6Match = trimmed.match(
         /^import\s+(?:{([^}]+)}|(\*)\s+as\s+(\w+)|(\w+))\s+from\s+['"]([^'"]+)['"]/
       );
-      
+
       if (es6Match) {
         const [, namedImports, , , defaultImport, source] = es6Match;
-        const symbols = namedImports 
+        const symbols = namedImports
           ? namedImports.split(',').map(s => s.trim().split(' as ')[0].trim())
           : defaultImport ? [defaultImport] : [];
 
@@ -270,13 +242,13 @@ export class DependencyGraph {
   /**
    * 解析模块路径到实际文件路径
    */
-  private _resolvePath(fromFile: string, modulePath: string): string {
+  _resolvePath(fromFile, modulePath) {
     if (this._isExternalModule(modulePath)) {
       return modulePath;
     }
 
     const baseDir = resolve(fromFile, '..');
-    
+
     // 处理相对路径
     if (modulePath.startsWith('.')) {
       return resolve(baseDir, modulePath);
@@ -289,7 +261,7 @@ export class DependencyGraph {
   /**
    * 检查是否是外部模块
    */
-  private _isExternalModule(modulePath: string): boolean {
+  _isExternalModule(modulePath) {
     // 外部模块通常不以 . 或 / 开头
     return !modulePath.startsWith('.') && !modulePath.startsWith('/');
   }
@@ -297,7 +269,7 @@ export class DependencyGraph {
   /**
    * 内容哈希
    */
-  private _hashContent(content: string): string {
+  _hashContent(content) {
     const { createHash } = require('crypto');
     return createHash('sha256').update(content).digest('hex');
   }
@@ -305,14 +277,9 @@ export class DependencyGraph {
   /**
    * 获取依赖图统计
    */
-  getStats(): {
-    files: number;
-    externalModules: number;
-    avgDependencies: number;
-    mostDependent: { path: string; count: number }[];
-  } {
+  getStats() {
     let totalDeps = 0;
-    let mostDependent: { path: string; count: number }[] = [];
+    let mostDependent = [];
 
     for (const [path, node] of this._nodes.entries()) {
       totalDeps += node.dependencies.filter(d => !d.isExternal).length;
@@ -332,12 +299,9 @@ export class DependencyGraph {
   /**
    * 导出图数据（用于可视化或序列化）
    */
-  export(): {
-    nodes: Array<{ path: string; hash: string; timestamp: number }>;
-    edges: Array<{ from: string; to: string; type: string }>;
-  } {
-    const nodes: Array<{ path: string; hash: string; timestamp: number }> = [];
-    const edges: Array<{ from: string; to: string; type: string }> = [];
+  export() {
+    const nodes = [];
+    const edges = [];
 
     for (const [path, node] of this._nodes.entries()) {
       nodes.push({

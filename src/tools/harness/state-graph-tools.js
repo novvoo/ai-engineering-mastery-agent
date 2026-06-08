@@ -1,40 +1,40 @@
 /**
  * State Graph Editing Tools
- * 
+ *
  * Agent 可使用的工具，直接操作 State Graph 而不是文件
- * 
+ *
  * 核心思想：
  * Agent 不再直接读/写文件，而是操作状态图节点，通过投影获取上下文
  */
 
-import { ToolCategory } from '../../core/types';
-import { ContentAddressableStore, StateGraph } from '../state-graph-core';
-import { CompleteIndex } from '../content-addressable-store';
-import { ContextProjectionGenerator } from '../context-projection';
+import { ToolCategory } from '../../core/types.js';
+import { ContentAddressableStore, StateGraph } from '../../core/harness/state-graph-core.js';
+import { CompleteIndex } from '../../core/harness/content-addressable-store.js';
+import { ContextProjectionGenerator } from '../../core/harness/context-projection.js';
 import { readFile, writeFile, existsSync } from 'fs/promises';
 import { resolve, join } from 'path';
 
 // 全局实例（实际使用中应该与 Agent 实例绑定
-let globalGraph: StateGraph | null = null;
-let globalIndex: CompleteIndex | null = null;
-let globalProjection: ContextProjectionGenerator | null = null;
+let globalGraph = null;
+let globalIndex = null;
+let globalProjection = null;
 let isInitialized = false;
 
 /**
  * 初始化系统
  */
-function ensureInitialized(workingDir: string) {
+function ensureInitialized(workingDir) {
   if (!isInitialized) {
     const store = new ContentAddressableStore();
     globalGraph = new StateGraph(store);
     globalIndex = new CompleteIndex(store);
     globalProjection = new ContextProjectionGenerator(globalGraph, globalIndex);
-    
+
     globalGraph.initialize({
       workingDir,
       createdAt: Date.now()
     });
-    
+
     isInitialized = true;
   }
 }
@@ -58,13 +58,13 @@ export function createStateGraphTools() {
         }
       },
       required: [],
-      handler: async ({ pattern }: any, ctx: any) => {
+      handler: async ({ pattern }, ctx) => {
         ensureInitialized(ctx.workingDirectory);
-        
+
         const patterns = pattern ? [pattern] : ['**/*.js', '**/*.ts', '**/*.jsx', '**/*.tsx'];
-        
-        const result = await globalIndex!.indexProject(ctx.workingDirectory, patterns);
-        
+
+        const result = await globalIndex.indexProject(ctx.workingDirectory, patterns);
+
         return `✅ State Graph Indexing Complete
 
 Files: ${result.filesIndexed}
@@ -99,26 +99,26 @@ You can now use sg_project, sg_edit, etc.
         }
       },
       required: ['task'],
-      handler: async ({ task, focus, query }: any, ctx: any) => {
+      handler: async ({ task, focus, query }, ctx) => {
         ensureInitialized(ctx.workingDirectory);
-        
+
         if (task === 'summary') {
-          return globalProjection!.projectMinimal();
+          return globalProjection.projectMinimal();
         }
-        
+
         if (task === 'understand') {
-          return globalProjection!.projectSmart('understand', {
+          return globalProjection.projectSmart('understand', {
             query: query || focus
           });
         }
-        
+
         if (task === 'edit' && focus) {
-          return globalProjection!.projectSmart('edit', {
+          return globalProjection.projectSmart('edit', {
             filePath: focus.startsWith('/') ? focus : resolve(ctx.workingDirectory, focus)
           });
         }
-        
-        return globalProjection!.projectMinimal();
+
+        return globalProjection.projectMinimal();
       }
     },
 
@@ -141,11 +141,11 @@ You can now use sg_project, sg_edit, etc.
         }
       },
       required: ['id'],
-      handler: async ({ id, type }: any, ctx: any) => {
+      handler: async ({ id, type }, ctx) => {
         ensureInitialized(ctx.workingDirectory);
-        
+
         if (type === 'symbol') {
-          const symbols = globalIndex!.symbols.findByName(id);
+          const symbols = globalIndex.symbols.findByName(id);
           if (symbols.length > 0) {
             let result = `Found ${symbols.length} symbol(s) for "${id}":\n\n`;
             for (const sym of symbols) {
@@ -161,24 +161,24 @@ You can now use sg_project, sg_edit, etc.
           }
           return `Symbol "${id}" not found.`;
         }
-        
+
         if (type === 'file' || id.includes('/') || id.includes('.')) {
           const filePath = id.startsWith('/') ? id : resolve(ctx.workingDirectory, id);
           if (existsSync(filePath)) {
             const content = await readFile(filePath, 'utf-8');
-            const symbols = globalIndex!.symbols.findInFile(filePath);
-            
+            const symbols = globalIndex.symbols.findInFile(filePath);
+
             let result = `## File: ${filePath}\n\n`;
             result += `Symbols in file: ${symbols.length}\n`;
             if (symbols.length > 0) {
               result += '  - ' + symbols.map(s => s.name).join(', ') + '\n';
             }
             result += '\n---\nContent:\n```\n' + content + '\n```\n';
-            
+
             return result;
           }
         }
-        
+
         return `Node "${id}" not found. Try sg_index first.`;
       }
     },
@@ -214,18 +214,18 @@ You can now use sg_project, sg_edit, etc.
         }
       },
       required: ['path', 'operation'],
-      handler: async ({ path, operation, anchor, content, message }: any, ctx: any) => {
+      handler: async ({ path, operation, anchor, content, message }, ctx) => {
         ensureInitialized(ctx.workingDirectory);
-        
+
         const filePath = resolve(ctx.workingDirectory, path);
-        
+
         if (!existsSync(filePath)) {
           return `Error: File not found - ${filePath}`;
         }
-        
+
         let currentContent = await readFile(filePath, 'utf-8');
         let newContent = currentContent;
-        
+
         if (operation === 'replace' && anchor && content) {
           if (!currentContent.includes(anchor)) {
             return `Error: Anchor text not found. Provide the EXACT text to replace.`;
@@ -243,24 +243,24 @@ You can now use sg_project, sg_edit, etc.
           }
           newContent = currentContent.replace(anchor, '');
         }
-        
+
         // 应用变更
         await writeFile(filePath, newContent, 'utf-8');
-        
+
         // 创建状态图提交
         const changes = [
           { type: 'update', nodeId: 'file:' + filePath }
         ];
-        
-        const commitId = globalGraph!.commit(
-          changes, 
+
+        const commitId = globalGraph.commit(
+          changes,
           message || `${operation}: ${path}`,
           'agent'
         );
-        
+
         // 重新索引（简化版）
-        await globalIndex!.symbols.indexFile(filePath, newContent);
-        
+        await globalIndex.symbols.indexFile(filePath, newContent);
+
         return `✅ Change applied and committed to State Graph
 
 Commit ID: ${commitId.substring(0, 16)}...
@@ -289,12 +289,12 @@ File updated: ${filePath}
         }
       },
       required: ['message'],
-      handler: async ({ message, changes }: any, ctx: any) => {
+      handler: async ({ message, changes }, ctx) => {
         ensureInitialized(ctx.workingDirectory);
-        
+
         const changeOps = changes ? JSON.parse(changes) : [];
-        const commitId = globalGraph!.commit(changeOps, message, 'agent');
-        
+        const commitId = globalGraph.commit(changeOps, message, 'agent');
+
         return `✅ Commit created
 
 ID: ${commitId.substring(0, 16)}...
@@ -317,17 +317,17 @@ Message: ${message}
         }
       },
       required: [],
-      handler: async ({ limit }: any, ctx: any) => {
+      handler: async ({ limit }, ctx) => {
         ensureInitialized(ctx.workingDirectory);
-        
-        const history = globalGraph!.getHistory(limit || 10);
-        
+
+        const history = globalGraph.getHistory(limit || 10);
+
         let result = '## State Graph History\n\n';
         for (const node of history) {
           const date = new Date(node.timestamp).toLocaleString();
           result += `- [${node.id.substring(0, 8)}] ${date} - ${node.data?.message || 'Commit'}\n`;
         }
-        
+
         return result;
       }
     },
@@ -346,11 +346,11 @@ Message: ${message}
         }
       },
       required: ['commit_id'],
-      handler: async ({ commit_id }: any, ctx: any) => {
+      handler: async ({ commit_id }, ctx) => {
         ensureInitialized(ctx.workingDirectory);
-        
-        const success = globalGraph!.rollbackTo(commit_id);
-        
+
+        const success = globalGraph.rollbackTo(commit_id);
+
         if (success) {
           return `✅ Rollback successful
 
@@ -373,13 +373,13 @@ To revert files, use sg_restore or git commands.
       category: ToolCategory.FILESYSTEM,
       params: {},
       required: [],
-      handler: async (args: any, ctx: any) => {
+      handler: async (args, ctx) => {
         ensureInitialized(ctx.workingDirectory);
-        
-        const stats = globalIndex!.getStats();
-        const graphStats = globalGraph!.getStats();
-        const head = globalGraph!.getHead();
-        
+
+        const stats = globalIndex.getStats();
+        const graphStats = globalGraph.getStats();
+        const head = globalGraph.getHead();
+
         return `## State Graph Status
 
 HEAD: ${head ? head.substring(0, 16) + '...' : 'none'}

@@ -1,25 +1,25 @@
 /**
  * Context Expansion Tools - 上下文扩展工具
- * 
+ *
  * 提供 Agent 主动扩展上下文的接口
  * 实现"按需加载（load on demand）"而非"预加载（preload everything）"
  */
 
 import { ToolCategory } from '../../core/types.js';
-import { OnDemandContextExpansion } from '../core/harness/on-demand-context.js';
-import { SymbolIndex } from '../core/harness/symbol-index.js';
-import { DependencyGraph } from '../core/harness/dependency-graph.js';
+import { OnDemandContextExpansion } from '../../core/harness/on-demand-context.js';
+import { SymbolIndex } from '../../core/harness/symbol-index.js';
+import { DependencyGraph } from '../../core/harness/dependency-graph.js';
 import { resolve, join } from 'path';
 
 // 全局实例（实际项目应该与 Session 绑定）
-let globalExpander: OnDemandContextExpansion | null = null;
-let globalSymbolIndex: SymbolIndex | null = null;
-let globalDepGraph: DependencyGraph | null = null;
+let globalExpander = null;
+let globalSymbolIndex = null;
+let globalDepGraph = null;
 
 /**
  * 初始化上下文扩展器
  */
-function initializeExpander(workingDirectory?: string) {
+function initializeExpander(workingDirectory) {
   if (!globalExpander) {
     globalSymbolIndex = new SymbolIndex();
     globalDepGraph = new DependencyGraph();
@@ -34,7 +34,7 @@ function initializeExpander(workingDirectory?: string) {
 /**
  * 创建上下文扩展工具
  */
-export function createContextExpansionTools(workingDirectory?: string) {
+export function createContextExpansionTools(workingDirectory) {
   initializeExpander(workingDirectory);
 
   return [
@@ -46,8 +46,8 @@ export function createContextExpansionTools(workingDirectory?: string) {
       description: '索引项目文件，构建符号索引、依赖关系图和 AST 元数据。这是使用其他上下文扩展工具的前置步骤。',
       category: ToolCategory.FILESYSTEM,
       params: {
-        file_patterns: { 
-          type: 'array', 
+        file_patterns: {
+          type: 'array',
           items: { type: 'string' },
           description: '要索引的文件模式，如 ["**/*.js", "**/*.ts"]',
           default: ['**/*.{js,ts,jsx,tsx}']
@@ -56,13 +56,13 @@ export function createContextExpansionTools(workingDirectory?: string) {
       required: [],
       handler: async ({ file_patterns }, ctx) => {
         try {
-          const result = await globalExpander!.indexProject(
+          const result = await globalExpander.indexProject(
             ctx.workingDirectory,
             file_patterns || ['**/*.{js,ts,jsx,tsx}']
           );
-          
-          const stats = globalExpander!.getStats();
-          
+
+          const stats = globalExpander.getStats();
+
           return `项目索引完成\n` +
                  `  文件数: ${result.filesIndexed}\n` +
                  `  符号数: ${result.symbolsFound}\n` +
@@ -91,8 +91,8 @@ export function createContextExpansionTools(workingDirectory?: string) {
       required: ['file'],
       handler: async ({ file, line, symbol_name, anchor_hash }, ctx) => {
         const fullPath = resolve(ctx.workingDirectory, file);
-        
-        const result = globalExpander!.assessConfidence({
+
+        const result = globalExpander.assessConfidence({
           file: fullPath,
           line,
           symbolName: symbol_name,
@@ -140,8 +140,8 @@ export function createContextExpansionTools(workingDirectory?: string) {
       required: ['file'],
       handler: async ({ file, line, symbol_name, dependency_level, context_lines }, ctx) => {
         const fullPath = resolve(ctx.workingDirectory, file);
-        
-        const result = await globalExpander!.expandContext({
+
+        const result = await globalExpander.expandContext({
           file: fullPath,
           line,
           symbolName: symbol_name,
@@ -170,10 +170,10 @@ export function createContextExpansionTools(workingDirectory?: string) {
         // 支持上下文
         if (result.supportingContext.length > 0) {
           response += `支持上下文:\n`;
-          for (const ctx of result.supportingContext.slice(0, 10)) {
+          for (const item of result.supportingContext.slice(0, 10)) {
             const importanceIcon = { critical: '🔴', helpful: '🟡', optional: '⚪' };
-            response += `  ${importanceIcon[ctx.importance]} ${ctx.type}: ${ctx.name} (${ctx.file})\n`;
-            response += `     预览: ${ctx.preview}\n`;
+            response += `  ${importanceIcon[item.importance]} ${item.type}: ${item.name} (${item.file})\n`;
+            response += `     预览: ${item.preview}\n`;
           }
           response += `\n`;
         }
@@ -213,8 +213,8 @@ export function createContextExpansionTools(workingDirectory?: string) {
       required: ['symbol_name'],
       handler: async ({ symbol_name, file }, ctx) => {
         const fullPath = file ? resolve(ctx.workingDirectory, file) : undefined;
-        
-        const result = await globalExpander!.getSymbolFullContext(symbol_name, fullPath);
+
+        const result = await globalExpander.getSymbolFullContext(symbol_name, fullPath);
 
         let response = `符号 "${symbol_name}" 的完整上下文\n`;
         response += `${'='.repeat(60)}\n\n`;
@@ -279,8 +279,8 @@ export function createContextExpansionTools(workingDirectory?: string) {
       description: '查询符号索引和依赖关系图，快速定位符号定义或依赖关系。',
       category: ToolCategory.FILESYSTEM,
       params: {
-        query_type: { 
-          type: 'string', 
+        query_type: {
+          type: 'string',
           enum: ['symbol', 'type', 'dependency', 'impact'],
           description: '查询类型'
         },
@@ -293,7 +293,7 @@ export function createContextExpansionTools(workingDirectory?: string) {
 
         switch (query_type) {
           case 'symbol': {
-            const symbols = globalSymbolIndex!.findByName(name);
+            const symbols = globalSymbolIndex.findByName(name);
             if (symbols.length === 0) {
               return `未找到符号 "${name}"`;
             }
@@ -311,7 +311,7 @@ export function createContextExpansionTools(workingDirectory?: string) {
           }
 
           case 'type': {
-            const byType = globalSymbolIndex!.findByType(name as any);
+            const byType = globalSymbolIndex.findByType(name);
             if (byType.length === 0) {
               return `未找到类型为 "${name}" 的符号`;
             }
@@ -325,7 +325,7 @@ export function createContextExpansionTools(workingDirectory?: string) {
               return '查询依赖需要指定 file 参数';
             }
 
-            const deps = globalDepGraph!.getDirectDependencies(fullPath);
+            const deps = globalDepGraph.getDirectDependencies(fullPath);
             if (deps.length === 0) {
               return `文件 "${file}" 没有依赖`;
             }
@@ -347,10 +347,10 @@ export function createContextExpansionTools(workingDirectory?: string) {
               return '查询影响需要指定 file 参数';
             }
 
-            const impact = globalDepGraph!.analyzeImpact(fullPath);
+            const impact = globalDepGraph.analyzeImpact(fullPath);
 
             let response = `修改 "${file}" 的影响分析:\n\n`;
-            
+
             response += `直接依赖 (此文件依赖):\n`;
             if (impact.directlyAffects.length > 0) {
               for (const dep of impact.directlyAffects) {
@@ -393,10 +393,10 @@ export function createContextExpansionTools(workingDirectory?: string) {
       category: ToolCategory.FILESYSTEM,
       params: {
         file: { type: 'string', description: '目标文件' },
-        change_type: { 
-          type: 'string', 
+        change_type: {
+          type: 'string',
           enum: ['modify', 'extend', 'delete', 'replace', 'refactor'],
-          description: '修改类型' 
+          description: '修改类型'
         },
         change_description: { type: 'string', description: '修改描述' }
       },
@@ -404,7 +404,7 @@ export function createContextExpansionTools(workingDirectory?: string) {
       handler: async ({ file, change_type, change_description }, ctx) => {
         const fullPath = resolve(ctx.workingDirectory, file);
 
-        const result = await globalExpander!.generateEvidenceBasedIntent({
+        const result = await globalExpander.generateEvidenceBasedIntent({
           targetFile: fullPath,
           changeType: change_type,
           changeDescription: change_description
@@ -441,8 +441,8 @@ export function createContextExpansionTools(workingDirectory?: string) {
         if (result.requiredContext.toLoad.length > 0) {
           response += `建议加载的上下文:\n`;
           response += `  原因: ${result.requiredContext.reason}\n`;
-          for (const ctx of result.requiredContext.toLoad) {
-            response += `  - ${ctx}\n`;
+          for (const item of result.requiredContext.toLoad) {
+            response += `  - ${item}\n`;
           }
           response += `\n`;
         }
@@ -469,7 +469,7 @@ export function createContextExpansionTools(workingDirectory?: string) {
       params: {},
       required: [],
       handler: async (_, ctx) => {
-        const stats = globalExpander!.getStats();
+        const stats = globalExpander.getStats();
 
         return `上下文索引统计:\n\n` +
                `符号索引:\n` +

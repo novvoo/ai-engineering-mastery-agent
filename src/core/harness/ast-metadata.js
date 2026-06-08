@@ -1,6 +1,6 @@
 /**
  * AST Metadata Extractor - AST 元数据提取器
- * 
+ *
  * 提供代码的 AST（抽象语法树）级别元数据
  * 支持代码理解，理解"这段代码做什么"
  */
@@ -9,85 +9,18 @@ import { readFile } from 'fs/promises';
 import { resolve } from 'path';
 import { existsSync } from 'fs';
 
-interface ASTNode {
-  type: string;
-  name?: string;
-  start: { line: number; column: number };
-  end: { line: number; column: number };
-  children?: ASTNode[];
-  metadata?: Record<string, any>;
-}
-
-interface FunctionMetadata {
-  name: string;
-  params: Array<{
-    name: string;
-    type?: string;
-    defaultValue?: string;
-  }>;
-  returnType?: string;
-  isAsync: boolean;
-  isGenerator: boolean;
-  calls: string[];  // 函数调用的其他函数
-  references: string[];  // 引用的变量
-  complexity: number;  // 圈复杂度估算
-  startLine: number;
-  endLine: number;
-}
-
-interface ClassMetadata {
-  name: string;
-  extends?: string;
-  implements?: string[];
-  properties: Array<{
-    name: string;
-    type?: string;
-    visibility: 'public' | 'private' | 'protected';
-    isStatic: boolean;
-    initializer?: string;
-  }>;
-  methods: Array<{
-    name: string;
-    visibility: 'public' | 'private' | 'protected';
-    isStatic: boolean;
-    isAsync: boolean;
-    isGetter: boolean;
-    isSetter: boolean;
-  }>;
-  decorators?: string[];
-  startLine: number;
-  endLine: number;
-}
-
-interface CodeRegion {
-  type: 'function' | 'class' | 'method' | 'block' | 'import' | 'export' | 'comment';
-  name?: string;
-  startLine: number;
-  endLine: number;
-  content: string;
-  children: CodeRegion[];
-  metadata: Record<string, any>;
-}
-
 /**
  * AST 元数据提取器
  */
 export class ASTMetadataExtractor {
-  private _cache: Map<string, {
-    functions: Map<string, FunctionMetadata>;
-    classes: Map<string, ClassMetadata>;
-    regions: CodeRegion[];
-    hash: string;
-  }> = new Map();
+  constructor() {
+    this._cache = new Map();
+  }
 
   /**
    * 提取文件的 AST 元数据
    */
-  async extract(filePath: string): Promise<{
-    functions: FunctionMetadata[];
-    classes: ClassMetadata[];
-    regions: CodeRegion[];
-  }> {
+  async extract(filePath) {
     if (!existsSync(filePath)) {
       throw new Error(`File not found: ${filePath}`);
     }
@@ -106,7 +39,7 @@ export class ASTMetadataExtractor {
     }
 
     const lines = content.split('\n');
-    
+
     const functions = this._extractFunctions(lines, content);
     const classes = this._extractClasses(lines, content);
     const regions = this._extractRegions(lines, content);
@@ -130,7 +63,7 @@ export class ASTMetadataExtractor {
   /**
    * 获取函数元数据
    */
-  getFunctionMetadata(filePath: string, functionName: string): FunctionMetadata | null {
+  getFunctionMetadata(filePath, functionName) {
     const cached = this._cache.get(filePath);
     if (!cached) return null;
     return cached.functions.get(functionName) || null;
@@ -139,7 +72,7 @@ export class ASTMetadataExtractor {
   /**
    * 获取类的元数据
    */
-  getClassMetadata(filePath: string, className: string): ClassMetadata | null {
+  getClassMetadata(filePath, className) {
     const cached = this._cache.get(filePath);
     if (!cached) return null;
     return cached.classes.get(className) || null;
@@ -148,11 +81,11 @@ export class ASTMetadataExtractor {
   /**
    * 获取代码区域
    */
-  getCodeRegion(filePath: string, line: number): CodeRegion | null {
+  getCodeRegion(filePath, line) {
     const cached = this._cache.get(filePath);
     if (!cached) return null;
 
-    const findRegion = (regions: CodeRegion[]): CodeRegion | null => {
+    const findRegion = (regions) => {
       for (const region of regions) {
         if (line >= region.startLine && line <= region.endLine) {
           const child = findRegion(region.children);
@@ -168,8 +101,8 @@ export class ASTMetadataExtractor {
   /**
    * 提取函数元数据
    */
-  private _extractFunctions(lines: string[], content: string): FunctionMetadata[] {
-    const functions: FunctionMetadata[] = [];
+  _extractFunctions(lines, content) {
+    const functions = [];
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
@@ -179,12 +112,12 @@ export class ASTMetadataExtractor {
       const funcMatch = trimmed.match(
         /^(?:export\s+)?(?:async\s+)?function\s+([a-zA-Z_$][\w$]*)\s*\(/
       );
-      
+
       if (funcMatch) {
         const name = funcMatch[1];
         const isAsync = trimmed.includes('async');
         const endLine = this._findBlockEnd(lines, i);
-        
+
         functions.push({
           name,
           params: this._extractParams(line),
@@ -228,8 +161,8 @@ export class ASTMetadataExtractor {
   /**
    * 提取类元数据
    */
-  private _extractClasses(lines: string[], content: string): ClassMetadata[] {
-    const classes: ClassMetadata[] = [];
+  _extractClasses(lines, content) {
+    const classes = [];
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
@@ -239,24 +172,24 @@ export class ASTMetadataExtractor {
       if (classMatch) {
         const name = classMatch[1];
         const endLine = this._findBlockEnd(lines, i);
-        const classLines = lines.slice(i, endLine).join('\n');
 
         // 提取 extends
         const extendsMatch = trimmed.match(/extends\s+([A-Z][\w]*)/);
-        
+
         // 提取属性和方法
-        const properties: ClassMetadata['properties'] = [];
-        const methods: ClassMetadata['methods'] = [];
+        const properties = [];
+        const methods = [];
 
         for (let j = i + 1; j < endLine; j++) {
           const methodLine = lines[j].trim();
-          
+
           // 方法
           const methodMatch = methodLine.match(
             /^(?:(private|protected|public)\s+)?(?:static\s+)?(?:async\s+)?([a-zA-Z_$][\w$]*)\s*\(/
           );
           if (methodMatch) {
-            const [, visibility, methodName] = methodMatch;
+            const visibility = methodMatch[1];
+            const methodName = methodMatch[2];
             methods.push({
               name: methodName,
               visibility: this._parseVisibility(visibility),
@@ -286,7 +219,7 @@ export class ASTMetadataExtractor {
           extends: extendsMatch?.[1],
           properties,
           methods,
-          decorators: this._extractDecorators(classLines),
+          decorators: this._extractDecorators(lines.slice(i, endLine).join('\n')),
           startLine: i + 1,
           endLine
         });
@@ -299,8 +232,8 @@ export class ASTMetadataExtractor {
   /**
    * 提取代码区域
    */
-  private _extractRegions(lines: string[], content: string): CodeRegion[] {
-    const regions: CodeRegion[] = [];
+  _extractRegions(lines, content) {
+    const regions = [];
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
@@ -324,15 +257,15 @@ export class ASTMetadataExtractor {
   /**
    * 提取参数
    */
-  private _extractParams(line: string): Array<{ name: string; type?: string; defaultValue?: string }> {
+  _extractParams(line) {
     const match = line.match(/\(([^)]*)\)/);
     if (!match) return [];
 
-    const params: Array<{ name: string; type?: string; defaultValue?: string }> = [];
+    const params = [];
     const paramStr = match[1];
 
     const paramList = paramStr.split(',').map(p => p.trim()).filter(Boolean);
-    
+
     for (const param of paramList) {
       const [namePart, defaultPart] = param.split('=').map(s => s.trim());
       const name = namePart.split(':')[0].trim();
@@ -351,7 +284,7 @@ export class ASTMetadataExtractor {
   /**
    * 提取返回类型
    */
-  private _extractReturnType(line: string): string | undefined {
+  _extractReturnType(line) {
     const match = line.match(/\)\s*(?::\s*([^=]+))?\s*[{=]/);
     return match?.[1]?.trim();
   }
@@ -359,8 +292,8 @@ export class ASTMetadataExtractor {
   /**
    * 提取函数调用
    */
-  private _extractCalls(code: string): string[] {
-    const calls: string[] = [];
+  _extractCalls(code) {
+    const calls = [];
     const regex = /\b([a-zA-Z_$][\w$]*)\s*\(/g;
     let match;
 
@@ -378,8 +311,8 @@ export class ASTMetadataExtractor {
   /**
    * 提取引用
    */
-  private _extractReferences(code: string): string[] {
-    const refs: string[] = [];
+  _extractReferences(code) {
+    const refs = [];
     const regex = /\b([a-zA-Z_$][\w$]*)\b/g;
     let match;
 
@@ -397,22 +330,22 @@ export class ASTMetadataExtractor {
   /**
    * 估算圈复杂度
    */
-  private _estimateComplexity(code: string): number {
+  _estimateComplexity(code) {
     let complexity = 1; // 基础复杂度
 
     // 条件语句
     complexity += (code.match(/\bif\b/g) || []).length;
     complexity += (code.match(/\belse\s+if\b/g) || []).length;
     complexity += (code.match(/\bcase\b/g) || []).length;
-    
+
     // 循环
     complexity += (code.match(/\bfor\b/g) || []).length;
     complexity += (code.match(/\bwhile\b/g) || []).length;
     complexity += (code.match(/\bdo\b/g) || []).length;
-    
+
     // 逻辑运算符
     complexity += (code.match(/&&|\|\|/g) || []).length;
-    
+
     // 异常处理
     complexity += (code.match(/\bcatch\b/g) || []).length;
     complexity += (code.match(/\bthrow\b/g) || []).length;
@@ -423,7 +356,7 @@ export class ASTMetadataExtractor {
   /**
    * 查找代码块结束行
    */
-  private _findBlockEnd(lines: string[], startLine: number): number {
+  _findBlockEnd(lines, startLine) {
     let braceCount = 0;
     let foundOpen = false;
 
@@ -437,7 +370,7 @@ export class ASTMetadataExtractor {
           braceCount--;
         }
       }
-      
+
       if (foundOpen && braceCount === 0) {
         return i + 1;
       }
@@ -449,7 +382,7 @@ export class ASTMetadataExtractor {
   /**
    * 解析可见性
    */
-  private _parseVisibility(modifier?: string): 'public' | 'private' | 'protected' {
+  _parseVisibility(modifier) {
     switch (modifier) {
       case 'private': return 'private';
       case 'protected': return 'protected';
@@ -460,8 +393,8 @@ export class ASTMetadataExtractor {
   /**
    * 提取装饰器
    */
-  private _extractDecorators(code: string): string[] {
-    const decorators: string[] = [];
+  _extractDecorators(code) {
+    const decorators = [];
     const regex = /@([a-zA-Z_$][\w$]*)/g;
     let match;
 
@@ -475,7 +408,7 @@ export class ASTMetadataExtractor {
   /**
    * 内容哈希
    */
-  private _hashContent(content: string): string {
+  _hashContent(content) {
     const { createHash } = require('crypto');
     return createHash('sha256').update(content).digest('hex');
   }

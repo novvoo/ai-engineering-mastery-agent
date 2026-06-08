@@ -3,7 +3,10 @@
 AI Engineering Mastery Agent 是一个本地运行的 AI 工程助手，面向真实项目里的代码阅读、修改、验证、文档检索和日常排障。它同时提供 CLI 和 Desktop 两种入口：终端里足够快，桌面端更适合持续对话、浏览项目文件和管理文档知识库。
 
 它的核心体验不是“问模型一个答案”，而是让 Agent 按工程方法论推进任务：先理解系统和风险，再选择合适工具，修改最小必要范围，最后用测试、构建、日志或人工可检查证据验证结果。
+该架构将 Agent 的系统状态从 Token Context 中提升为 Runtime 维护的显式 State Graph。内容寻址提供稳定对象身份，状态图提供长期状态连续性，而上下文仅作为状态图在当前任务下的局部投影（Context Projection）。
+![info 001](./images/info_001.png)
 
+运行截图:
 ![Desktop demo1](./images/demo_001.png)
 ![Desktop demo2](./images/demo_002.png)
 ![Desktop demo3](./images/demo_003.png)
