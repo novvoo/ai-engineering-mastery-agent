@@ -1160,7 +1160,7 @@ function MessageLog({ messages, status, onClear, onAskAgent }) {
           ...(isCollapsed ? styles.messageContentCollapsed : {})
         }}>
           {msg.content || msg.message ? (
-            <div className="markdown">
+            <div className="markdown" style={{maxHeight: '400px', overflowY: 'auto'}}>
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
                 {msg.content || msg.message || ''}
               </ReactMarkdown>
@@ -1298,8 +1298,21 @@ function MessageLog({ messages, status, onClear, onAskAgent }) {
         ? getStatusUpdateText(latestStatusUpdate)
         : '执行完成';
 
+    // 即使没有可见运行详情也保留面板头部（防止 Agent 回答后整个面板消失）
     if (visibleRuntimeDetails.length === 0 && !isRunningGroup) {
-      return null;
+      // 返回一个精简的头部，让用户知道执行过程存在
+      return (
+        <div key={group.id + '_runtime_empty'} style={styles.runtimeDetailsPanel}>
+          <div style={{...styles.runtimeDetailsHeader, opacity: 0.5, cursor: 'default'}}>
+            <span style={styles.runtimeDetailsTitle}>
+              <span>运行详情</span>
+            </span>
+            <span style={styles.runtimeDetailsActions}>
+              <span>0 条</span>
+            </span>
+          </div>
+        </div>
+      );
     }
 
     return (
