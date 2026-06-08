@@ -18,7 +18,7 @@
  */
 
 import { readFile, writeFile, mkdir, stat } from 'fs/promises';
-import { relative, resolve, join, dirname, extname } from 'path';
+import { resolve, join, dirname, extname, basename } from 'path';
 import { glob } from 'glob';
 
 const INDEX_VERSION = 1;
@@ -85,9 +85,9 @@ for (const re of patterns) {
 // 推断文件种类
 function inferKind(relPath, ext) {
   const base = basename(relPath).toLowerCase();
-  if (/.(test|spec).(js|ts|jsx|tsx)$/.test(relPath)) return 'test';
-  if (/^./.test(basename(relPath))) return 'config';
-  if (base === 'makefile' || base === 'dockerfile') return 'config';
+  if (/.(test|spec).(js|ts|jsx|tsx)$/.test(relPath)) {return 'test';}
+  if (/^./.test(basename(relPath))) {return 'config';}
+  if (base === 'makefile' || base === 'dockerfile') {return 'config';}
   return FILE_KINDS[ext] || 'other';
 }
 
@@ -186,7 +186,7 @@ export class WorkspaceIndex {
         })
       );
       for (const entry of batch) {
-        if (entry) this.#index.set(entry.path, entry);
+        if (entry) {this.#index.set(entry.path, entry);}
       }
     }
 
@@ -280,12 +280,12 @@ export class WorkspaceIndex {
     const stats = await stat(fullPath);
 
     // 跳过过大文件
-    if (stats.size > 256 * 1024) return null;
+    if (stats.size > 256 * 1024) {return null;}
 
     const text = await readFile(fullPath, 'utf-8');
 
     // 跳过二进制文件
-    if (text.includes('\0')) return null;
+    if (text.includes('\0')) {return null;}
 
     const lines = text.split('\n');
     const headLines = lines.slice(0, MAX_HEAD_LINES);
@@ -310,13 +310,13 @@ export class WorkspaceIndex {
 
   getSummary() {
     const entries = Array.from(this.#index.values());
-    if (entries.length === 0) return '';
+    if (entries.length === 0) {return '';}
 
     // 按顶级目录统计
     const topDirs = new Map();
     for (const entry of entries) {
       const top = entry.dir ? entry.dir.split('/')[0] : '.';
-      if (!topDirs.has(top)) topDirs.set(top, []);
+      if (!topDirs.has(top)) {topDirs.set(top, []);}
       topDirs.get(top).push(entry);
     }
 

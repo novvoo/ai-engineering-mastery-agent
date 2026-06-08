@@ -302,10 +302,10 @@ export class ReActAgent {
           try { this.#debugEvent('Workspace index warmed', {
             files: this.#workspaceIndex.size,
             summaryChars: summary.length,
-         }); } catch {}
+         }); } catch { /* ignore */ }
         }
       }).catch(err => {
-         try { this.#debugEvent('Workspace index warm failed', { error: err.message }); } catch {}
+         try { this.#debugEvent('Workspace index warm failed', { error: err.message }); } catch { /* ignore */ }
      });
       this.#workspaceIndex.startPeriodicSync();
     }
@@ -1798,7 +1798,7 @@ export class ReActAgent {
       return this.#config.maxIterations;
     }
 
-    if (!taskProfile) return ITERATION_BUDGET.normal;
+    if (!taskProfile) { return ITERATION_BUDGET.normal; }
 
     // 基于任务分类自动选择预算等级
     if (taskProfile.isLikelyTrivial) {
@@ -1821,7 +1821,7 @@ export class ReActAgent {
    * 跟踪工具类型和是否执行了修改操作
    */
   #recordToolCallForStagnation(toolResult, iteration) {
-    if (!toolResult || !toolResult.name) return;
+    if (!toolResult || !toolResult.name) { return; }
     const isMutation = this.#isMutationTool(toolResult.name, toolResult);
     this.#stagnationWindow.push({
       toolName: toolResult.name,
@@ -1850,7 +1850,7 @@ export class ReActAgent {
    * 超过 MAX_STAGNATION_NUDGES 次后，降级迭代预算以节约 token
    */
   #injectStagnationNudge(iteration, maxIterations) {
-    if (iteration < 3) return; // 前 3 轮不检测
+    if (iteration < 3) { return; } // 前 3 轮不检测
 
     // 检查是否已达到进度检查点间隔
     if (iteration % PROGRESS_CHECKPOINT_INTERVAL === 0) {

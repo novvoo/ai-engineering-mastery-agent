@@ -240,7 +240,7 @@ export function createFileSystemTools() {
           const results = [];
           
           async function traverse(currentPath, depth, prefix) {
-            if (depth > maxDepth) return;
+            if (depth > maxDepth) {return;}
 
             const entries = await readdir(currentPath);
             const sortedEntries = entries
