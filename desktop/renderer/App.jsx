@@ -2136,9 +2136,10 @@ const handleClearAgentHistory = useCallback(() => {
           </button>
           <button
             style={{
-              ...styles.activityButton
+              ...styles.activityButton,
+              marginTop: 'auto'
             }}
-            onClick={() => setShowSettings(true)}
+            onClick={() => setShowSettings(prev => !prev)}
             title="设置"
           >
             ⚙️
@@ -2374,7 +2375,7 @@ const handleClearAgentHistory = useCallback(() => {
             </button>
           </div>
         </div>
-      )
+      )}
       {showLLMSetup && (
         <div style={styles.modalBackdrop}>
           <div style={styles.modal}>
