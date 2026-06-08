@@ -43,114 +43,30 @@ export function createEnhancedWorkspace(options = {}) {
     }
   }
 
-  return {
-    workspaceState,
-    observationSummarizer,
-    
-    /**
-     * 处理工具结果并更新工作区状态
-     * @param {string} toolName
-     * @param {object} args
-     * @param {any} result
-     * @returns {object} 处理后的摘要
-     */
-    processToolResult(toolName, args, result) {
-      const processed = observationSummarizer.processToolResult(toolName, args, result);
-      
-      // 添加到观察历史
-      this.#addToObservationHistory(toolName, args, processed);
-      
-      return processed;
-    },
+  let observationHistory = [];
 
-    /** @type {Array} */
-    #observationHistory: [],
+  function addToObservationHistory(toolName, args, processed) {
+    observationHistory.push({
+      toolName,
+      args,
+      summary: processed.summary,
+      facts: processed.facts,
+      timestamp: Date.now(),
+    });
 
-    /**
-     * 添加到观察历史
-     */
-    #addToObservationHistory(toolName, args, processed) {
-      this.#observationHistory.push({
-        toolName,
-        args,
-        summary: processed.summary,
-        facts: processed.facts,
-        timestamp: Date.now(),
-      });
+    if (observationHistory.length > 100) {
+      observationHistory = observationHistory.slice(-50);
+    }
+  }
 
-      // 限制历史大小
-      if (this.#observationHistory.length > 100) {
-        this.#observationHistory = this.#observationHistory.slice(-50);
-      }
-    },
+  function generateSystemPromptAddition() {
+    const hint = getContextPreservationHint();
 
-    /**
-     * 检查工具调用是否可能失败（基于已有观察）
-     * @param {string} toolName
-     * @param {object} args
-     * @returns {{ canSkip: boolean, reason: string, predicted: any }}
-     */
-    checkToolPrediction(toolName, args) {
-      return workspaceState.predictToolResult(toolName, args);
-    },
+    if (hint.knownNonExistent.length === 0) {
+      return '';
+    }
 
-    /**
-     * 检查路径是否存在
-     * @param {string} path
-     * @returns {'exists' | 'not_found' | 'unknown'}
-     */
-    checkPathExists(path) {
-      return workspaceState.checkPathExists(path);
-    },
-
-    /**
-     * 生成上下文保留建议
-     * 在上下文裁剪时使用，保留关键事实
-     */
-    getContextPreservationHint() {
-      const summary = workspaceState.getSummary();
-      const criticalFacts = workspaceState.getCriticalFacts();
-      const workspaceDescription = observationSummarizer.generateWorkspaceDescription();
-
-      return {
-        // 关键事实摘要（应该在裁剪时保留）
-        preserveFacts: criticalFacts.map(f => ({
-          type: f.type,
-          value: f.value,
-        })),
-        
-        // 工作区状态概述
-        workspaceSummary: summary,
-        
-        // 自然语言描述（可以直接注入到系统提示）
-        workspaceDescription,
-        
-        // 已知不存在的路径（避免重复尝试）
-        knownNonExistent: Array.from(
-          new Set(
-            criticalFacts
-              .filter(f => f.type === 'path_not_found')
-              .map(f => f.value?.path)
-              .filter(Boolean)
-          )
-        ),
-        
-        // 建议在系统提示中包含的信息
-        systemPromptAddition: this.#generateSystemPromptAddition(),
-      };
-    },
-
-    /**
-     * 生成应添加到系统提示的内容
-     */
-    #generateSystemPromptAddition() {
-      const hint = this.getContextPreservationHint();
-      
-      if (hint.knownNonExistent.length === 0) {
-        return '';
-      }
-
-      return `
+    return `
 ## 工作区探索状态
 ${hint.workspaceDescription}
 
@@ -160,42 +76,73 @@ ${hint.knownNonExistent.map(p => `- ${p}`).join('\n')}
 ### 关键发现
 ${hint.preserveFacts.slice(-5).map(f => `- ${f.type}: ${JSON.stringify(f.value)}`).join('\n')}
 `;
+  }
+
+  function getContextPreservationHint() {
+    const summary = workspaceState.getSummary();
+    const criticalFacts = workspaceState.getCriticalFacts();
+    const workspaceDescription = observationSummarizer.generateWorkspaceDescription();
+
+    return {
+      preserveFacts: criticalFacts.map(f => ({
+        type: f.type,
+        value: f.value,
+      })),
+      workspaceSummary: summary,
+      workspaceDescription,
+      knownNonExistent: Array.from(
+        new Set(
+          criticalFacts
+            .filter(f => f.type === 'path_not_found')
+            .map(f => f.value?.path)
+            .filter(Boolean)
+        )
+      ),
+      systemPromptAddition: generateSystemPromptAddition(),
+    };
+  }
+
+  return {
+    workspaceState,
+    observationSummarizer,
+
+    processToolResult(toolName, args, result) {
+      const processed = observationSummarizer.processToolResult(toolName, args, result);
+      addToObservationHistory(toolName, args, processed);
+      return processed;
     },
 
-    /**
-     * 获取工作区状态
-     */
+    checkToolPrediction(toolName, args) {
+      return workspaceState.predictToolResult(toolName, args);
+    },
+
+    checkPathExists(path) {
+      return workspaceState.checkPathExists(path);
+    },
+
+    getContextPreservationHint,
+
     getState() {
       return workspaceState.export();
     },
 
-    /**
-     * 恢复工作区状态
-     */
     restoreState(state) {
       if (state) {
         workspaceState.import(state);
       }
     },
 
-    /**
-     * 清除所有工作区状态
-     */
     clear() {
       workspaceState.clear();
-      this.#observationHistory = [];
+      observationHistory = [];
     },
 
-    /**
-     * 获取工具调用建议
-     * 在执行工具前调用，帮助决定是否应该执行
-     */
     getToolAdvice(toolName, args) {
       const prediction = workspaceState.predictToolResult(toolName, args);
-      
+
       return {
         prediction,
-        recentObservations: this.#observationHistory
+        recentObservations: observationHistory
           .filter(o => o.toolName === toolName)
           .slice(-3)
           .map(o => o.summary),

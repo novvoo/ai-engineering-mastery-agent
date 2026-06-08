@@ -286,7 +286,7 @@ export class DependencyAnalyzer {
 
       // ES6 import
       const importMatch = trimmed.match(
-        /^import\s+(?:{([^}]+)}|import\s+from\s+['"]([^'"]+)['"]/
+        /^import\s+(?:{([^}]+)}\s+from\s+['"]([^'"]+)['"])/
       );
       if (importMatch) {
         const target = importMatch[2];

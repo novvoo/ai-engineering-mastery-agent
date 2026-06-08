@@ -8,6 +8,7 @@
 import { readFile } from 'fs/promises';
 import { resolve } from 'path';
 import { existsSync } from 'fs';
+import { createHash } from 'node:crypto';
 
 /**
  * AST 元数据提取器
@@ -409,7 +410,6 @@ export class ASTMetadataExtractor {
    * 内容哈希
    */
   _hashContent(content) {
-    const { createHash } = require('crypto');
     return createHash('sha256').update(content).digest('hex');
   }
 }

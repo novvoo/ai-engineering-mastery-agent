@@ -8,6 +8,7 @@
 import { readFile } from 'fs/promises';
 import { resolve, join } from 'path';
 import { existsSync } from 'fs';
+import { createHash } from 'node:crypto';
 
 /**
  * 符号索引器
@@ -314,7 +315,6 @@ export class SymbolIndex {
    * 内容哈希
    */
   _hashContent(content) {
-    const { createHash } = require('crypto');
     return createHash('sha256').update(content).digest('hex');
   }
 
