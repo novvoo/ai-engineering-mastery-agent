@@ -318,11 +318,13 @@ export function normalizeRuntimeEventMessage(eventName, payload = {}) {
     case 'agent:complete': {
       const answer = extractAgentAnswer(payload);
       const needsUserInput = payload?.result?.status === 'needs_user_input' || payload?.status === 'needs_user_input';
+      // 收敛 Agent 回答：只取第一段（FINAL_ANSWER 后的冗余内容不显示）
+      const converged = answer ? answer.split('\n\n')[0].trim() : answer;
       return {
         message: {
           ...base,
-          type: needsUserInput ? 'warning' : (answer ? 'result' : 'success'),
-          content: answer || (needsUserInput ? '需要你补充信息后继续' : 'Agent 执行完成'),
+          type: needsUserInput ? 'warning' : (converged ? 'result' : 'success'),
+          content: converged || (needsUserInput ? '需要你补充信息后继续' : 'Agent 执行完成'),
         },
       };
     }
