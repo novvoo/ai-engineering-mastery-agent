@@ -7674,6 +7674,187 @@ coreEngineTests.test('Regex patterns - JWT matches token format', async () => {
   if (!JWT.test(token)) {throw new Error('JWT should match valid token');}
 });
 
+// ============ State Graph Architecture Tests ============
+const stateGraphTests = new TestRunner('State Graph Architecture');
+
+stateGraphTests.test('ContentAddressableStore - basic storage and retrieval', async () => {
+  const { ContentAddressableStore } = await import('./src/core/harness/state-graph-core.js');
+
+  const store = new ContentAddressableStore();
+
+  const testObj = { type: 'blob', content: 'Hello, State Graph!', metadata: { timestamp: Date.now() } };
+  const objId = store.put(testObj);
+
+  // Verify the object exists
+  if (!store.has(objId)) {
+    throw new Error('Object should exist after put');
+  }
+
+  // Retrieve the object
+  const retrieved = store.get(objId);
+  if (!retrieved) {
+    throw new Error('Object could not be retrieved');
+  }
+
+  // Verify content matches
+  if (retrieved.content !== testObj.content) {
+    throw new Error(`Content mismatch: expected "${testObj.content}", got "${retrieved.content}"`);
+  }
+
+  // Verify same content produces same ID (content addressing works)
+  const sameObj = { type: 'blob', content: 'Hello, State Graph!', metadata: { timestamp: Date.now() } };
+  const sameId = store.put(sameObj);
+
+  if (objId !== sameId) {
+    throw new Error('Same content should produce same ID (content addressing failed)');
+  }
+
+  console.log('     ContentAddressableStore basic storage works');
+});
+
+stateGraphTests.test('StateGraph - initialization and basic operations', async () => {
+  const { StateGraph } = await import('./src/core/harness/state-graph-core.js');
+
+  const graph = new StateGraph();
+
+  // Initial state check
+  const headId = graph.getHead();
+  if (!headId) {
+    throw new Error('StateGraph should have an initial head');
+  }
+
+  // Create a commit
+  const commitId = graph.commit(
+    [{ type: 'add', nodeId: 'node1', data: { type: 'file', path: 'test.js', content: 'console.log(1);' } }],
+    'Initial commit',
+    'test-agent'
+  );
+
+  // Verify the new commit becomes head
+  const newHeadId = graph.getHead();
+  if (newHeadId !== commitId) {
+    throw new Error('New commit should be head');
+  }
+
+  // Retrieve the commit node
+  const commitNode = graph.getNode(commitId);
+  if (!commitNode) {
+    throw new Error('Commit node should exist');
+  }
+  if (commitNode.data?.message !== 'Initial commit') {
+    throw new Error('Commit message not stored correctly');
+  }
+
+  console.log('     StateGraph basic operations work');
+});
+
+stateGraphTests.test('StateGraph - rollback to previous state', async () => {
+  const { StateGraph } = await import('./src/core/harness/state-graph-core.js');
+
+  const graph = new StateGraph();
+
+  // Get initial state
+  const initialHead = graph.getHead();
+
+  // Make some commits
+  const commit1 = graph.commit([{ type: 'add', nodeId: 'node1' }], 'Commit 1', 'test-agent');
+  const commit2 = graph.commit([{ type: 'update', nodeId: 'node1' }], 'Commit 2', 'test-agent');
+
+  // Current head should be commit2
+  if (graph.getHead() !== commit2) {
+    throw new Error('Head should be at commit2 before rollback');
+  }
+
+  // Rollback to initial state
+  const rollbackSuccess = graph.rollbackTo(initialHead);
+  if (!rollbackSuccess) {
+    throw new Error('Rollback should succeed');
+  }
+
+  // Head should now be initial
+  if (graph.getHead() !== initialHead) {
+    throw new Error('Head should be at initial after rollback');
+  }
+
+  console.log('     StateGraph rollback works');
+});
+
+stateGraphTests.test('ContextProjectionGenerator - basic projection', async () => {
+  const { ContentAddressableStore, StateGraph } = await import('./src/core/harness/state-graph-core.js');
+  const { ContextProjectionGenerator } = await import('./src/core/harness/context-projection.js');
+
+  const store = new ContentAddressableStore();
+  const graph = new StateGraph(store);
+  const generator = new ContextProjectionGenerator(graph);
+
+  // Generate a minimal projection
+  const projection = generator.projectSmart('minimal', { priority: 'fast' });
+
+  if (!projection) {
+    throw new Error('Projection should be generated');
+  }
+
+  // Verify projection contains basic info
+  if (!projection.includes('State Graph')) {
+    throw new Error('Projection should reference State Graph');
+  }
+
+  console.log('     ContextProjectionGenerator basic projection works');
+});
+
+stateGraphTests.test('Content addressing provides stable object identity', async () => {
+  const { ContentAddressableStore } = await import('./src/core/harness/state-graph-core.js');
+
+  const store = new ContentAddressableStore();
+
+  // Same content should always produce same ID
+  const obj = { type: 'test', value: 42 };
+  const id1 = store.put({ ...obj });
+  const id2 = store.put({ ...obj });
+
+  if (id1 !== id2) {
+    throw new Error('Same content should produce same object ID');
+  }
+
+  // Different content should produce different IDs
+  const obj2 = { type: 'test', value: 43 };
+  const id3 = store.put(obj2);
+
+  if (id1 === id3) {
+    throw new Error('Different content should produce different object IDs');
+  }
+
+  console.log('     Content addressing stable identity works');
+});
+
+stateGraphTests.test('State Graph history maintains continuity', async () => {
+  const { StateGraph } = await import('./src/core/harness/state-graph-core.js');
+
+  const graph = new StateGraph();
+
+  // Create a chain of commits
+  const commits = [];
+  commits.push(graph.commit([{ type: 'add', nodeId: 'node1' }], 'Commit 1', 'test-agent'));
+  commits.push(graph.commit([{ type: 'add', nodeId: 'node2' }], 'Commit 2', 'test-agent'));
+  commits.push(graph.commit([{ type: 'update', nodeId: 'node1' }], 'Commit 3', 'test-agent'));
+
+  // Verify the history chain
+  const history = graph.getHistory(10);
+  if (history.length < 4) { // 3 new commits + initial
+    throw new Error(`History should have at least 4 commits, got ${history.length}`);
+  }
+
+  // Verify the commit messages are in reverse chronological order
+  if (history[0].data?.message !== 'Commit 3') {
+    throw new Error('Latest commit should be first in history');
+  }
+  if (history[history.length - 2].data?.message !== 'Commit 1') {
+    throw new Error('First commit should be last (except initial) in history');
+  }
+
+  console.log('     State Graph history continuity works');
+});
+
 // ============ 10. Adapter & Desktop Unit Tests ============
 const adapterUnitTests = new TestRunner("Adapter \u0026 Desktop Unit Tests");
 
