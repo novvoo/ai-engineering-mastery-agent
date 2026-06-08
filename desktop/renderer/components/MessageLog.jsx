@@ -667,7 +667,9 @@ function MessageLog({ messages, status, onClear, onAskAgent }) {
     if (!listRef.current) return;
 
     const lastMessage = messages.filter(msg => !isRuntimeDetailMessage(msg)).at(-1);
-    const shouldScroll = autoScroll || lastMessage?.type === 'event';
+    // 不因 Agent 回答结果而滚动（保持运行详情可见）
+    const isAnswerMessage = lastMessage?.type === 'result' || lastMessage?.type === 'success';
+    const shouldScroll = !isAnswerMessage && (autoScroll || lastMessage?.type === 'event');
 
     if (shouldScroll) {
       listRef.current.scrollTop = listRef.current.scrollHeight;
@@ -726,7 +728,12 @@ function MessageLog({ messages, status, onClear, onAskAgent }) {
       // 收敛工具结果：移除首行的匹配率
       const lines = resultText.split('\n');
       const isScoreLine = lines.length > 1 && /^\[.+?\] → \d+% match/.test(lines[0].trim());
-      const clean = isScoreLine ? lines.slice(1).join('\n').trim() : resultText;
+      let clean = isScoreLine ? lines.slice(1).join('\n').trim() : resultText;
+      // 截断过长工具结果（保留前 12 行 + 最后 3 行）
+      const allLines = clean.split('\n');
+      if (allLines.length > 20) {
+        clean = allLines.slice(0, 12).join('\n') + '\n... [截断 ' + (allLines.length - 15) + ' 行] ...\n' + allLines.slice(-3).join('\n');
+      }
       sections.push(`结果:\n${clean}`);
     }
 
