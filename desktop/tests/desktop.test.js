@@ -253,4 +253,40 @@ describe('Desktop IPC Initialization Order', () => {
     adapter.disconnect();
     resetEventBus();
   });
+
+
+// ==================== Event Forwarding & Deduplication ====================
+
+describe('Desktop Event Forwarding', () => {
+  test('DesktopCore forwards agent:start through IPC adapter once', async () => {
+    const { getEventBus, resetEventBus } = await import('../../src/runtime/event-bus.js');
+    const { DesktopCore, createDesktopCore } = await import('../../src/adapters/desktop/desktop-core.js');
+    const { createMainProcessIPCAdapter } = await import('../../src/adapters/desktop/ipc-adapter.js');
+    const { RuntimeEvent } = await import('../../src/runtime/types.js');
+
+    resetEventBus();
+    const bus = getEventBus();
+    const mockIpcMain = { handle: () => {}, on: () => {} };
+
+    const core = createDesktopCore({ workingDirectory: '/tmp', debug: false });
+    await core.initialize();
+    const adapter = core.attachIPCAdapter(mockIpcMain);
+    let broadcastCount = 0;
+    adapter.broadcast = (name, data) => { broadcastCount++; };
+
+    bus.emit(RuntimeEvent.AGENT_START, { task: 'test' });
+
+    if (broadcastCount === 0) {
+      throw new Error('Expected at least 1 broadcast, got 0 (event forwarding broken)');
+    }
+    if (broadcastCount > 4) {
+      throw new Error('Expected exactly 1 broadcast, got ' + broadcastCount + ' (possible state cascade)');
+    }
+
+    core.dispose();
+    adapter.disconnect();
+    resetEventBus();
+  });
+});
+
 });

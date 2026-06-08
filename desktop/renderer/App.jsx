@@ -2040,30 +2040,22 @@ const handleClearAgentHistory = useCallback(() => {
         paddingLeft: shouldReserveMacTrafficLightSpace ? '86px' : '12px',
         WebkitAppRegion: 'drag'
       }}>
-        {/* Logo */}
-        <div style={{ 
-          display: 'flex', 
-          alignItems: 'center', 
-          gap: '8px',
-          marginRight: '12px',
-          fontSize: '14px',
-          fontWeight: '700',
-          color: 'var(--primary-color)',
-          WebkitAppRegion: 'no-drag'
-        }}>
-          <span style={{
-            width: '28px',
-            height: '28px',
-            borderRadius: '7px',
-            backgroundColor: 'var(--primary-soft)',
-            border: '1px solid rgba(76, 201, 240, 0.22)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: '12px',
-            fontWeight: '750'
-          }}>AI</span>
-          AI Agent
+        {/* 切换边栏 */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', WebkitAppRegion: 'no-drag' }}>
+          <button
+            style={{
+              width: '28px', height: '28px', borderRadius: '7px',
+              border: '1px solid var(--border-subtle)',
+              backgroundColor: 'transparent',
+              color: 'var(--text-muted)',
+              cursor: 'pointer', fontSize: '16px',
+              display: 'flex', alignItems: 'center', justifyContent: 'center'
+            }}
+            onClick={() => setSidebarCollapsed(prev => !prev)}
+            title={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'}
+          >
+            {sidebarCollapsed ? '☰' : '✕'}
+          </button>
         </div>
         
         {/* 右侧状态 */}
@@ -2141,16 +2133,6 @@ const handleClearAgentHistory = useCallback(() => {
             title="工具"
           >
             TL
-          </button>
-          <button
-            style={{
-              ...styles.activityButton,
-              marginTop: 'auto'
-            }}
-            onClick={() => setSidebarCollapsed(prev => !prev)}
-            title={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'}
-          >
-            {sidebarCollapsed ? '>' : '<'}
           </button>
           <button
             style={{
