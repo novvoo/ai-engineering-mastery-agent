@@ -25,17 +25,16 @@ const styles = {
     height: '100%',
     overflow: 'hidden',
     backgroundColor: '#11161e',
-    borderRadius: '8px',
-    border: '1px solid var(--border-subtle)',
-    boxShadow: 'var(--shadow-sm)'
+    border: 'none',
+    boxShadow: 'none'
   },
   
   header: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    minHeight: '48px',
-    padding: '0 14px',
+    minHeight: '32px',
+    padding: '0 10px',
     borderBottom: '1px solid var(--border-subtle)',
     backgroundColor: 'var(--surface-color)'
   },
@@ -127,14 +126,16 @@ const styles = {
   messageList: {
     flex: 1,
     overflowY: 'auto',
-    padding: '14px 0',
-    scrollBehavior: 'smooth'
+    padding: '6px 8px',
+    scrollBehavior: 'smooth',
+    display: 'flex',
+    flexDirection: 'column'
   },
 
   runtimeDetailsPanel: {
     marginBottom: '12px',
     borderRadius: '8px',
-    border: '1px solid rgba(148, 163, 184, 0.22)',
+    border: 'none',
     backgroundColor: 'rgba(15, 20, 28, 0.74)',
     overflow: 'hidden'
   },
@@ -301,32 +302,56 @@ const styles = {
     transition: 'all 0.2s'
   },
   
-  // 消息项样式
+  // 消息项外层容器
   messageItem: {
-    marginBottom: '10px',
-    borderRadius: '8px',
-    padding: '12px',
-    backgroundColor: 'var(--surface-color)',
-    border: '1px solid var(--border-subtle)',
+    marginBottom: '4px',
+    display: 'flex',
+    flexDirection: 'column',
+    border: 'none',
     transition: 'all 0.2s ease',
     position: 'relative',
     cursor: 'pointer'
   },
   
   messageItemHover: {
-    border: '1px solid var(--border-color)',
-    backgroundColor: 'var(--surface-raised)'
+    backgroundColor: 'transparent'
   },
   
   messageItemCollapsed: {
-    padding: '8px 12px'
   },
-  
+
+  messageItemUser: {
+    alignItems: 'flex-end'
+  },
+
+  messageItemAgent: {
+    alignItems: 'flex-start'
+  },
+
+  // 消息气泡
+  messageBubble: {
+    borderRadius: '12px',
+    padding: '8px 12px',
+    backgroundColor: 'rgba(148, 163, 184, 0.06)',
+    maxWidth: '85%'
+  },
+
+  messageBubbleUser: {
+    backgroundColor: 'rgba(148, 163, 184, 0.10)',
+    borderRadius: '12px 12px 4px 12px',
+    maxWidth: '80%'
+  },
+
+  messageBubbleAgent: {
+    borderRadius: '12px 12px 12px 4px',
+    maxWidth: '85%'
+  },
+
   messageHeader: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: '8px',
+    marginBottom: '4px',
     cursor: 'pointer'
   },
   
@@ -389,9 +414,9 @@ const styles = {
   },
   
   typeUser: {
-    backgroundColor: 'rgba(111, 66, 193, 0.2)',
-    color: '#6f42c1',
-    border: '1px solid #6f42c1'
+    backgroundColor: 'rgba(148, 163, 184, 0.12)',
+    color: 'var(--text-color)',
+    border: '1px solid rgba(148, 163, 184, 0.2)'
   },
 
   typeAgent: {
@@ -578,11 +603,11 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     gap: '8px',
-    padding: '8px 12px',
+    padding: '6px 10px',
     backgroundColor: 'var(--border-color)',
     borderRadius: '4px',
-    marginBottom: '8px',
-    marginTop: '16px',
+    marginBottom: '4px',
+    marginTop: '8px',
     cursor: 'pointer'
   },
   
@@ -1182,6 +1207,8 @@ function MessageLog({ messages, status, onClear, onAskAgent }) {
     const isSelected = selectedMessage === msgId;
     const typeDisplay = getTypeDisplay(msg.type);
     const isActionableError = isActionableErrorMessage(msg);
+    const isUser = msg.type === 'user';
+    const isAgent = msg.type === 'agent';
     
     return (
       <div 
@@ -1190,7 +1217,10 @@ function MessageLog({ messages, status, onClear, onAskAgent }) {
           ...styles.messageItem,
           ...(isCollapsed ? styles.messageItemCollapsed : {}),
           ...(isSelected ? styles.messageItemHover : {}),
-          ...(isTimeline ? { marginLeft: '16px' } : {})
+          ...(isUser ? styles.messageItemUser : {}),
+          ...(isAgent ? styles.messageItemAgent : {}),
+          ...(isTimeline && !isUser ? { marginLeft: '16px' } : {}),
+          ...(isTimeline && isUser ? { marginRight: '16px' } : {})
         }}
         onMouseEnter={() => handleMouseEnter(msgId)}
         onMouseLeave={handleMouseLeave}
@@ -1204,9 +1234,12 @@ function MessageLog({ messages, status, onClear, onAskAgent }) {
           }} />
         )}
         
-        {/* 消息头部 */}
+        {/* 消息头部 - 在气泡外面 */}
         <div 
-          style={styles.messageHeader}
+          style={{
+            ...styles.messageHeader,
+            ...(isUser ? { flexDirection: 'row-reverse' } : {})
+          }}
           onClick={() => handleToggleCollapse(msgId)}
         >
           <span style={getTypeStyle(msg.type)}>
@@ -1224,26 +1257,34 @@ function MessageLog({ messages, status, onClear, onAskAgent }) {
           </div>
         </div>
         
-        {/* 消息内容 */}
+        {/* 消息气泡 */}
         <div style={{
-          ...styles.messageContent,
-          ...(isCollapsed ? styles.messageContentCollapsed : {})
+          ...styles.messageBubble,
+          ...(isUser ? styles.messageBubbleUser : {}),
+          ...(isAgent ? styles.messageBubbleAgent : {})
         }}>
-          {msg.content || msg.message ? (
-            <div
-              className="markdown"
-              style={markdownStyle}
-              onClick={handleMessageContainerClick}
-            >
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                components={markdownComponents}
-                remarkPluginSettings={{ gfm: true }}
+          {/* 消息内容 */}
+          <div style={{
+            ...styles.messageContent,
+            ...(isCollapsed ? styles.messageContentCollapsed : {}),
+            ...(isUser ? { textAlign: 'right' } : {})
+          }}>
+            {msg.content || msg.message ? (
+              <div
+                className="markdown"
+                style={markdownStyle}
+                onClick={handleMessageContainerClick}
               >
-                {preprocessTextForLinks(msg.content || msg.message || '')}
-              </ReactMarkdown>
-            </div>
-          ) : null}
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={markdownComponents}
+                  remarkPluginSettings={{ gfm: true }}
+                >
+                  {preprocessTextForLinks(msg.content || msg.message || '')}
+                </ReactMarkdown>
+              </div>
+            ) : null}
+          </div>
         </div>
         
         {/* 元数据 */}
@@ -1268,97 +1309,97 @@ function MessageLog({ messages, status, onClear, onAskAgent }) {
           ...styles.messageActions,
           ...(isSelected || isActionableError ? styles.messageActionsVisible : {})
         }}>
-          {isActionableError && onAskAgent && (
-            <button
-              style={styles.actionButton}
-              onClick={(e) => {
-                e.stopPropagation();
-                handleAskAgent(msg);
-              }}
-              title="把错误消息交给 Agent 分析处理"
-            >
-              交给 Agent
-            </button>
-          )}
-
+        {isActionableError && onAskAgent && (
           <button
             style={styles.actionButton}
             onClick={(e) => {
               e.stopPropagation();
-              handleCopyMessage(msg);
+              handleAskAgent(msg);
             }}
-            title="复制内容"
+            title="把错误消息交给 Agent 分析处理"
           >
-            📋 复制
+            交给 Agent
           </button>
-          
-          <button
-            style={styles.actionButton}
-            onClick={(e) => {
-              e.stopPropagation();
-              handleToggleDetails(msgId);
-            }}
-            title="查看详情"
-          >
-            {showDetail ? '📖 隐藏详情' : '📖 详情'}
-          </button>
-          
-          <button
-            style={styles.actionButton}
-            onClick={(e) => {
-              e.stopPropagation();
-              handleToggleCollapse(msgId);
-            }}
-            title="折叠/展开"
-          >
-            {isCollapsed ? '▶' : '▼'}
-          </button>
-        </div>
-        
-        {/* 详情面板 */}
-        {showDetail && !isCollapsed && (
-          <div style={styles.detailPanel}>
-            <div style={styles.detailTitle}>消息详情</div>
-            <div style={styles.detailRow}>
-              <span>消息ID:</span>
-              <span style={styles.detailValue}>{msgId}</span>
-            </div>
-            <div style={styles.detailRow}>
-              <span>类型:</span>
-              <span style={styles.detailValue}>{msg.type}</span>
-            </div>
-            <div style={styles.detailRow}>
-              <span>时间:</span>
-              <span style={styles.detailValue}>
-                {msg.timestamp ? new Date(msg.timestamp).toISOString() : 'N/A'}
-              </span>
-            </div>
-            {msg.toolName && (
-              <div style={styles.detailRow}>
-                <span>工具名称:</span>
-                <span style={styles.detailValue}>{msg.toolName}</span>
-              </div>
-            )}
-            {msg.duration && (
-              <div style={styles.detailRow}>
-                <span>执行耗时:</span>
-                <span style={styles.detailValue}>{msg.duration}ms</span>
-              </div>
-            )}
-            {msg.payload && (
-              <div style={{ marginTop: '8px' }}>
-                <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '6px' }}>负载 (payload)</div>
-                <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '12px', color: 'var(--text-color)', backgroundColor: 'transparent', borderRadius: '4px' }}>{typeof msg.payload === 'string' ? msg.payload : JSON.stringify(msg.payload, null, 2)}</pre>
-              </div>
-            )}
-            {msg.raw && (
-              <div style={{ marginTop: '8px' }}>
-                <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '6px' }}>原始数据</div>
-                <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '12px', color: 'var(--text-color)', backgroundColor: 'transparent', borderRadius: '4px' }}>{typeof msg.raw === 'string' ? msg.raw : JSON.stringify(msg.raw, null, 2)}</pre>
-              </div>
-            )}
-          </div>
         )}
+
+        <button
+          style={styles.actionButton}
+          onClick={(e) => {
+            e.stopPropagation();
+            handleCopyMessage(msg);
+          }}
+          title="复制内容"
+        >
+          📋 复制
+        </button>
+        
+        <button
+          style={styles.actionButton}
+          onClick={(e) => {
+            e.stopPropagation();
+            handleToggleDetails(msgId);
+          }}
+          title="查看详情"
+        >
+          {showDetail ? '📖 隐藏详情' : '📖 详情'}
+        </button>
+        
+        <button
+          style={styles.actionButton}
+          onClick={(e) => {
+            e.stopPropagation();
+            handleToggleCollapse(msgId);
+          }}
+          title="折叠/展开"
+        >
+          {isCollapsed ? '▶' : '▼'}
+        </button>
+      </div>
+      
+      {/* 详情面板 */}
+      {showDetail && !isCollapsed && (
+        <div style={styles.detailPanel}>
+          <div style={styles.detailTitle}>消息详情</div>
+          <div style={styles.detailRow}>
+            <span>消息ID:</span>
+            <span style={styles.detailValue}>{msgId}</span>
+          </div>
+          <div style={styles.detailRow}>
+            <span>类型:</span>
+            <span style={styles.detailValue}>{msg.type}</span>
+          </div>
+          <div style={styles.detailRow}>
+            <span>时间:</span>
+            <span style={styles.detailValue}>
+              {msg.timestamp ? new Date(msg.timestamp).toISOString() : 'N/A'}
+            </span>
+          </div>
+          {msg.toolName && (
+            <div style={styles.detailRow}>
+              <span>工具名称:</span>
+              <span style={styles.detailValue}>{msg.toolName}</span>
+            </div>
+          )}
+          {msg.duration && (
+            <div style={styles.detailRow}>
+              <span>执行耗时:</span>
+              <span style={styles.detailValue}>{msg.duration}ms</span>
+            </div>
+          )}
+          {msg.payload && (
+            <div style={{ marginTop: '8px' }}>
+              <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '6px' }}>负载 (payload)</div>
+              <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '12px', color: 'var(--text-color)', backgroundColor: 'transparent', borderRadius: '4px' }}>{typeof msg.payload === 'string' ? msg.payload : JSON.stringify(msg.payload, null, 2)}</pre>
+            </div>
+          )}
+          {msg.raw && (
+            <div style={{ marginTop: '8px' }}>
+              <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '6px' }}>原始数据</div>
+              <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '12px', color: 'var(--text-color)', backgroundColor: 'transparent', borderRadius: '4px' }}>{typeof msg.raw === 'string' ? msg.raw : JSON.stringify(msg.raw, null, 2)}</pre>
+            </div>
+          )}
+        </div>
+      )}
       </div>
     );
   };
@@ -1652,19 +1693,19 @@ function MessageLog({ messages, status, onClear, onAskAgent }) {
           padding: 0;
         }
         .markdown p {
-          margin: 8px 0;
-          line-height: 1.6;
+          margin: 4px 0;
+          line-height: 1.5;
           font-size: 13px;
           color: var(--text-color, #e6e9ef);
         }
         .markdown ul, .markdown ol {
-          margin: 8px 0;
+          margin: 4px 0;
           padding-left: 20px;
           font-size: 13px;
         }
         .markdown li {
-          margin: 4px 0;
-          line-height: 1.5;
+          margin: 2px 0;
+          line-height: 1.4;
         }
       `}</style>
       {/* 头部 */}

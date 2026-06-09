@@ -706,11 +706,11 @@ export class Embedder {
     const finalTarget = Math.min(target, hardCap);
     const finalOverlap = Math.min(overlap, Math.max(8, Math.floor(finalTarget * 0.2)));
 
-    if (!textStr) return [];
+    if (!textStr) {return [];}
 
     // Fast path: small text → one chunk
     const totalTokens = this.countTokens(textStr)[0];
-    if (totalTokens <= finalTarget) return [textStr];
+    if (totalTokens <= finalTarget) {return [textStr];}
 
     // Split into natural segments (newlines / sentences) first, then
     // greedily pack segments into chunks, recomputing token counts per
@@ -748,7 +748,7 @@ export class Embedder {
     }
 
     const trimmed = buffer.trim();
-    if (trimmed) chunks.push(trimmed);
+    if (trimmed) {chunks.push(trimmed);}
 
     // Final safety: if any chunk still exceeds hardCap, forcibly split it
     const finalChunks = [];
@@ -772,7 +772,7 @@ export class Embedder {
             subTokens += wTokens;
           }
         }
-        if (sub.trim()) finalChunks.push(sub.trim());
+        if (sub.trim()) {finalChunks.push(sub.trim());}
       }
     }
     return finalChunks;
@@ -815,7 +815,7 @@ function normalizePooling(value) {
  */
 export function heuristicCountTokens(text) {
   const s = String(text || '');
-  if (!s) return 0;
+  if (!s) {return 0;}
   const cjkMatches = s.match(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/gu) || [];
   const cjkCount = cjkMatches.length;
   const stripped = s.replace(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/gu, ' ');
@@ -836,8 +836,8 @@ export function mmrReRank(items, { lambda = 0.7, limit = 5, minScore = -Infinity
     .map((it, i) => ({ ...it, _origIndex: i }))
     .filter(it => Number(it.score) >= minScore);
 
-  if (candidates.length === 0) return [];
-  if (candidates.length <= limit) return candidates;
+  if (candidates.length === 0) {return [];}
+  if (candidates.length <= limit) {return candidates;}
 
   const selected = [];
   const remaining = candidates.slice();
@@ -851,7 +851,7 @@ export function mmrReRank(items, { lambda = 0.7, limit = 5, minScore = -Infinity
       let maxSimToSelected = 0;
       for (const sel of selected) {
         const sim = fastSimilarity(cand, sel);
-        if (sim > maxSimToSelected) maxSimToSelected = sim;
+        if (sim > maxSimToSelected) {maxSimToSelected = sim;}
       }
       const mmr = lambda * rel - (1 - lambda) * maxSimToSelected;
       if (mmr > bestScore) {
@@ -859,7 +859,7 @@ export function mmrReRank(items, { lambda = 0.7, limit = 5, minScore = -Infinity
         bestIdx = i;
       }
     }
-    if (bestIdx < 0) break;
+    if (bestIdx < 0) {break;}
     selected.push(remaining[bestIdx]);
     remaining.splice(bestIdx, 1);
   }
@@ -869,7 +869,7 @@ export function mmrReRank(items, { lambda = 0.7, limit = 5, minScore = -Infinity
 function fastSimilarity(a, b) {
   if (Array.isArray(a.embedding) && Array.isArray(b.embedding) && a.embedding.length === b.embedding.length) {
     let dot = 0;
-    for (let i = 0; i < a.embedding.length; i++) dot += a.embedding[i] * b.embedding[i];
+    for (let i = 0; i < a.embedding.length; i++) {dot += a.embedding[i] * b.embedding[i];}
     return Math.max(-1, Math.min(1, dot));
   }
   // Fallback: bag-of-words jaccard over tokens
@@ -877,12 +877,12 @@ function fastSimilarity(a, b) {
 }
 
 function jaccardSimilarity(a, b) {
-  if (!a || !b) return 0;
+  if (!a || !b) {return 0;}
   const ta = new Set(a.toLowerCase().match(/[\p{L}\p{N}_-]{2,}/gu) || []);
   const tb = new Set(b.toLowerCase().match(/[\p{L}\p{N}_-]{2,}/gu) || []);
-  if (ta.size === 0 || tb.size === 0) return 0;
+  if (ta.size === 0 || tb.size === 0) {return 0;}
   let inter = 0;
-  for (const t of ta) if (tb.has(t)) inter++;
+  for (const t of ta) {if (tb.has(t)) {inter++;}}
   const union = ta.size + tb.size - inter;
   return union > 0 ? inter / union : 0;
 }
@@ -893,11 +893,11 @@ function jaccardSimilarity(a, b) {
  * may have been split across multiple chunks.
  */
 export function mergeAdjacentChunks(items) {
-  if (!Array.isArray(items) || items.length === 0) return items;
+  if (!Array.isArray(items) || items.length === 0) {return items;}
   const byDoc = new Map();
   for (const it of items) {
     const docId = it.metadata?.documentId || '__global__';
-    if (!byDoc.has(docId)) byDoc.set(docId, []);
+    if (!byDoc.has(docId)) {byDoc.set(docId, []);}
     byDoc.get(docId).push(it);
   }
   const out = [];
@@ -908,7 +908,7 @@ export function mergeAdjacentChunks(items) {
       let current = { ...group[i] };
       while (i + 1 < group.length) {
         const next = group[i + 1];
-        if (next.metadata?.documentId !== current.metadata?.documentId) break;
+        if (next.metadata?.documentId !== current.metadata?.documentId) {break;}
         // Merge if chunk indices are consecutive and content differs
         if (shouldMerge(current, next)) {
           current = mergeTwo(current, next);
@@ -927,11 +927,11 @@ export function mergeAdjacentChunks(items) {
 function shouldMerge(a, b) {
   const idxA = Number(a.metadata?.chunkIndex) || 0;
   const idxB = Number(b.metadata?.chunkIndex) || 0;
-  if (idxB - idxA !== 1) return false;
+  if (idxB - idxA !== 1) {return false;}
   // Don't merge if one text is already fully contained in the other
   const tA = String(a.text || '').toLowerCase();
   const tB = String(b.text || '').toLowerCase();
-  if (tA.includes(tB) || tB.includes(tA)) return true;
+  if (tA.includes(tB) || tB.includes(tA)) {return true;}
   return true;
 }
 

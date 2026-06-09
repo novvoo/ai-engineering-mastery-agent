@@ -278,6 +278,10 @@ const COMMAND_HELP_ALIASES = {
  * Main application class
  */
 class AIEngineeringAgent {
+  #sigintCount = 0;
+  #sigintTimer = null;
+  #sigintHandler = null;
+
   constructor() {
     this.config = this.#loadConfig();
     this.workingDir = this.config.workingDir;
@@ -500,6 +504,30 @@ class AIEngineeringAgent {
       this.rlClosed = true;
       this.isRunning = false;
     });
+
+    // 处理 Ctrl+C 中断：优雅停止 Agent 而非直接退出
+    const sigintHandler = () => {
+      if (this.isProcessingInput) {
+        // Agent 正在执行中 → 请求停止
+        this.#sigintCount++;
+        if (this.#sigintCount === 1) {
+          enhancedUI.warning('\n⚠️  正在请求中断 Agent...（再按一次 Ctrl+C 强制退出）');
+          this.engine.stop().catch(() => {});
+          // 3秒内不再次按 Ctrl+C 则重置计数
+          this.#sigintTimer = setTimeout(() => { this.#sigintCount = 0; }, 3000);
+        } else if (this.#sigintCount >= 2) {
+          // 双击 Ctrl+C → 强制退出
+          enhancedUI.error('\n强制退出');
+          process.exit(130);
+        }
+      } else {
+        // 空闲状态 → 直接退出
+        this.shutdown().then(() => process.exit(0));
+      }
+    };
+    process.on('SIGINT', sigintHandler);
+    this.#sigintHandler = sigintHandler;
+
     this.#installSlashCommandSuggestions();
 
     this.isRunning = true;
@@ -2231,7 +2259,11 @@ class AIEngineeringAgent {
         inputChars: preparedInput.length,
         result: result?.status || (result?.answer ? 'completed' : 'unknown'),
       });
-      if (result?.status === 'needs_user_input') {
+
+      // 处理不同的结束状态
+      if (result?.status === 'cancelled') {
+        enhancedUI.warning('🛑 Agent 执行已中断');
+      } else if (result?.status === 'needs_user_input') {
         if (result.answer) {
           enhancedUI.finalAnswer(result.answer);
         }
@@ -2347,6 +2379,16 @@ class AIEngineeringAgent {
 
     console.log('');
     enhancedUI.info('Shutting down...');
+
+    // 清理 SIGINT 处理器
+    if (this.#sigintHandler) {
+      process.removeListener('SIGINT', this.#sigintHandler);
+      this.#sigintHandler = null;
+    }
+    if (this.#sigintTimer) {
+      clearTimeout(this.#sigintTimer);
+      this.#sigintTimer = null;
+    }
 
     this.isRunning = false;
 

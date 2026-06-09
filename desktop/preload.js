@@ -61,6 +61,7 @@ const ALLOWED_CHANNELS = {
     'ipc:event',
     'ipc:heartbeat',
     'app:newTask',
+    'app:menuAction',
     'app:projectCreated',
     'app:projectOpened',
     'workspace:changed',

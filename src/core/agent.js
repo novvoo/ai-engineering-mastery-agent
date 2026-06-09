@@ -1901,7 +1901,7 @@ export class ReActAgent {
       const extensions = new Set();
       for (const p of changedFiles) {
         const m = p.match(/\.[a-zA-Z0-9]+$/);
-        if (m) extensions.add(m[0].toLowerCase());
+        if (m) {extensions.add(m[0].toLowerCase());}
       }
 
       let recommendedCommands = [];
@@ -1970,7 +1970,7 @@ export class ReActAgent {
       for (const ext of verificationHintExts) {
         if (['.json', '.yml', '.yaml', '.toml'].includes(ext)) {
           // JSON/YAML/TOML can at least be parsed
-          if (ext === '.json') extBasedCommands.push('node -e "JSON.parse(require(\'fs\').readFileSync(\'<file>\',\'utf8\'))"  # syntax check JSON');
+          if (ext === '.json') {extBasedCommands.push('node -e "JSON.parse(require(\'fs\').readFileSync(\'<file>\',\'utf8\'))"  # syntax check JSON');}
         } else {
           // markdown/txt - no sensible runtime command
           unverifiableExts.push(ext);
@@ -1985,11 +1985,11 @@ export class ReActAgent {
       }
       if (recommendedCommands.length > 0) {
         lines.push('Recommended verification commands (from package.json):');
-        for (const c of recommendedCommands.slice(0, 4)) lines.push(`  - ${c}`);
+        for (const c of recommendedCommands.slice(0, 4)) {lines.push(`  - ${c}`);}
       }
       if (extBasedCommands.length > 0) {
         lines.push('File-extension-based verification commands:');
-        for (const c of extBasedCommands.slice(0, 6)) lines.push(`  - ${c}`);
+        for (const c of extBasedCommands.slice(0, 6)) {lines.push(`  - ${c}`);}
       }
       if (unverifiableExts.length > 0) {
         lines.push(`Files with extensions ${unverifiableExts.join(', ')} may not have meaningful runtime verification; ` +

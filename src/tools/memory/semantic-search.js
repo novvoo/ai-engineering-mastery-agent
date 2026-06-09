@@ -91,7 +91,7 @@ function chunkFile(path, content) {
 
   function emitChunk(srcLines, s, e, tokens) {
     const text = srcLines.slice(s, e).join('\n').trim();
-    if (!text) return;
+    if (!text) {return;}
     chunks.push({
       text,
       metadata: { path, startLine: s + 1, endLine: e, tokens: tokens || tokenCount(text) },
@@ -109,9 +109,9 @@ function chunkFile(path, content) {
         currentTokens += tokenCount(srcLines[endIdx]);
         endIdx++;
       }
-      if (endIdx === startIdx) endIdx = Math.min(e, startIdx + 1);
+      if (endIdx === startIdx) {endIdx = Math.min(e, startIdx + 1);}
       emitChunk(srcLines, startIdx, endIdx, currentTokens);
-      if (endIdx >= e) break;
+      if (endIdx >= e) {break;}
       // Advance by roughly (CHUNK_TOKENS_TARGET - OVERLAP_TOKENS) tokens
       let advanceTokens = 0;
       let newStart = startIdx;
@@ -120,7 +120,7 @@ function chunkFile(path, content) {
         advanceTokens += tokenCount(srcLines[newStart]);
         newStart++;
       }
-      if (newStart <= startIdx) newStart = startIdx + 1;
+      if (newStart <= startIdx) {newStart = startIdx + 1;}
       startIdx = newStart;
     }
   }
@@ -128,11 +128,11 @@ function chunkFile(path, content) {
 
 function tokenCount(text) {
   try {
-    if (typeof heuristicCountTokens === 'function') return heuristicCountTokens(text);
-  } catch {}
+    if (typeof heuristicCountTokens === 'function') {return heuristicCountTokens(text);}
+  } catch { /* noop */ }
   // Ultra-light fallback: ~4 chars per token for CJK-heavy, ~0.75 words for Latin
   const s = String(text || '');
-  if (!s) return 0;
+  if (!s) {return 0;}
   const cjk = (s.match(/[\u4e00-\u9fff]/g) || []).length;
   const words = (s.match(/[\p{L}\p{N}_-]+/gu) || []).length;
   return Math.max(1, Math.round(cjk + words * 1.3));

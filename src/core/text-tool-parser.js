@@ -135,7 +135,7 @@ export class TextToolParser {
       const toolName = match[1];
       const braceStart = match.index + match[0].length - 1;
       const found = this.#findBalancedJSON(text, braceStart);
-      if (!found) continue;
+      if (!found) {continue;}
 
       try {
         const args = this.#safeJSONParse(found.content);
@@ -176,7 +176,7 @@ export class TextToolParser {
     while ((match = blockRegex.exec(text)) !== null) {
       const braceStart = match.index + match[0].length - 1;
       const found = this.#findBalancedJSON(text, braceStart);
-      if (!found) continue;
+      if (!found) {continue;}
 
       // verify closing code fence appears within a few characters after the JSON
       const after = text.substring(found.endIdx, found.endIdx + 20);
@@ -331,7 +331,7 @@ export class TextToolParser {
         const attrRegex = /(\w+)\s*=\s*"([^"]*)"/g;
         let attrMatch;
         while ((attrMatch = attrRegex.exec(attrsText)) !== null) {
-          if (attrMatch[1] === 'name') continue;
+          if (attrMatch[1] === 'name') {continue;}
           args[attrMatch[1]] = this.#decodeStringLiteral(attrMatch[2]);
         }
 
@@ -1333,7 +1333,7 @@ export class TextToolParser {
    * 安全的 JSON 解析
    */
   #safeJSONParse(str) {
-    if (!str || typeof str !== 'string') return null;
+    if (!str || typeof str !== 'string') {return null;}
     try {
       // 先尝试直接解析
       return JSON.parse(str);

@@ -346,13 +346,13 @@ const MODIFICATION_INTENTS = new Set(['coding_task', 'git_task']);
 
 export function mergeIntentProfile(quickResult, intent, userInput = '') {
   // 没 intent 或置信度低：保留 quickAssess 结果
-  if (!intent || typeof intent !== 'object') return quickResult;
+  if (!intent || typeof intent !== 'object') {return quickResult;}
   if (typeof intent.confidence === 'number' && intent.confidence < INTENT_CONFIDENCE_THRESHOLD) {
     return quickResult;
   }
 
   const intentName = intent.intent;
-  if (!intentName || intentName === 'unknown') return quickResult;
+  if (!intentName || intentName === 'unknown') {return quickResult;}
 
   const cli = isCliCommand(userInput);
   if (cli) {

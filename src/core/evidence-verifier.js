@@ -71,7 +71,7 @@ const SEMANTIC_REVIEW_TOOL_NAMES = new Set(['review']);
 // 辅助：从 toolEvent 中提取 shell/pty 的命令字符串
 // =============================================================
 function extractCommand(event) {
-  if (!event || !event.args) return '';
+  if (!event || !event.args) {return '';}
   return String(
     event.args.command || event.args.input || event.args.text || event.args.cmd || ''
   ).toLowerCase();
@@ -82,18 +82,18 @@ function extractCommand(event) {
 // 注意：shell 要看命令内容，echo "hello" 不算修改，npm install 也不算（依赖安装）
 // =============================================================
 export function isMutationEvent(event) {
-  if (!event || !event.name) return false;
-  if (event.success === false) return false;
+  if (!event || !event.name) {return false;}
+  if (event.success === false) {return false;}
 
-  if (MUTATION_TOOL_NAMES.has(event.name)) return true;
+  if (MUTATION_TOOL_NAMES.has(event.name)) {return true;}
 
   if (event.name === 'shell' || event.name === 'pty_start' || event.name === 'pty_write') {
     const cmd = extractCommand(event);
     // 必须是"写"操作，不是纯读操作（ls/cat/grep/rg/find 都不算 mutation）
-    if (!cmd) return false;
+    if (!cmd) {return false;}
     // 排除纯读命令
     const isPureRead = /\b(ls|cat|grep|rg|find|sed\s+-n|awk)\s/.test(cmd) && !/>|>>/.test(cmd);
-    if (isPureRead) return false;
+    if (isPureRead) {return false;}
     return MUTATION_SHELL_COMMAND_PATTERNS.some((p) => p.test(cmd));
   }
 
@@ -105,15 +105,15 @@ export function isMutationEvent(event) {
 // 这是本模块最重要的函数 —— 它定义了"什么算验证"
 // =============================================================
 export function isRuntimeVerificationEvent(event) {
-  if (!event || !event.name) return false;
-  if (event.success === false) return false;
+  if (!event || !event.name) {return false;}
+  if (event.success === false) {return false;}
 
-  if (RUNTIME_VERIFICATION_TOOL_NAMES.has(event.name)) return true;
+  if (RUNTIME_VERIFICATION_TOOL_NAMES.has(event.name)) {return true;}
 
   // shell/pty: 必须匹配实验证命令模式
   if (event.name === 'shell' || event.name === 'pty_start' || event.name === 'pty_write' || event.name === 'pty_read') {
     const cmd = extractCommand(event);
-    if (!cmd) return false;
+    if (!cmd) {return false;}
     return RUNTIME_VERIFICATION_COMMAND_PATTERNS.some((p) => p.test(cmd));
   }
 
@@ -125,8 +125,8 @@ export function isRuntimeVerificationEvent(event) {
 // 注意：这不算验证证据，只是"是否遵循了方法论流程"的标记
 // =============================================================
 export function isMethodologyEvent(event) {
-  if (!event || !event.name) return false;
-  if (event.success === false) return false;
+  if (!event || !event.name) {return false;}
+  if (event.success === false) {return false;}
   return METHODOLOGY_TOOL_NAMES.has(event.name);
 }
 
@@ -135,12 +135,12 @@ export function isMethodologyEvent(event) {
 // 只有当 review 工具被调用，且调用参数中明确提到了语义相关的 focus areas 才算
 // =============================================================
 export function isSemanticRiskReviewEvent(event) {
-  if (!event || event.name !== 'review') return false;
-  if (event.success === false) return false;
+  if (!event || event.name !== 'review') {return false;}
+  if (event.success === false) {return false;}
 
   const focusAreas = String(event.args?.focus_areas || '').toLowerCase();
   // 如果没指定 focus_areas，也算"做了代码 review"（宽松一点，不卡太紧）
-  if (!focusAreas) return true;
+  if (!focusAreas) {return true;}
 
   const semanticKeywords = [
     'semantic', 'api', 'security', 'state', 'concurrency', 'async', 'timing',
@@ -266,7 +266,7 @@ export function crossCheckVerifyClaim(claimText, toolEvents = []) {
 // 如果 mutation 存在但 final answer 完全没提"如何验证" → 警告
 // =============================================================
 export function finalAnswerMentionsVerification(finalAnswerText, hasMutation) {
-  if (!hasMutation) return { ok: true };
+  if (!hasMutation) {return { ok: true };}
 
   const text = String(finalAnswerText || '').toLowerCase();
   const mentions = [

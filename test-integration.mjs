@@ -5591,7 +5591,7 @@ newFeaturesTests.test('Document RAG CLI - /doc search passes full evidence (not 
 
   const mockToolRegistry = {
     async execute(name, args) {
-      if (name === 'document_search') return searchOutput;
+      if (name === 'document_search') {return searchOutput;}
       throw new Error(`Unexpected tool: ${name}`);
     },
   };
@@ -5606,7 +5606,7 @@ newFeaturesTests.test('Document RAG CLI - /doc search passes full evidence (not 
   }
 
   const userMsg = modelMessages[0].find(m => m.role === 'user');
-  if (!userMsg) throw new Error('Expected user role message in refine prompt');
+  if (!userMsg) {throw new Error('Expected user role message in refine prompt');}
   const userContent = String(userMsg.content || '');
 
   if (!userContent.includes(FAKE_SNIPPET)) {
@@ -5621,7 +5621,7 @@ newFeaturesTests.test('Document RAG CLI - /doc search passes full evidence (not 
     throw new Error(`refine prompt should include header too, got:\n${userContent.substring(0, 300)}`);
   }
 
-  if (!result?.success) throw new Error(`Expected success result, got: ${JSON.stringify(result)}`);
+  if (!result?.success) {throw new Error(`Expected success result, got: ${JSON.stringify(result)}`);}
   const content = String(result?.content || '');
   // Default mode: only the refined answer, no raw evidence noise
   if (!content.includes('TEST_ANSWER_PLACEHOLDER')) {
@@ -5662,7 +5662,7 @@ newFeaturesTests.test('Document RAG CLI - /doc search falls back to raw result w
     // No modelProvider → should not crash, just return raw results
   });
 
-  if (!result?.success) throw new Error(`Expected success, got ${JSON.stringify(result)}`);
+  if (!result?.success) {throw new Error(`Expected success, got ${JSON.stringify(result)}`);}
   if (!String(result.content).includes('evidence here')) {
     throw new Error(`Expected raw evidence in fallback output, got: ${result.content}`);
   }
@@ -6799,7 +6799,7 @@ newFeaturesTests.test('Document RAG - document_answer returns structured JSON wi
   if (!answer.missing_info || typeof answer.missing_info.low_relevance !== 'boolean') {
     throw new Error(`Expected answer.missing_info.low_relevance boolean, got ${JSON.stringify(answer.missing_info)}`);
   }
-  if (!answer.meta || !Number.isFinite(answer.meta.total_indexed_chunks) || answer.meta.min_score == null) {
+  if (!answer.meta || !Number.isFinite(answer.meta.total_indexed_chunks) || answer.meta.min_score === null) {
     throw new Error(`Expected answer.meta.{total_indexed_chunks, min_score}, got ${JSON.stringify(answer.meta)}`);
   }
 

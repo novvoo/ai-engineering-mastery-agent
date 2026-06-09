@@ -758,7 +758,7 @@ export class PluginManager {
   #detectCircularDependency(startNode, graph) {
     const WHITE = 0, GRAY = 1, BLACK = 2;
     const color = new Map();
-    for (const node of graph.keys()) color.set(node, WHITE);
+    for (const node of graph.keys()) {color.set(node, WHITE);}
 
     const path = [];
     const dfs = (node) => {
@@ -766,7 +766,7 @@ export class PluginManager {
       path.push(node);
       const deps = graph.get(node) || [];
       for (const dep of deps) {
-        if (!graph.has(dep)) continue; // 未注册的依赖跳过
+        if (!graph.has(dep)) {continue;} // 未注册的依赖跳过
         const c = color.get(dep);
         if (c === GRAY) {
           // 找到环
@@ -775,7 +775,7 @@ export class PluginManager {
         }
         if (c === WHITE) {
           const res = dfs(dep);
-          if (res) return res;
+          if (res) {return res;}
         }
       }
       path.pop();

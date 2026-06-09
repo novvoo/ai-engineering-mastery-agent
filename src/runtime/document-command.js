@@ -102,7 +102,7 @@ export async function handleDocumentCommand(input, options = {}) {
     }
 
     const rawResult = await toolRegistry.execute('document_search', { query, limit: 5 }, context);
-    const searchPayload = rawResult != null ? String(rawResult) : '';
+    const searchPayload = rawResult !== null ? String(rawResult) : '';
     const truncatedSearch = searchPayload.length > 8000 ? searchPayload.slice(0, 8000) + '\n...[truncated]' : searchPayload;
     let answer = '';
 

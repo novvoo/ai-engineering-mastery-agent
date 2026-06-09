@@ -18,6 +18,8 @@ import CommandSuggestions from './components/CommandSuggestions.jsx';
 import { useRuntime } from './hooks/useRuntime.js';
 import { useIPC } from './hooks/useIPC.js';
 import { formatPreviewUrlInput, normalizePreviewUrlInput } from './preview-url.js';
+import { Button, Badge, Panel, PanelHeader, EmptyState } from './components/ui/index.js';
+import { TabGroup, TabItem } from './components/ui/Tab.jsx';
 import './index.css';
 
 // Codex 2026 风格布局常量
@@ -214,10 +216,10 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     minHeight: `${LAYOUT.headerHeight}px`,
-    padding: '0 12px',
-    backgroundColor: '#11161e',
+    padding: '0 var(--spacing-md)',
+    backgroundColor: 'var(--bg-depth-2)',
     borderBottom: '1px solid var(--border-subtle)',
-    gap: '4px'
+    gap: 'var(--spacing-xs)'
   },
   
   menuItem: {
@@ -306,12 +308,12 @@ const styles = {
   activityRail: {
     width: `${LAYOUT.activityRailWidth}px`,
     flexShrink: 0,
-    backgroundColor: '#0b0f15',
+    backgroundColor: 'var(--bg-depth-0)',
     borderRight: '1px solid var(--border-subtle)',
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    padding: '8px 6px',
+    padding: 'var(--spacing-sm) 6px',
     gap: '6px'
   },
 
@@ -340,23 +342,23 @@ const styles = {
   // ================== 左侧工具面板 ==================
   leftSidebar: {
     width: `${LAYOUT.sidebarWidth}px`,
-    backgroundColor: 'var(--surface-color)',
+    backgroundColor: 'var(--bg-depth-3)',
     borderRight: '1px solid var(--border-subtle)',
     display: 'flex',
     flexDirection: 'column',
     overflow: 'hidden',
-    transition: 'width 0.2s ease'
+    transition: 'width var(--transition-normal)'
   },
 
   sidebarHeader: {
     minHeight: '42px',
-    padding: '0 12px',
+    padding: '0 var(--spacing-md)',
     borderBottom: '1px solid var(--border-subtle)',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: '8px',
-    backgroundColor: '#141922'
+    gap: 'var(--spacing-sm)',
+    backgroundColor: 'var(--bg-depth-2)'
   },
 
   sidebarTitle: {
@@ -368,7 +370,7 @@ const styles = {
   
   // ================== 右侧 Inspector 面板 ==================
   summaryPanel: {
-    backgroundColor: 'var(--surface-color)',
+    backgroundColor: 'var(--bg-depth-3)',
     borderLeft: '1px solid var(--border-subtle)',
     display: 'flex',
     flexDirection: 'column',
@@ -391,9 +393,9 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     gap: '6px',
-    padding: '8px',
+    padding: 'var(--spacing-sm)',
     borderBottom: '1px solid var(--border-subtle)',
-    backgroundColor: '#141922'
+    backgroundColor: 'var(--bg-depth-2)'
   },
 
   previewHeader: {
@@ -521,9 +523,9 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: '12px 20px',
+    padding: 'var(--spacing-sm) var(--spacing-xl)',
     borderBottom: '1px solid var(--border-subtle)',
-    backgroundColor: 'var(--surface-color)'
+    backgroundColor: 'var(--bg-depth-3)'
   },
   
   chatTitle: {
@@ -567,8 +569,8 @@ const styles = {
   
   // ================== 输入区域 ==================
   inputArea: {
-    padding: '16px 20px',
-    backgroundColor: 'var(--surface-color)',
+    padding: 'var(--spacing-sm) var(--spacing-xl)',
+    backgroundColor: 'var(--bg-depth-3)',
     borderTop: '1px solid var(--border-subtle)'
   },
   
@@ -624,7 +626,7 @@ const styles = {
   },
   
   inputHint: {
-    marginTop: '8px',
+    marginTop: '4px',
     fontSize: '11px',
     color: 'var(--text-dark)'
   },
@@ -664,7 +666,7 @@ const styles = {
   
   // ================== 底部状态栏 ==================
   footer: {
-    backgroundColor: '#11161e',
+    backgroundColor: 'var(--bg-depth-2)',
     borderTop: '1px solid var(--border-subtle)'
   },
   
@@ -862,9 +864,15 @@ function App() {
     isMaximized: false
   });
   
-  // Codex 风格新状态
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => Boolean(readDesktopLayout().sidebarCollapsed));
-  const [summaryPanelVisible, setSummaryPanelVisible] = useState(() => Boolean(readDesktopLayout().summaryPanelVisible));
+  // Codex 风格新状态 — 默认折叠侧边栏和 Inspector，突出聊天区
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    const stored = readDesktopLayout().sidebarCollapsed;
+    return stored === undefined ? true : Boolean(stored);
+  });
+  const [summaryPanelVisible, setSummaryPanelVisible] = useState(() => {
+    const stored = readDesktopLayout().summaryPanelVisible;
+    return stored === undefined ? false : Boolean(stored);
+  });
   const [activeInspectorTab, setActiveInspectorTab] = useState(readStoredInspectorTab);
   const [inspectorPanelWidth, setInspectorPanelWidth] = useState(() => clampInspectorWidth(readDesktopLayout().inspectorPanelWidth));
   const [inspectorExpanded, setInspectorExpanded] = useState(() => Boolean(readDesktopLayout().inspectorExpanded));
@@ -1026,6 +1034,7 @@ function App() {
     let unsubscribeWindowState = null;
     let unsubscribeProjectCreated = null;
     let unsubscribeProjectOpened = null;
+    let unsubscribeMenuAction = null;
 
     const syncWorkingDirectoryFromEvent = (payload = {}) => {
       const nextDirectory = payload?.path || payload?.workingDirectory || payload;
@@ -1071,6 +1080,55 @@ function App() {
 
       unsubscribeProjectCreated = ipc.subscribe('app:projectCreated', syncWorkingDirectoryFromEvent);
       unsubscribeProjectOpened = ipc.subscribe('app:projectOpened', syncWorkingDirectoryFromEvent);
+      
+      // 监听菜单动作事件（来自 Electron 主进程的 app:menuAction）
+      unsubscribeMenuAction = ipc.subscribe('app:menuAction', ({ command, ...payload }) => {
+        if (!isMounted) return;
+        switch (command) {
+          case 'stopAgent':
+            runtime.stop();
+            break;
+          case 'focusInput':
+            chatInputRef.current?.focus();
+            break;
+          case 'newTask':
+            setChatInput('');
+            chatInputRef.current?.focus();
+            break;
+          case 'clearConversation':
+            runtime.clearMessages();
+            break;
+          case 'insertDocSearch':
+            setChatInput('/doc search ');
+            chatInputRef.current?.focus();
+            break;
+          case 'openModelConfig':
+            setShowLLMSetup(true);
+            break;
+          case 'toggleSidebar':
+            setSidebarCollapsed(prev => !prev);
+            break;
+          case 'toggleSummary':
+            setSummaryPanelVisible(prev => !prev);
+            break;
+          case 'showAgent':
+            setActiveTab('agent');
+            setSidebarCollapsed(false);
+            break;
+          case 'showTools':
+            setActiveTab('tools');
+            setSidebarCollapsed(false);
+            break;
+          case 'insertCommand':
+            if (payload?.value) {
+              setChatInput(payload.value);
+              chatInputRef.current?.focus();
+            }
+            break;
+          default:
+            console.log('[App] Unhandled menu action:', command);
+        }
+      });
       
       // 获取应用信息
       ipc.getAppInfo().then(info => {
@@ -1119,6 +1177,9 @@ function App() {
       }
       if (typeof unsubscribeProjectOpened === 'function') {
         unsubscribeProjectOpened();
+      }
+      if (typeof unsubscribeMenuAction === 'function') {
+        unsubscribeMenuAction();
       }
       ipc.disconnect();
     };
@@ -1738,11 +1799,6 @@ const handleClearAgentHistory = useCallback(() => {
   const renderSummaryPanel = () => {
     if (!summaryPanelVisible) return null;
 
-    const tabLabels = [
-      { id: 'rag', label: 'RAG' },
-      { id: 'preview', label: 'Preview' }
-    ];
-
     const renderRagTab = () => (
       <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
         <div style={styles.summarySection}>
@@ -2008,45 +2064,42 @@ const handleClearAgentHistory = useCallback(() => {
     );
 
     return (
-      <aside style={{
-        ...styles.summaryPanel,
-        width: `${inspectorPanelWidth}px`,
-        minWidth: `${LAYOUT.inspectorMinWidth}px`,
-        maxWidth: `${LAYOUT.inspectorMaxWidth}px`
-      }}>
+      <Panel
+        variant="inspector"
+        collapsed={false}
+        width={inspectorPanelWidth}
+        ariaLabel="Inspector 面板"
+        style={{
+          minWidth: `${LAYOUT.inspectorMinWidth}px`,
+          maxWidth: `${LAYOUT.inspectorMaxWidth}px`,
+        }}
+      >
         <div
           style={styles.inspectorResizeHandle}
           onPointerDown={handleInspectorResizeStart}
           title="拖拽调整 Inspector 宽度"
+          role="separator"
+          aria-orientation="vertical"
         />
         <div style={styles.inspectorHeader}>
-          <div style={styles.inspectorTabs}>
-            {tabLabels.map(tab => (
-              <button
-                key={tab.id}
-                style={{
-                  ...styles.inspectorTab,
-                  ...(activeInspectorTab === tab.id ? styles.inspectorTabActive : {})
-                }}
-                onClick={() => setActiveInspectorTab(tab.id)}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-          <button
-            style={styles.iconButton}
+          <TabGroup activeTab={activeInspectorTab} onChange={setActiveInspectorTab}>
+            <TabItem id="rag">RAG</TabItem>
+            <TabItem id="preview">Preview</TabItem>
+          </TabGroup>
+          <Button
+            variant="icon"
+            size="sm"
             onClick={handleInspectorExpandToggle}
-            title={inspectorExpanded ? '还原子窗口宽度' : '放大子窗口'}
-            aria-label={inspectorExpanded ? '还原子窗口宽度' : '放大子窗口'}
+            title={inspectorExpanded ? '还原预览区域' : '放大预览区域'}
+            ariaLabel={inspectorExpanded ? '还原预览区域' : '放大预览区域'}
           >
             {inspectorExpanded ? '↙' : '⛶'}
-          </button>
+          </Button>
         </div>
 
         {activeInspectorTab === 'rag' && renderRagTab()}
         {activeInspectorTab === 'preview' && renderPreviewTab()}
-      </aside>
+      </Panel>
     );
   };
   
@@ -2059,69 +2112,37 @@ const handleClearAgentHistory = useCallback(() => {
       {/* 顶部菜单栏 */}
       <header style={{
         ...styles.menuBar,
-        paddingLeft: shouldReserveMacTrafficLightSpace ? '86px' : '12px',
+        paddingLeft: shouldReserveMacTrafficLightSpace ? '86px' : 'var(--spacing-md)',
         WebkitAppRegion: 'drag'
       }}>
         {/* 切换边栏 */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', WebkitAppRegion: 'no-drag' }}>
-          <button
-            style={{
-              width: '28px', height: '28px', borderRadius: '7px',
-              border: '1px solid var(--border-subtle)',
-              backgroundColor: 'transparent',
-              color: 'var(--text-muted)',
-              cursor: 'pointer', fontSize: '16px',
-              display: 'flex', alignItems: 'center', justifyContent: 'center'
-            }}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)', WebkitAppRegion: 'no-drag' }}>
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => setSidebarCollapsed(prev => !prev)}
             title={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'}
+            ariaLabel={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'}
           >
             {sidebarCollapsed ? '☰' : '✕'}
-          </button>
+          </Button>
         </div>
         
         {/* 右侧状态 */}
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px', WebkitAppRegion: 'no-drag' }}>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            padding: '4px 10px',
-            borderRadius: '999px',
-            fontSize: '12px',
-            fontWeight: '500',
-            backgroundColor: runtime.status === 'running' 
-              ? 'rgba(246, 200, 95, 0.12)' 
-              : 'rgba(93, 211, 158, 0.12)',
-            border: `1px solid ${runtime.status === 'running' 
-              ? 'rgba(246, 200, 95, 0.28)' 
-              : 'rgba(93, 211, 158, 0.28)'}`,
-            color: runtime.status === 'running' 
-              ? 'var(--warning-color)' 
-              : 'var(--success-color)'
-          }}>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)', WebkitAppRegion: 'no-drag' }}>
+          <Badge variant={runtime.status === 'running' ? 'warning' : 'success'} size="md">
             <span>{runtime.status === 'running' ? '⚡' : '✓'}</span>
             <span>{runtime.status === 'running' ? '运行中' : '就绪'}</span>
-          </div>
+          </Badge>
           
           {/* 窗口控制按钮 (非 Mac) */}
           {!platformInfo?.isMac && (
-            <div style={{ display: 'flex', gap: '4px', marginLeft: '8px' }}>
-              <button 
-                style={{...styles.menuItem, width: '32px', height: '32px', padding: 0}}
-                onClick={handleMinimize}
-                title="最小化"
-              >−</button>
-              <button 
-                style={{...styles.menuItem, width: '32px', height: '32px', padding: 0}}
-                onClick={handleMaximize}
-                title={windowState.isMaximized ? '还原' : '最大化'}
-              >{windowState.isMaximized ? '❐' : '□'}</button>
-              <button 
-                style={{...styles.menuItem, width: '32px', height: '32px', padding: 0, color: 'var(--error-color)'}}
-                onClick={handleClose}
-                title="关闭"
-              >×</button>
+            <div style={{ display: 'flex', gap: 'var(--spacing-xs)', marginLeft: 'var(--spacing-sm)' }}>
+              <Button variant="ghost" size="sm" onClick={handleMinimize} title="最小化">−</Button>
+              <Button variant="ghost" size="sm" onClick={handleMaximize} title={windowState.isMaximized ? '还原' : '最大化'}>
+                {windowState.isMaximized ? '❐' : '□'}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={handleClose} title="关闭" style={{ color: 'var(--error-color)' }}>×</Button>
             </div>
           )}
         </div>
@@ -2130,69 +2151,59 @@ const handleClearAgentHistory = useCallback(() => {
       {/* 主体内容 */}
       <main style={styles.mainContent}>
         <nav style={styles.activityRail} aria-label="工作区导航">
-          <button
-            style={{
-              ...styles.activityButton,
-              ...(activeTab === 'agent' && !sidebarCollapsed ? styles.activityButtonActive : {})
-            }}
+          <Button
+            variant="icon"
+            size="md"
             onClick={() => {
               setActiveTab('agent');
               setSidebarCollapsed(false);
             }}
             title="Agent"
+            ariaLabel="Agent 面板"
+            style={activeTab === 'agent' && !sidebarCollapsed ? styles.activityButtonActive : {}}
           >
             AG
-          </button>
-          <button
-            style={{
-              ...styles.activityButton,
-              ...(activeTab === 'tools' && !sidebarCollapsed ? styles.activityButtonActive : {})
-            }}
+          </Button>
+          <Button
+            variant="icon"
+            size="md"
             onClick={() => {
               setActiveTab('tools');
               setSidebarCollapsed(false);
             }}
             title="工具"
+            ariaLabel="工具面板"
+            style={activeTab === 'tools' && !sidebarCollapsed ? styles.activityButtonActive : {}}
           >
             TL
-          </button>
-          <button
-            style={{
-              ...styles.activityButton,
-              marginTop: 'auto'
-            }}
+          </Button>
+          <Button
+            variant="icon"
+            size="md"
             onClick={() => setShowSettings(prev => !prev)}
             title="设置"
+            ariaLabel="设置"
+            style={{ marginTop: 'auto' }}
           >
             ⚙️
-          </button>
+          </Button>
         </nav>
 
         {!sidebarCollapsed && (
-          <aside style={styles.leftSidebar}>
-            <div style={styles.sidebarHeader}>
-              <span style={styles.sidebarTitle}>{activeTab === 'tools' ? '工具' : '会话'}</span>
-              <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-                {activeTab !== 'tools' && (
-                  <button
-                    style={{ ...styles.button, width: '26px', height: '26px', padding: 0, fontSize: '14px' }}
-                    onClick={handleNewTask}
-                    title="新对话"
-                  >
-                    +
-                  </button>
-                )}
-                <button
-                  style={{ ...styles.button, width: '26px', height: '26px', padding: 0, fontSize: '14px' }}
-                  onClick={() => setSidebarCollapsed(true)}
-                  title="收起侧边栏"
-                >
-                  ×
-                </button>
-              </div>
-            </div>
+          <Panel variant="sidebar" width={LAYOUT.sidebarWidth} ariaLabel="侧边栏">
+            <PanelHeader
+              title={activeTab === 'tools' ? '工具' : '会话'}
+              actions={
+                <>
+                  {activeTab !== 'tools' && (
+                    <Button variant="icon" size="sm" onClick={handleNewTask} title="新对话" ariaLabel="新对话">+</Button>
+                  )}
+                  <Button variant="icon" size="sm" onClick={() => setSidebarCollapsed(true)} title="收起侧边栏" ariaLabel="收起侧边栏">×</Button>
+                </>
+              }
+            />
             {renderSidebarContent()}
-        </aside>
+          </Panel>
         )}
         
         {/* 聊天区域 */}
@@ -2212,43 +2223,18 @@ const handleClearAgentHistory = useCallback(() => {
               </span>
             </div>
             
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <button
-                style={styles.headerActionButton}
-                onClick={handleExport}
-                title="导出对话"
-              >
-                导出
-              </button>
-              <button
-                style={styles.headerActionButton}
-                onClick={() => {
-                  setSummaryPanelVisible(true);
-                  setActiveInspectorTab('preview');
-                }}
-                title="打开预览"
-              >
-                Preview
-              </button>
-              <button
-                style={styles.headerActionButton}
-                onClick={() => setSummaryPanelVisible(prev => !prev)}
-                title="切换 Inspector"
-              >
+            <div style={{ display: 'flex', gap: 'var(--spacing-sm)' }}>
+              <Button variant="ghost" size="sm" onClick={handleExport} title="导出对话" ariaLabel="导出对话">导出</Button>
+              <Button variant="ghost" size="sm" onClick={() => { setSummaryPanelVisible(true); setActiveInspectorTab('preview'); }} title="打开预览" ariaLabel="打开预览">Preview</Button>
+              <Button variant="ghost" size="sm" onClick={() => setSummaryPanelVisible(prev => !prev)} title="切换 Inspector" ariaLabel="切换 Inspector">
                 {summaryPanelVisible ? '隐藏' : '显示'} Inspector
-              </button>
-              <button
-                style={styles.headerActionButton}
-                onClick={runtime.clearMessages}
-                title="清除对话"
-              >
-                清除
-              </button>
+              </Button>
+              <Button variant="ghost" size="sm" onClick={runtime.clearMessages} title="清除对话" ariaLabel="清除对话">清除</Button>
             </div>
           </div>
           
           {/* 消息列表 */}
-          <div style={styles.messageContainer}>
+          <div style={styles.messageContainer} role="log" aria-label="对话消息" aria-live="polite" tabIndex={0}>
             <MessageLog
               messages={runtime.messages}
               status={runtime.status}
@@ -2287,31 +2273,22 @@ const handleClearAgentHistory = useCallback(() => {
               <button
                 style={{
                   ...styles.sendButton,
-                  ...(runtime.status === 'running' || !chatInput.trim() 
-                    ? styles.sendButtonDisabled 
-                    : {})
+                  ...(runtime.status === 'running'
+                    ? { backgroundColor: 'var(--warning-color)', color: '#000' }
+                    : !chatInput.trim()
+                      ? styles.sendButtonDisabled
+                      : {})
                 }}
-                onClick={handleSendMessage}
-                disabled={runtime.status === 'running' || !chatInput.trim()}
-                title="发送消息 (Ctrl+Enter)"
+                onClick={runtime.status === 'running' ? () => runtime.stop() : handleSendMessage}
+                disabled={runtime.status !== 'running' && !chatInput.trim()}
+                title={runtime.status === 'running' ? '停止执行 (Cmd+Ctrl+.)' : '发送消息 (Ctrl+Enter)'}
+                aria-label={runtime.status === 'running' ? '停止执行' : '发送消息'}
               >
-                ↑
+                {runtime.status === 'running' ? '■' : '↑'}
               </button>
             </div>
             <div style={styles.inputHint}>
-              按 <kbd style={{
-                padding: '2px 5px',
-                borderRadius: '3px',
-                backgroundColor: 'var(--surface-color)',
-                border: '1px solid var(--border-subtle)',
-                fontSize: '10px'
-              }}>Ctrl+Enter</kbd> 发送 | 输入 <kbd style={{
-                padding: '2px 5px',
-                borderRadius: '3px',
-                backgroundColor: 'var(--surface-color)',
-                border: '1px solid var(--border-subtle)',
-                fontSize: '10px'
-              }}>/技能名</kbd> 快速调用技能
+              按 <kbd className="kbd-hint">Ctrl+Enter</kbd> 发送 | 输入 <kbd className="kbd-hint">/技能名</kbd> 快速调用技能
             </div>
           </div>
         </div>

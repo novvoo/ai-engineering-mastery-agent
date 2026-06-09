@@ -138,7 +138,7 @@ const SECTION_KEYWORDS_ZH = [
 const PREFIX_STRIP_RE = /^(?:\s*(?:\d+[.\)、\)）:]|[①-⑳][.:\s]+|[一二三四五六七八九十]+[、.:\s]+|Chapter\s+\d+[:\s]+|[IVXLCDM]+\.\s*))?\s*/i;
 
 function normalizeHeading(raw) {
-  if (!raw) return '';
+  if (!raw) {return '';}
   let s = String(raw).trim();
   s = s.replace(PREFIX_STRIP_RE, '');
   s = s.replace(/[:：|\-\s]+$/g, '').trim();
@@ -149,19 +149,19 @@ function normalizeHeading(raw) {
 }
 
 function looksLikeHeading(line) {
-  if (!line) return null;
+  if (!line) {return null;}
   const trimmed = line.trim();
   const len = Array.from(trimmed).length;
 
-  if (len > 60) return null;
-  if (len < 2) return null;
+  if (len > 60) {return null;}
+  if (len < 2) {return null;}
 
   // Skip lines that look like list items / bullets
-  if (/^[\-\*•\d][\.\)\s]/.test(trimmed)) return null;
-  if (/^[①②③④⑤⑥⑦⑧⑨⑩]/.test(trimmed)) return null;
+  if (/^[\-\*•\d][\.\)\s]/.test(trimmed)) {return null;}
+  if (/^[①②③④⑤⑥⑦⑧⑨⑩]/.test(trimmed)) {return null;}
 
   const normalized = normalizeHeading(trimmed);
-  if (!normalized) return null;
+  if (!normalized) {return null;}
 
   if (/^#{1,6}\s+\S/.test(trimmed)) {
     return { text: normalized, kind: 'markdown' };
@@ -180,10 +180,10 @@ function looksLikeHeading(line) {
 
   const lowerNorm = normalized.toLowerCase();
   const zhHit = SECTION_KEYWORDS_ZH.find(k => normalized.includes(k));
-  if (zhHit) return { text: normalized, kind: 'zh-keyword', matched: zhHit };
+  if (zhHit) {return { text: normalized, kind: 'zh-keyword', matched: zhHit };}
 
   const enHit = SECTION_KEYWORDS_EN.find(k => lowerNorm.includes(k));
-  if (enHit) return { text: normalized, kind: 'en-keyword', matched: enHit };
+  if (enHit) {return { text: normalized, kind: 'en-keyword', matched: enHit };}
 
   if (/[:：]\s*$/.test(trimmed) && len <= 30) {
     return { text: normalized, kind: 'trailing-colon' };
@@ -193,21 +193,21 @@ function looksLikeHeading(line) {
 }
 
 function detectSections(rawText) {
-  if (!rawText) return [];
+  if (!rawText) {return [];}
   const lines = rawText.split('\n');
   const hits = [];
 
   // First pass: collect candidate headings with their line index
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    if (!line || !line.trim()) continue;
+    if (!line || !line.trim()) {continue;}
 
     // Heuristic: a section heading line is typically short and followed by
     // either a blank line OR content that doesn't look like a paragraph
     // continuation. We are lenient — the cost of a false positive is low
     // (just an extra chunk boundary) while the cost of missing one is high.
     const trimmed = line.trim();
-    if (Array.from(trimmed).length > 60) continue;
+    if (Array.from(trimmed).length > 60) {continue;}
 
     const match = looksLikeHeading(trimmed);
     if (match) {
@@ -225,7 +225,7 @@ function detectSections(rawText) {
     // Count non-empty lines in the section body
     let bodyLines = 0;
     for (let j = start + 1; j < end; j++) {
-      if (lines[j] && lines[j].trim()) bodyLines++;
+      if (lines[j] && lines[j].trim()) {bodyLines++;}
     }
 
     // First "section" can't start on line 0 if it's really just a title —
@@ -305,7 +305,7 @@ function chunkBySections(text, sections) {
     const sec = sections[s];
     const sectionLines = lines.slice(sec.startLine, sec.endLine);
     const sectionText = sectionLines.join('\n').trim();
-    if (!sectionText) continue;
+    if (!sectionText) {continue;}
 
     const sectionTokens = tokenCount(sectionText);
 
@@ -324,12 +324,12 @@ function chunkBySections(text, sections) {
         sectionText.split('\n').map(l => l.trim()).filter(Boolean),
         [sec.heading]
       );
-      for (const c of subChunks) outputChunks.push(c);
+      for (const c of subChunks) {outputChunks.push(c);}
       continue;
     }
 
     const subChunks = packByTokens(paragraphs, [sec.heading]);
-    for (const c of subChunks) outputChunks.push(c);
+    for (const c of subChunks) {outputChunks.push(c);}
   }
 
   return outputChunks;
@@ -341,7 +341,7 @@ function packByTokens(segments, sectionPath) {
   let bufferTokens = 0;
 
   for (const seg of segments) {
-    if (!seg) continue;
+    if (!seg) {continue;}
     const segTokens = tokenCount(seg);
 
     if (segTokens > CHUNK_TOKENS_MAX) {
@@ -380,7 +380,7 @@ function packByTokens(segments, sectionPath) {
       bufferTokens += segTokens;
     }
   }
-  if (buffer && buffer.trim()) result.push(makePackResult(buffer, sectionPath, bufferTokens));
+  if (buffer && buffer.trim()) {result.push(makePackResult(buffer, sectionPath, bufferTokens));}
   return result;
 }
 
@@ -389,9 +389,9 @@ function makePackResult(text, sectionPath, tokens) {
 }
 
 function carryOverlap(text) {
-  if (!text) return '';
+  if (!text) {return '';}
   const pieces = text.split(/\s+/).filter(Boolean);
-  if (pieces.length === 0) return '';
+  if (pieces.length === 0) {return '';}
   const targetWords = Math.max(6, Math.round(OVERLAP_TOKENS / 1.3));
   return pieces.slice(-targetWords).join(' ');
 }
@@ -399,7 +399,7 @@ function carryOverlap(text) {
 function legacyTokenSplit(text) {
   const result = [];
   const s = String(text || '');
-  if (!s) return result;
+  if (!s) {return result;}
   const words = s.split(/\s+/);
   let buffer = '';
   let bufferTokens = 0;
@@ -422,10 +422,10 @@ function legacyTokenSplit(text) {
 
 function tokenCount(text) {
   try {
-    if (typeof heuristicCountTokens === 'function') return heuristicCountTokens(text);
-  } catch {}
+    if (typeof heuristicCountTokens === 'function') {return heuristicCountTokens(text);}
+  } catch { /* noop */ }
   const s = String(text || '');
-  if (!s) return 0;
+  if (!s) {return 0;}
   const cjk = (s.match(/[\u4e00-\u9fff]/g) || []).length;
   const words = (s.match(/[\p{L}\p{N}_-]+/gu) || []).length;
   return Math.max(1, Math.round(cjk + words * 1.3));
@@ -451,7 +451,7 @@ class BM25Index {
   }
 
   _tokenize(text) {
-    if (!text) return [];
+    if (!text) {return [];}
     const t = String(text).toLowerCase();
     // CJK chars → individual tokens; words → whole word tokens.
     const out = [];
@@ -459,12 +459,12 @@ class BM25Index {
     const wordRe = /[\p{L}\p{N}_-]+/gu;
     let match;
     while ((match = wordRe.exec(t)) !== null) {
-      if (match[0].length >= 2) out.push(match[0]);
+      if (match[0].length >= 2) {out.push(match[0]);}
     }
     // CJK chars as individual tokens (bigrams would be better for recall,
     // but unigrams are fine for ranking and cheap to compute).
     for (const ch of t) {
-      if (/[\u4e00-\u9fff]/.test(ch)) out.push(ch);
+      if (/[\u4e00-\u9fff]/.test(ch)) {out.push(ch);}
     }
     return out;
   }
@@ -487,14 +487,14 @@ class BM25Index {
 
   score(query, docIndex) {
     const queryTokens = this._tokenize(query);
-    if (queryTokens.length === 0) return 0;
+    if (queryTokens.length === 0) {return 0;}
     const doc = this.docs[docIndex];
-    if (!doc) return 0;
+    if (!doc) {return 0;}
     const N = this.docs.length;
     let score = 0;
     for (const qt of queryTokens) {
       const f = doc.tokens.get(qt) || 0;
-      if (f === 0) continue;
+      if (f === 0) {continue;}
       const df = this.docFreq.get(qt) || 0;
       const idf = Math.max(0.0001, Math.log((N - df + 0.5) / (df + 0.5) + 1));
       const denom = f + BM25_K1 * (1 - BM25_B + BM25_B * (doc.length / Math.max(1, this.avgdl)));
@@ -508,7 +508,7 @@ class BM25Index {
     const scored = [];
     for (let i = 0; i < this.docs.length; i++) {
       const s = this.score(query, i);
-      if (s > 0) scored.push({ index: i, score: s });
+      if (s > 0) {scored.push({ index: i, score: s });}
     }
     scored.sort((a, b) => b.score - a.score);
     return scored.slice(0, max);
@@ -516,7 +516,7 @@ class BM25Index {
 }
 
 function getOrBuildBM25() {
-  if (bm25Cache) return bm25Cache;
+  if (bm25Cache) {return bm25Cache;}
   bm25Cache = new BM25Index(chunks);
   return bm25Cache;
 }
@@ -566,9 +566,9 @@ async function hybridSearch(query, scopedChunks, opts) {
     const scored = [];
     for (let i = 0; i < scopedChunks.length; i++) {
       const chunk = scopedChunks[i];
-      if (!chunk.embedding) continue;
+      if (!chunk.embedding) {continue;}
       let dot = 0;
-      for (let j = 0; j < qEmb.length; j++) dot += qEmb[j] * chunk.embedding[j];
+      for (let j = 0; j < qEmb.length; j++) {dot += qEmb[j] * chunk.embedding[j];}
       scored.push({ index: i, score: dot });
     }
     scored.sort((a, b) => b.score - a.score);
@@ -588,7 +588,7 @@ async function hybridSearch(query, scopedChunks, opts) {
       // position in scopedChunks. Do a linear remap via identity match on text.
       const r = semanticResults[i];
       const idx = scopedChunks.findIndex(c => c.text === r.text);
-      if (idx !== -1) semanticByIndex.set(idx, r.score);
+      if (idx !== -1) {semanticByIndex.set(idx, r.score);}
     }
     semanticResults = [...semanticByIndex.entries()]
       .map(([index, score]) => ({ index, score }))
@@ -760,18 +760,18 @@ function createDocumentAddTool() {
 }
 
 function inferSectionForChunk(chunkText, fullText, boundaries) {
-  if (!boundaries || boundaries.length === 0) return ['Content'];
+  if (!boundaries || boundaries.length === 0) {return ['Content'];}
   const needle = chunkText.trim().slice(0, 80);
-  if (!needle) return ['Content'];
+  if (!needle) {return ['Content'];}
   const pos = fullText.indexOf(needle);
-  if (pos === -1) return ['Content'];
+  if (pos === -1) {return ['Content'];}
   // Find the section whose [startChar, endChar] range contains pos
   for (const b of boundaries) {
-    if (pos >= b.startChar && pos <= b.endChar) return [b.heading];
+    if (pos >= b.startChar && pos <= b.endChar) {return [b.heading];}
   }
   // Fallback: closest preceding section
   let chosen = boundaries[0];
-  for (const b of boundaries) if (b.startChar <= pos) chosen = b;
+  for (const b of boundaries) {if (b.startChar <= pos) {chosen = b;}}
   return [chosen.heading];
 }
 
@@ -820,7 +820,7 @@ function createDocumentSearchTool() {
       });
 
       const results = (reranked.length > 0 ? reranked : hybrid).slice(0, maxResults);
-      for (const r of results) r.query = query;
+      for (const r of results) {r.query = query;}
 
       ctx?.ui?.debugEvent?.('Document search completed', {
         query,
@@ -932,7 +932,7 @@ function createDocumentClearTool() {
  * ===================================================================== */
 
 async function synthesizeWithLLM(question, evidenceItems, modelProvider) {
-  if (!modelProvider || typeof modelProvider.chat !== 'function') return null;
+  if (!modelProvider || typeof modelProvider.chat !== 'function') {return null;}
 
   const topEv = evidenceItems.slice(0, 5);
   const evidenceText = topEv.map((e, i) => {
@@ -1073,7 +1073,7 @@ async function buildStructuredAnswer(question, evidence, totalChunks, minScore, 
         c.references += 1;
         if (sectionPath) {
           const key = sectionPath.join(' › ');
-          if (!c.sections.some(s => s.join(' › ') === key)) c.sections.push(sectionPath);
+          if (!c.sections.some(s => s.join(' › ') === key)) {c.sections.push(sectionPath);}
         }
       }
     }
@@ -1092,7 +1092,7 @@ async function buildStructuredAnswer(question, evidence, totalChunks, minScore, 
   let answerMethod = 'fallback-extractive';
   if (modelProvider && typeof modelProvider.chat === 'function' && !lowRelevance) {
     synthesizedAnswer = await synthesizeWithLLM(question, evidenceItems, modelProvider);
-    if (synthesizedAnswer) answerMethod = 'llm-evidence-based';
+    if (synthesizedAnswer) {answerMethod = 'llm-evidence-based';}
   }
   if (!synthesizedAnswer) {
     const topSnippet = evidenceItems.slice(0, 2).map(e => e.snippet).join(' ');
@@ -1130,7 +1130,7 @@ async function buildStructuredAnswer(question, evidence, totalChunks, minScore, 
 }
 
 function condenseForAnswer(text, question, maxChars) {
-  if (!text) return '';
+  if (!text) {return '';}
   const queryTerms = new Set(
     (String(question || '').toLowerCase().match(/[\p{L}\p{N}_-]{2,}/gu) || [])
   );
@@ -1138,20 +1138,20 @@ function condenseForAnswer(text, question, maxChars) {
   const scored = sentences.map((s, i) => {
     const lower = s.toLowerCase();
     let hit = 0;
-    for (const t of queryTerms) if (lower.includes(t)) hit++;
+    for (const t of queryTerms) {if (lower.includes(t)) {hit++;}}
     return { text: s, score: hit, index: i };
   });
   scored.sort((a, b) => b.score - a.score || a.index - b.index);
   const picked = [];
   let used = 0;
   for (const s of scored) {
-    if (used + s.text.length > maxChars) break;
+    if (used + s.text.length > maxChars) {break;}
     picked.push(s);
     used += s.text.length;
   }
   picked.sort((a, b) => a.index - b.index);
   const out = picked.map(p => p.text).join(' ').trim();
-  if (!out) return text.slice(0, maxChars);
+  if (!out) {return text.slice(0, maxChars);}
   return out.length > maxChars ? out.slice(0, maxChars - 3) + '...' : out;
 }
 
@@ -1290,7 +1290,7 @@ async function withSuppressedPdfJsCanvasWarnings(fn) {
 
 function extractRelevantSnippet(text, query, maxLen) {
   const terms = extractSearchTerms(query || '');
-  if (terms.length === 0 || !text) return (text || '').slice(0, maxLen || 500);
+  if (terms.length === 0 || !text) {return (text || '').slice(0, maxLen || 500);}
 
   const lines = text.split('\n').filter(Boolean);
   const scored = lines.map((line) => {
@@ -1304,16 +1304,16 @@ function extractRelevantSnippet(text, query, maxLen) {
   });
   scored.sort((a, b) => b.score - a.score);
   const best = scored.find(m => m.score > 0.5);
-  if (!best) return (text || '').slice(0, maxLen || 500);
+  if (!best) {return (text || '').slice(0, maxLen || 500);}
 
   let startPos = 0;
-  for (let i = 0; i < best.index; i++) startPos += lines[i].length + 1;
+  for (let i = 0; i < best.index; i++) {startPos += lines[i].length + 1;}
   return text.substring(startPos, startPos + (maxLen || 500)).trim();
 }
 
 function formatSearchResults(results, meta = {}) {
   if (!results || results.length === 0) {
-    if (meta.minScore != null) {
+    if (meta.minScore !== null) {
       return `No document matches above min_score=${meta.minScore}. Try a lower min_score or broader query.`;
     }
     return 'No document matches found.';
@@ -1321,7 +1321,7 @@ function formatSearchResults(results, meta = {}) {
 
   const header = [
     `Found ${results.length} relevant snippet${results.length === 1 ? '' : 's'}${meta.totalChunks ? ` (from ${meta.totalChunks} indexed chunk${meta.totalChunks === 1 ? '' : 's'})` : ''}.`,
-    meta.minScore != null ? `min_score ≥ ${meta.minScore}` : null,
+    meta.minScore !== null ? `min_score ≥ ${meta.minScore}` : null,
   ].filter(Boolean).join(' ');
 
   const items = results.map((result, index) => {
@@ -1337,10 +1337,10 @@ function formatSearchResults(results, meta = {}) {
 
     const lines = [];
     lines.push(`#${index + 1} [${metadata.title || 'Untitled'}] ${scorePct}%`);
-    if (sectionPath) lines.push(`Section: ${sectionPath}`);
-    if (metadata.source) lines.push(`Source : ${metadata.source}`);
-    if (metadata.chunkIndex) lines.push(`Chunk  : ${metadata.chunkIndex}`);
-    if (typeof result.semanticScore === 'number') lines.push(`Semantic: ${result.semanticScore.toFixed(3)}`);
+    if (sectionPath) {lines.push(`Section: ${sectionPath}`);}
+    if (metadata.source) {lines.push(`Source : ${metadata.source}`);}
+    if (metadata.chunkIndex) {lines.push(`Chunk  : ${metadata.chunkIndex}`);}
+    if (typeof result.semanticScore === 'number') {lines.push(`Semantic: ${result.semanticScore.toFixed(3)}`);}
     if (typeof result.lexicalScore === 'number' && result.lexicalScore > 0) {
       lines.push(`Lexical (BM25) : ${result.lexicalScore.toFixed(3)}`);
     }
@@ -1365,10 +1365,10 @@ function rerankWithLexicalSignals(query, semanticResults) {
 
 function computeLexicalScore(query, text) {
   const queryTerms = extractSearchTerms(query);
-  if (queryTerms.length === 0) return 0;
+  if (queryTerms.length === 0) {return 0;}
   const normalizedText = normalizeSearchText(text);
   const matchedWeight = queryTerms.reduce((sum, term) => {
-    if (!normalizedText.includes(term.value)) return sum;
+    if (!normalizedText.includes(term.value)) {return sum;}
     return sum + term.weight;
   }, 0);
   const totalWeight = queryTerms.reduce((sum, term) => sum + term.weight, 0);
@@ -1390,7 +1390,7 @@ function extractSearchTerms(query) {
 
 function addSearchTerm(terms, value, weight) {
   const normalized = normalizeSearchText(value);
-  if (normalized.length < 2 || CHINESE_STOP_TERMS.has(normalized)) return;
+  if (normalized.length < 2 || CHINESE_STOP_TERMS.has(normalized)) {return;}
   terms.set(normalized, Math.max(terms.get(normalized) || 0, weight));
 }
 
@@ -1444,7 +1444,7 @@ function normalizeLimit(limit) {
 function removeDocument(documentId) {
   const existed = documents.delete(documentId);
   for (let i = chunks.length - 1; i >= 0; i--) {
-    if (chunks[i].metadata.documentId === documentId) chunks.splice(i, 1);
+    if (chunks[i].metadata.documentId === documentId) {chunks.splice(i, 1);}
   }
   if (existed) {
     bm25Cache = null;
@@ -1475,11 +1475,11 @@ function sanitizeId(value) {
 function inferKind(source, contentType = '') {
   const ext = extname(getURLSafePath(source)).toLowerCase();
   const type = contentType.toLowerCase();
-  if (ext === '.pdf' || type.includes('application/pdf')) return 'pdf';
-  if (ext === '.docx' || type.includes('wordprocessingml.document')) return 'docx';
-  if (ext === '.html' || ext === '.htm' || type.includes('text/html')) return 'html';
-  if (ext === '.json' || type.includes('application/json')) return 'json';
-  if (ext === '.md' || ext === '.markdown') return 'markdown';
+  if (ext === '.pdf' || type.includes('application/pdf')) {return 'pdf';}
+  if (ext === '.docx' || type.includes('wordprocessingml.document')) {return 'docx';}
+  if (ext === '.html' || ext === '.htm' || type.includes('text/html')) {return 'html';}
+  if (ext === '.json' || type.includes('application/json')) {return 'json';}
+  if (ext === '.md' || ext === '.markdown') {return 'markdown';}
   return 'text';
 }
 
