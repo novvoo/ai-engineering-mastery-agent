@@ -460,7 +460,7 @@ describe('Runtime Layer Integration Tests', () => {
       expect(config.platform).toBe(PlatformType.CLI);
       expect(config.workingDirectory).toBe(process.cwd());
       expect(config.debug).toBe(false);
-      expect(config.maxIterations).toBe(180);
+      expect(config.maxIterations).toBe(120);
       expect(config.autoDownloadModels).toBe(true);
       expect(config.enableMiddleware).toBe(true);
       expect(config.enableToolGroups).toBe(true);

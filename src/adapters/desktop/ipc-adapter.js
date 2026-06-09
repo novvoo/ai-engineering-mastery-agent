@@ -152,8 +152,10 @@ export class MessageQueue {
    * 添加消息到队列
    */
   enqueue(message) {
+    if (this.maxSize <= 0) {
+      return;
+    }
     if (this.queue.length >= this.maxSize) {
-      // 移除最旧的消息
       this.queue.shift();
     }
     this.queue.push(message);
@@ -210,6 +212,27 @@ export class IPCAdapterBase extends EventEmitter {
     this.reconnectAttempts = 0;
     this.heartbeatTimer = null;
     this.lastHeartbeat = Date.now();
+
+    // 保存子类可能定义的 send 实现
+    const subclassSend = typeof this.send === 'function' && this.send !== IPCAdapterBase.prototype.send
+      ? this.send.bind(this)
+      : null;
+
+    // 包装 send：统一检查连接状态 + 队列管理
+    const self = this;
+    this.send = async function (message) {
+      if (!self.isConnected) {
+        if (self.config.enableQueue) {
+          self.messageQueue.enqueue(message);
+          return null;
+        }
+        throw new Error('IPC 未连接');
+      }
+      if (subclassSend) {
+        return subclassSend(message);
+      }
+      return self._sendImpl(message);
+    };
   }
 
   /**
@@ -373,10 +396,26 @@ export class IPCAdapterBase extends EventEmitter {
   }
 
   /**
-   * 发送消息（子类实现）
+   * 发送消息（统一做连接状态检查和队列管理
+   * 子类应重写 _sendImpl() 实现实际发送逻辑
    */
   async send(message) {
-    throw new Error('send() 必须由子类实现');
+    if (!this.isConnected) {
+      if (this.config.enableQueue) {
+        this.messageQueue.enqueue(message);
+        return null;
+      }
+      throw new Error('IPC 未连接');
+    }
+    return this._sendImpl(message);
+  }
+
+  /**
+   * 实际发送逻辑（子类重写）
+   * @protected
+   */
+  async _sendImpl(message) {
+    throw new Error('_sendImpl() 必须由子类实现');
   }
 
   /**
@@ -1055,17 +1094,9 @@ export class RendererProcessIPCAdapter extends IPCAdapterBase {
   }
 
   /**
-   * 发送消息（不等待响应）
+   * 实际发送逻辑（重写基类方法，基类已统一做了连接状态检查和队列管理
    */
-  async send(message) {
-    if (!this.isConnected) {
-      if (this.config.enableQueue) {
-        this.messageQueue.enqueue(message);
-        return;
-      }
-      throw new Error('IPC 未连接');
-    }
-
+  async _sendImpl(message) {
     this.#ipcRenderer.send(message.type, message.toJSON());
     return message;
   }
