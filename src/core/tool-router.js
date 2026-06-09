@@ -296,20 +296,45 @@ export function shouldUseIntentClassifier(userInput) {
     return false;
   }
 
-  // 明确编码任务：不调用 LLM 意图识别（直接走编码流程，节省一次 LLM 往返）
-  const clearlyCoding = [
-    ...CODING_CONTEXT_KEYWORDS,
-    ...MODIFICATION_VERB_PATTERNS,
-    ...CODING_VERB_CONTEXT_PATTERNS,
+  // 非常明确的写操作任务（如"写一个 python 游戏"、"创建一个 html 文件"）：
+  // 可以跳过意图分类器，quickAssess 已能正确识别
+  const explicitlyModifying = MODIFICATION_VERB_PATTERNS.some(p => p.test(input));
+
+  // 但是：如果任务中包含"查看/检查/看下/看一下/检查一下"这类可能是纯检查
+  // 或条件式修改的措辞（如"看下 index.html，如果没有 init() 就添加一个"），
+  // 那就应该调用意图分类器，让 LLM 准确判断 requiresCodeModification
+  const possiblyReadOnly = [
+    /查看|检查|看下|看一下|分析一下|浏览|阅读|检查一下|检查是否|看下是否|查看是否|先看|先检查/,
+    /\b(inspect|check|view|read|list|count|show|search|find|browse|analyze|review|look at|take a look)\b/,
   ].some(pattern => pattern.test(input));
 
-  if (clearlyCoding) {
+  if (explicitlyModifying && !possiblyReadOnly) {
+    // 纯写操作，不需要意图分类器
     return false;
   }
 
-  // 外部查询类（天气、新闻、实时数据等）：可能需要 LLM 意图识别来做更好 routing
-  return [
+  // 外部查询类（天气、新闻、实时数据等）：需要意图分类器路由
+  const asksForFreshData = [
     /天气|气温|新闻|最新|今天|现在|当前|实时|汇率|价格|股价|比分|赛程|政策|法规/,
     /\b(weather|news|latest|today|now|current|real[- ]?time|price|stock|exchange rate|schedule|score|law|regulation)\b/,
   ].some(pattern => pattern.test(input));
+
+  if (asksForFreshData) {
+    return true;
+  }
+
+  // 模棱两可的编码任务（含"查看/检查"或仅提到代码语言/文件）：
+  // 调用意图分类器来判断是否需要修改
+  const hasCodingContext = [
+    ...CODING_CONTEXT_KEYWORDS,
+    ...CODING_VERB_CONTEXT_PATTERNS,
+  ].some(pattern => pattern.test(input));
+
+  if (hasCodingContext) {
+    // 有编码上下文但不是明确写操作 → 调用意图分类器让 LLM 判断
+    return true;
+  }
+
+  // 完全非编码的一般对话类任务 → 也可以调用意图分类器做 routing
+  return true;
 }

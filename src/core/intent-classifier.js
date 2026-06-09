@@ -59,6 +59,8 @@ export class IntentClassifier {
       `- intent: ${intent.intent}`,
       `- confidence: ${intent.confidence}`,
       `- normalized task: ${intent.normalizedTask || 'none'}`,
+      `- isCodingRelated: ${intent.isCodingRelated ? 'true' : 'false'}`,
+      `- requiresCodeModification: ${intent.requiresCodeModification ? 'true' : 'false'}`,
       `- requires fresh data: ${intent.requiresFreshData ? 'true' : 'false'}`,
     ];
 
@@ -111,16 +113,26 @@ export class IntentClassifier {
       '  "intent": "weather_query | web_research | local_file_task | terminal_task | coding_task | git_task | schedule_task | explanation | general_chat | unknown",',
       '  "confidence": 0.0,',
       '  "normalizedTask": "clear task in the user language",',
+      '  "isCodingRelated": true,',
+      '  "requiresCodeModification": false,',
       '  "slots": {},',
       '  "requiresFreshData": false,',
       '  "recommendedTools": [],',
       '  "firstActionHint": {"tool": "tool_name", "arguments": {}}',
       '}',
       '',
+      'Important:',
+      '- Set isCodingRelated=true if the message asks about source code, programming, scripts, files containing code, tests, builds, code quality, or any programming-related topic.',
+      '- Set requiresCodeModification=true only if the message explicitly asks to CREATE, EDIT, MODIFY, FIX, REFACTOR, OPTIMIZE, ADD, REMOVE, DELETE, INSERT, REPLACE, UPDATE, WRITE, DEVELOP, IMPLEMENT, BUILD, or otherwise CHANGE source code, files, programs, scripts, functions, modules, features, or components. Pure reading, checking, viewing, inspecting, or asking about existing code does NOT require modification.',
+      '',
       'Important examples:',
       '- "上海天气" means a weather_query for location 上海, likely today/current weather.',
       '- "明天北京会下雨吗" means a weather_query for 北京 with date 明天.',
       '- "最新汇率" and "今天新闻" require fresh public data.',
+      '- "帮我看下 index.html 中有没有 init()" → local_file_task, isCodingRelated=true, requiresCodeModification=false (reading only)',
+      '- "index.html 中 init() 没有调用，帮我修复" → coding_task, isCodingRelated=true, requiresCodeModification=true',
+      '- "创建一个 index.html 页面" → coding_task, isCodingRelated=true, requiresCodeModification=true',
+      '- "检查一下项目的 js 文件是否正确" → local_file_task or coding_task, isCodingRelated=true, requiresCodeModification=false (reading only)',
       '- File, terminal, coding, git, and schedule requests should be routed to the matching tool family when available.',
     ].join('\n');
   }
@@ -189,6 +201,8 @@ export class IntentClassifier {
       ? value.recommendedTools.filter(tool => typeof tool === 'string' && this.#toolRegistry?.has?.(tool))
       : [];
     const firstActionHint = this.#normalizeFirstActionHint(value.firstActionHint);
+    const isCodingRelated = Boolean(value.isCodingRelated);
+    const requiresCodeModification = Boolean(value.requiresCodeModification);
 
     if (firstActionHint?.tool && !recommendedTools.includes(firstActionHint.tool)) {
       recommendedTools.unshift(firstActionHint.tool);
@@ -200,6 +214,8 @@ export class IntentClassifier {
       normalizedTask: typeof value.normalizedTask === 'string' ? value.normalizedTask.trim() : '',
       slots: value.slots && typeof value.slots === 'object' && !Array.isArray(value.slots) ? value.slots : {},
       requiresFreshData: Boolean(value.requiresFreshData),
+      isCodingRelated,
+      requiresCodeModification,
       recommendedTools,
       firstActionHint,
     };
@@ -243,6 +259,8 @@ export class IntentClassifier {
       intent: 'weather_query',
       confidence: 0.86,
       normalizedTask: `查询${query}`,
+      isCodingRelated: false,
+      requiresCodeModification: false,
       slots: {
         ...(location ? { location } : {}),
         date: this.#inferDateSlot(input),

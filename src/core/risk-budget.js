@@ -328,14 +328,14 @@ export function deepAssess(quickResult, filePaths = []) {
 
 // =============================================================
 // Intent 合并：将 IntentClassifier 的结果合并到 quickAssess 结果中
-// 这解决了"重复关键词判断"问题 —— LLM 意图识别结果优先于硬编码启发式
+// 核心原则：
+//   1) 如果有 LLM intent 结果且置信度够高 → 优先使用 LLM 判定的
+//      isCodingRelated 和 requiresCodeModification（智能化判断）
+//   2) 没有 intent 或置信度不够 → 保留 quickAssess 的硬编码 pattern 结果
 //
-// 映射规则：
-// - coding_task → isCodingTask=true，检查 normalizedTask 是否含写操作 → isModificationTask
-// - local_file_task → isCodingTask=true，检查 normalizedTask 是否有写操作
-// - terminal_task → isCodingTask=true，isModificationTask=可能需要也可能不需要（默认true保守）
-// - git_task → isCodingTask=true，isModificationTask=true（git 操作通常会影响仓库）
-// - weather_query / web_research / explanation / general_chat / unknown → 不视为编码任务
+// 这样："帮我看下 index.html 中有没有 init()，没有就添加一个" 这种任务，
+// 即使硬编码 pattern 没匹配到写操作，LLM 的 requiresCodeModification=true
+// 也能正确识别为 modification 任务。
 //
 // 置信度阈值：>=0.75 才覆盖，否则保留 quickAssess 结果
 // =============================================================
@@ -360,22 +360,35 @@ export function mergeIntentProfile(quickResult, intent, userInput = '') {
     return quickResult;
   }
 
-  const isCodingByIntent = CODING_INTENTS.has(intentName);
+  // 优先使用 LLM 直接判定的 isCodingRelated 和 requiresCodeModification
+  // fallback 到旧的 intent name + pattern 组合，以兼容旧版 IntentClassifier
+  let isCodingByIntent = CODING_INTENTS.has(intentName);
+  let isModificationByIntent = false;
 
-  // normalizedTask 中是否包含写操作语义（用于判断 modification）
-  const normalizedText = String(intent.normalizedTask || userInput || '').toLowerCase();
-  const hasModificationByIntent =
-    MODIFICATION_INTENTS.has(intentName) ||
-    MODIFICATION_VERB_PATTERNS.some((p) => p.test(normalizedText)) ||
-    CODING_VERB_CONTEXT_PATTERNS.some((p) => p.test(normalizedText));
+  if (typeof intent.isCodingRelated === 'boolean') {
+    isCodingByIntent = intent.isCodingRelated;
+  }
+  if (typeof intent.requiresCodeModification === 'boolean') {
+    isModificationByIntent = intent.requiresCodeModification;
+  } else {
+    // fallback: 用 pattern + intent name 判断（保留旧逻辑，不丢失功能）
+    const normalizedText = String(intent.normalizedTask || userInput || '').toLowerCase();
+    isModificationByIntent =
+      MODIFICATION_INTENTS.has(intentName) ||
+      MODIFICATION_VERB_PATTERNS.some((p) => p.test(normalizedText)) ||
+      CODING_VERB_CONTEXT_PATTERNS.some((p) => p.test(normalizedText));
 
-  // 只读模式：local_file_task + 明确的只读关键词 → 不改代码
-  const isReadOnly =
-    !MODIFICATION_INTENTS.has(intentName) &&
-    READ_ONLY_PATTERNS.some((p) => p.test(normalizedText));
+    // 只读模式兜底
+    const isReadOnly =
+      !MODIFICATION_INTENTS.has(intentName) &&
+      READ_ONLY_PATTERNS.some((p) => p.test(normalizedText));
+    if (isReadOnly) {
+      isModificationByIntent = false;
+    }
+  }
 
   const finalIsCoding = isCodingByIntent;
-  const finalIsModification = finalIsCoding && hasModificationByIntent && !isReadOnly;
+  const finalIsModification = finalIsCoding && isModificationByIntent;
 
   const semanticDomains = (quickResult && quickResult.semanticDomains) || [];
   const baseScore = (quickResult && quickResult.score) || 0;
