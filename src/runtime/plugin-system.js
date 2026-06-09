@@ -749,6 +749,44 @@ export class PluginManager {
   }
 
   /**
+   * 检测循环依赖（DFS + 三色标记法）
+   * @private
+   * @param {string} startNode - 起始插件名
+   * @param {Map<string, string[]>} graph - 依赖图（插件名 → 依赖数组）
+   * @returns {string[]|null} 循环路径，无则返回 null
+   */
+  #detectCircularDependency(startNode, graph) {
+    const WHITE = 0, GRAY = 1, BLACK = 2;
+    const color = new Map();
+    for (const node of graph.keys()) color.set(node, WHITE);
+
+    const path = [];
+    const dfs = (node) => {
+      color.set(node, GRAY);
+      path.push(node);
+      const deps = graph.get(node) || [];
+      for (const dep of deps) {
+        if (!graph.has(dep)) continue; // 未注册的依赖跳过
+        const c = color.get(dep);
+        if (c === GRAY) {
+          // 找到环
+          const idx = path.indexOf(dep);
+          return path.slice(idx).concat(dep);
+        }
+        if (c === WHITE) {
+          const res = dfs(dep);
+          if (res) return res;
+        }
+      }
+      path.pop();
+      color.set(node, BLACK);
+      return null;
+    };
+
+    return dfs(startNode);
+  }
+
+  /**
    * 注册插件
    */
   async register(plugin, options = {}) {
@@ -761,9 +799,24 @@ export class PluginManager {
       return false;
     }
     
-    // 检查依赖
-    if (plugin.dependencies && plugin.dependencies.length > 0) {
-      const missingDeps = plugin.dependencies.filter(dep => !this.#plugins.has(dep));
+    const deps = plugin.dependencies || [];
+
+    // 1) 自依赖检测
+    if (deps.includes(plugin.name)) {
+      throw new Error(`插件 "${plugin.name}" 不能依赖自身`);
+    }
+
+    // 2) 循环依赖检测（在当前依赖图基础上加入新插件后检测）
+    const tempGraph = new Map(this.#dependencyGraph);
+    tempGraph.set(plugin.name, deps);
+    const cycle = this.#detectCircularDependency(plugin.name, tempGraph);
+    if (cycle) {
+      throw new Error(`插件 "${plugin.name}" 存在循环依赖: ${cycle.join(' → ')}`);
+    }
+    
+    // 3) 缺失依赖抛错
+    if (deps.length > 0) {
+      const missingDeps = deps.filter(dep => !this.#plugins.has(dep));
       if (missingDeps.length > 0) {
         throw new Error(`插件 "${plugin.name}" 缺少依赖: ${missingDeps.join(', ')}`);
       }

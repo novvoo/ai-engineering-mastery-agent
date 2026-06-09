@@ -481,9 +481,13 @@ export class RuntimeEventBus extends EventEmitter {
       }
     }
 
-    // 检查数据过滤函数
+    // 检查数据过滤函数（安全地捕获异常）
     if (filter.dataFilter && typeof filter.dataFilter === 'function') {
-      if (!filter.dataFilter(eventData)) {
+      try {
+        if (!filter.dataFilter(eventData)) {
+          return false;
+        }
+      } catch (err) {
         return false;
       }
     }
@@ -799,11 +803,14 @@ let instance = null;
 
 /**
  * 获取事件总线单例实例
- * @param {Object} options - 配置选项
+ * @param {Object} options - 配置选项（可选，提供时会重建实例应用新配置）
  * @returns {RuntimeEventBus} 事件总线实例
  */
 export function getEventBus(options) {
   if (!instance) {
+    instance = new RuntimeEventBus(options);
+  } else if (options) {
+    instance.clear();
     instance = new RuntimeEventBus(options);
   }
   return instance;

@@ -49,22 +49,31 @@ export const RuntimeEvent = {
 };
 
 /**
+ * 默认最大迭代次数 —— 运行时层与 Agent 层共享的单一数据源
+ * 对于编码类任务，120 次迭代是一个合理的中间值：
+ *   - 简单任务: risk-budget 会按比例缩减 (25%~50%)
+ *   - 复杂任务: risk-budget 会按比例扩容 (85%~100%)
+ */
+export const MAX_ITERATIONS_DEFAULT = 120;
+
+/**
  * 运行时配置类
  */
 export class RuntimeConfig {
   constructor(options = {}) {
-    this.platform = options.platform || PlatformType.CLI;
-    this.workingDirectory = options.workingDirectory || process.cwd();
-    this.debug = options.debug || false;
-    this.modelProvider = options.modelProvider;
-    this.autoDownloadModels = options.autoDownloadModels !== false;
-    this.maxIterations = options.maxIterations || 60;
+    const opts = options || {};
+    this.platform = opts.platform || PlatformType.CLI;
+    this.workingDirectory = opts.workingDirectory || process.cwd();
+    this.debug = opts.debug || false;
+    this.modelProvider = opts.modelProvider;
+    this.autoDownloadModels = opts.autoDownloadModels !== false;
+    this.maxIterations = opts.maxIterations || MAX_ITERATIONS_DEFAULT;
     
     // 新增配置项
-    this.pluginConfig = options.pluginConfig || {};
-    this.enableMiddleware = options.enableMiddleware !== false;
-    this.enableToolGroups = options.enableToolGroups !== false;
-    this.hookTimeout = options.hookTimeout || 5000; // 钩子超时时间（毫秒）
+    this.pluginConfig = opts.pluginConfig || {};
+    this.enableMiddleware = opts.enableMiddleware !== false;
+    this.enableToolGroups = opts.enableToolGroups !== false;
+    this.hookTimeout = opts.hookTimeout || 5000; // 钩子超时时间（毫秒）
   }
 
   /**
