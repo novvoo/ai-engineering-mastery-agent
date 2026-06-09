@@ -16,11 +16,13 @@ import { selectToolsForRequest, shouldUseIntentClassifier } from './tool-router.
 import { WorkspaceState } from './workspace-state.js';
 import { ObservationSummarizer } from './observation-summarizer.js';
 import { ContentAddressableStore, FileAnalyzer } from './harness/content-addressing.js';
+import { quickAssess, deepAssess, computeIterationBudget as rbComputeIterationBudget, RISK_LEVEL, getCompletionGates, getMethodologyGuidance } from './risk-budget.js';
+import { isMutationEvent as evIsMutationEvent, isRuntimeVerificationEvent, isSemanticRiskReviewEvent as evIsSemanticRiskReviewEvent, checkCompletionGates as evCheckCompletionGates, crossCheckVerifyClaim, finalAnswerMentionsVerification } from './evidence-verifier.js';
+import { MAX_ITERATIONS_DEFAULT } from '../runtime/types.js';
 import { readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 
 const TERMINATION_KEYWORDS = ['FINAL_ANSWER:', 'Answer:', 'TASK_COMPLETE'];
-const MAX_ITERATIONS_DEFAULT = 120;
 
 // 自适应迭代预算（占 maxIterations 的比例）
 const ITERATION_BUDGET = {
@@ -1802,60 +1804,28 @@ export class ReActAgent {
   }
 
   #classifyTask(userInput) {
-    const input = String(userInput || '').toLowerCase();
-    const isCodingTask = [
-      /写.*代码|写.*html|写.*js|写.*css|创建.*文件|新建.*文件|修改.*代码|改.*代码|修复|实现|创建|新建|开发|生成|重构|跑.*测试|运行.*测试|集成测试|单元测试|提交|push/,
-      /(写一个|做一个|创建|新建|实现|开发).*(工程化|程序|应用|工具|脚本|项目|游戏|网站|页面|系统)/,
-      /2048|游戏|浏览器.*应用|网页.*应用/,
-      /\b(code|coding|implement|fix|bug|refactor|unit test|integration test|test suite|bun test|run tests?|write tests?|add tests?|html|css|javascript|typescript|commit|push)\b/,
-      /\b(create|write|edit|modify|update|change)\b.*\b(file|code|html|css|js|javascript|ts|typescript|component|function|class|module|test)\b/,
-    ].some(pattern => pattern.test(input));
+    const risk = quickAssess(userInput);
 
-    const isModificationTask = [
-      /写.*代码|写.*html|写.*js|写.*css|创建.*文件|新建.*文件|修改.*代码|改.*代码|修复|实现|创建|新建|开发|生成|写一个|做一个|放在|中创建|重构|提交|push/,
-      /2048.*\.(html|js)\b|\.(html|js)\b.*2048|index\.html|game\.js/,
-      /\b(implement|fix|refactor|commit|push)\b/,
-      /\b(create|write|edit|modify|update|change)\b.*\b(file|code|html|css|js|javascript|ts|typescript|component|function|class|module|test)\b/,
-    ].some(pattern => pattern.test(input));
+    const mentionsMultipleArtifacts = /(多个|拆分|分离|接口|controller|route|schema|resolver|service|component|module|html.*js|js.*html|css|测试)/i.test(String(userInput || ''))
+      || /\b(multiple|separate|split|html.*js|js.*html|css|tests?|docs?|route|controller|schema|resolver|endpoint|component|service|module)\b/i.test(String(userInput || ''));
+    const likelyFeatureWork = /(实现|创建|新建|写一个|做一个|开发|生成)/i.test(String(userInput || ''))
+      || /\b(implement|create|build|write|develop|generate|add)\b/i.test(String(userInput || ''));
 
-    const isBugTask = [
-      /bug|error|exception|failed|failing|broken|hang|stuck|报错|错误|失败|崩溃|卡住|没响应|没有响应|修复/,
-    ].some(pattern => pattern.test(input));
-
-    const isLikelyTrivial = [
-      /typo|拼写|文案|注释|comment|rename only|只改名/,
-      /简单|小.*(文件|页面|html)|单个.*(文件|页面|html)|独立.*(文件|页面|html)|直接.*(创建|写入|写)|demo|示例|standalone|single[- ]file|simple/,
-      /(创建|新建|写).*(html\s*文件|\.html)/,
-      /\.html\b.*\b(write[_ -]?file|writefile|read[_ -]?file|readfile)\b/,
-    ].some(pattern => pattern.test(input));
-
-    const mentionsMultipleArtifacts = [
-      /多个|拆分|分离|html.*js|js.*html|和.*中创建|目录|文件|css|测试|文档|接口|controller|route|schema|resolver/,
-      /\b(multiple|separate|split|html.*js|js.*html|css|tests?|docs?|route|controller|schema|resolver|endpoint|component|service)\b/,
-    ].some(pattern => pattern.test(input));
-    const likelyFeatureWork = [
-      /实现|创建|新建|写一个|做一个|开发|生成/,
-      /\b(implement|create|build|write|develop|generate|add)\b/,
-    ].some(pattern => pattern.test(input));
-    const requiresAutomaticPlanning = isCodingTask &&
-      isModificationTask &&
-      !isLikelyTrivial &&
-      (mentionsMultipleArtifacts || likelyFeatureWork || isBugTask);
-
-    const semanticRiskDomains = this.#inferSemanticRiskDomains(userInput);
-    const requiresSemanticRiskReview = isCodingTask &&
-      isModificationTask &&
-      semanticRiskDomains.length > 0 &&
-      !isLikelyTrivial;
+    const requiresAutomaticPlanning = risk.isCodingTask &&
+      risk.riskLevel !== RISK_LEVEL.LOW &&
+      (mentionsMultipleArtifacts || likelyFeatureWork || risk.isBugTask);
 
     return {
-      isCodingTask,
-      isModificationTask,
-      isBugTask,
-      isLikelyTrivial,
+      isCodingTask: risk.isCodingTask,
+      isModificationTask: risk.isCodingTask,
+      isBugTask: risk.isBugTask,
+      isLikelyTrivial: risk.isLikelyTrivial,
       requiresAutomaticPlanning,
-      requiresSemanticRiskReview,
-      semanticRiskDomains,
+      requiresSemanticRiskReview: risk.semanticDomains.length > 0 && risk.isCodingTask && !risk.isLikelyTrivial,
+      semanticRiskDomains: risk.semanticDomains,
+      riskLevel: risk.riskLevel,
+      riskScore: risk.score,
+      riskReasons: risk.reasons,
     };
   }
 
@@ -2003,18 +1973,22 @@ export class ReActAgent {
   }
 
   #buildCodingTaskOperatingPrompt(userInput) {
-    // NOTE: the verification strategy helper is async; the caller prepends it
-    // into the same user-message via `await`. We build it lazily in run().
     const hasMethodologyTools = this.#hasAnyTool(METHODOLOGY_TOOLS);
-    const methodologyLine = hasMethodologyTools
-      ? 'Use the built-in methodology tools proactively when they fit: setup only when project context is missing, coverage_check before uncertain/RAG/web answers, diagnose for bugs, grill/zoom_out for unclear or shared changes, brainstorm/tdd before implementation when non-trivial, to_prd/to_issues for formal planning, review after editing, and verify before completion. For a small standalone file creation, do not run setup repeatedly; write the file and inspect it.'
-      : 'Use the same methodology directly in your reasoning because methodology tools are not registered in this runtime.';
+    const riskLevel = this.#activeTaskProfile?.riskLevel || RISK_LEVEL.MEDIUM;
+    const profile = this.#activeTaskProfile || {};
+
+    let methodologyLine;
+    if (hasMethodologyTools) {
+      methodologyLine = getMethodologyGuidance(riskLevel, profile);
+    } else {
+      methodologyLine = 'Use the same methodology directly in your reasoning because methodology tools are not registered in this runtime.';
+    }
 
     return (
       `Coding task mode is active for the previous user request:\n${userInput}\n\n` +
-      `Act like a responsible coding agent. First understand the repo with tools, then make the smallest necessary change, then verify with fresh evidence.\n` +
+      `Risk level: ${riskLevel}. Act like a responsible coding agent. First understand the repo with tools, then make the smallest necessary change, then verify with fresh evidence.\n` +
       `${methodologyLine}\n` +
-      `${this.#activeTaskProfile?.requiresSemanticRiskReview ? `${this.#buildSemanticRiskGuidance()}\n` : ''}` +
+      `${profile.requiresSemanticRiskReview ? `${this.#buildSemanticRiskGuidance()}\n` : ''}` +
       `For file creation or file edits, prefer write_file/edit_file directly when available; shell is for inspection, commands, and verification, not a substitute for editing files.\n` +
       `Strict verification rules — read these carefully and obey them every time:\n` +
       `1. Any code/file you write or edit MUST be inspected after creation (read_file, list_dir, or equivalent) to confirm the content matches your intent.\n` +
@@ -2040,62 +2014,54 @@ export class ReActAgent {
     }
 
     const successfulEvents = this.#runToolEvents.filter(event => event.success);
-    const methodologyEvents = successfulEvents.filter(event => METHODOLOGY_TOOLS.has(event.name));
-    const mutationEvents = successfulEvents.filter(event => this.#isMutationEvent(event));
-    const verificationEvents = successfulEvents.filter(event => this.#isVerificationEvent(event));
-    const semanticRiskReviewEvents = successfulEvents.filter(event => this.#isSemanticRiskReviewEvent(event));
-    const hasMethodologyTools = this.#hasAnyTool(METHODOLOGY_TOOLS);
-    const hasFileWriteTool = this.#toolRegistry.has('write_file') || this.#toolRegistry.has('edit_file');
 
-    const evidence = {
-      methodologyTools: methodologyEvents.map(event => event.name),
-      mutationTools: mutationEvents.map(event => event.name),
-      verificationTools: verificationEvents.map(event => event.name),
-      semanticRiskReviewTools: semanticRiskReviewEvents.map(event => event.name),
-    };
+    // 用 evidence-verifier 评估
+    const gates = getCompletionGates(this.#activeTaskProfile.riskLevel, this.#activeTaskProfile);
+    const gateResult = evCheckCompletionGates(successfulEvents, gates, this.#activeTaskProfile);
 
+    // automatic_plan 检查保留（与 evidence-verifier 独立）
     if (this.#activeExecutionPlan && this.#activeExecutionPlan.status !== TaskStatus.COMPLETED) {
       return {
         block: true,
         reason: 'automatic_plan_incomplete',
         evidence: {
-          ...evidence,
           automaticPlan: this.#summarizePlanProgress(this.#activeExecutionPlan),
+          ...gateResult.summary,
         },
       };
     }
 
+    // 0 tool evidence
     if (successfulEvents.length === 0) {
-      return { block: true, reason: 'no_tool_evidence', evidence };
+      return {
+        block: true,
+        reason: 'no_tool_evidence',
+        evidence: gateResult.summary,
+      };
     }
 
-    if (hasMethodologyTools && !this.#activeTaskProfile.isLikelyTrivial && methodologyEvents.length === 0) {
-      return { block: true, reason: 'missing_methodology_step', evidence };
+    // evidence-verifier 给的其他缺失项
+    if (gateResult.block) {
+      return {
+        block: true,
+        reason: gateResult.reason,
+        missing: gateResult.missing,
+        evidence: gateResult.summary,
+      };
     }
 
-    if (hasFileWriteTool && this.#activeTaskProfile.isModificationTask && mutationEvents.length === 0) {
-      return { block: true, reason: 'missing_code_change', evidence };
+    // final answer 必须诚实提到验证
+    const hasMutation = gateResult.summary?.mutationEvents?.length > 0;
+    const checkSummary = finalAnswerMentionsVerification(text, hasMutation);
+    if (!checkSummary.ok) {
+      return {
+        block: true,
+        reason: checkSummary.reason,
+        evidence: gateResult.summary,
+      };
     }
 
-    if (mutationEvents.length > 0 && verificationEvents.length === 0) {
-      return { block: true, reason: 'missing_verification', evidence };
-    }
-
-    if (
-      this.#activeTaskProfile.requiresSemanticRiskReview &&
-      mutationEvents.length > 0 &&
-      semanticRiskReviewEvents.length === 0
-    ) {
-      return { block: true, reason: 'missing_semantic_risk_review', evidence };
-    }
-
-    const claimsDone = /done|completed|successfully|created|updated|fixed|implemented|完成|已完成|成功|创建|修改|修复|实现/.test(text.toLowerCase());
-    const mentionsVerification = /test|verify|verified|check|passed|validation|验证|测试|检查|通过/.test(text.toLowerCase());
-    if (mutationEvents.length > 0 && claimsDone && !mentionsVerification) {
-      return { block: true, reason: 'final_answer_missing_verification_summary', evidence };
-    }
-
-    return { block: false, evidence };
+    return { block: false, evidence: gateResult.summary };
   }
 
   #buildCodingCompletionGatePrompt(userInput, gate) {
@@ -2129,29 +2095,11 @@ export class ReActAgent {
   }
 
   #isMutationEvent(event) {
-    if (!MUTATION_TOOLS.has(event.name)) {
-      return false;
-    }
-
-    if (event.name === 'shell' || event.name === 'pty_start' || event.name === 'pty_write') {
-      const command = String(event.args?.command || event.args?.input || event.args?.text || '').toLowerCase();
-      return /(^|\s)(bun|npm|pnpm|yarn|npx|node|python|pytest|vitest|jest|eslint|tsc|git|mkdir|touch|cp|mv|rm|sed|perl)\b|>|>>|apply_patch/.test(command);
-    }
-
-    return true;
+    return evIsMutationEvent(event);
   }
 
   #isVerificationEvent(event) {
-    if (!VERIFICATION_TOOLS.has(event.name)) {
-      return false;
-    }
-
-    if (event.name === 'shell' || event.name === 'pty_start' || event.name === 'pty_read') {
-      const command = String(event.args?.command || event.args?.input || event.args?.text || '').toLowerCase();
-      return /\b(test|lint|check|verify|build|typecheck|tsc|jest|vitest|pytest|bun|node|npm|pnpm|yarn|cat|sed|ls|find|rg)\b/.test(command);
-    }
-
-    return true;
+    return isRuntimeVerificationEvent(event);
   }
 
   #isSemanticRiskReviewEvent(event) {
@@ -2205,23 +2153,11 @@ export class ReActAgent {
    */
   #computeIterationBudget(taskProfile) {
     const maxIterations = this.#config.maxIterations || MAX_ITERATIONS_DEFAULT;
-    let ratio;
 
     if (!taskProfile) {
-      ratio = ITERATION_BUDGET.normal;
-    } else if (taskProfile.isLikelyTrivial) {
-      ratio = ITERATION_BUDGET.trivial;
-    } else if (!taskProfile.isCodingTask) {
-      ratio = ITERATION_BUDGET.simple;
-    } else if (taskProfile.requiresAutomaticPlanning || taskProfile.isBugTask) {
-      ratio = ITERATION_BUDGET.intensive;
-    } else if (taskProfile.isCodingTask) {
-      ratio = ITERATION_BUDGET.normal;
-    } else {
-      ratio = ITERATION_BUDGET.normal;
+      return Math.round(maxIterations * 0.5);
     }
-
-    return Math.max(1, Math.round(maxIterations * ratio));
+    return rbComputeIterationBudget(taskProfile.riskLevel || taskProfile, maxIterations);
   }
 
   /**

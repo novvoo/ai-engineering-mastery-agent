@@ -75,11 +75,15 @@ export default function verify() {
         .map((e) => e.trim())
         .filter(Boolean);
 
-      const results = evaluateCriteria(criteriaList, evidenceList);
+      // Cross-check: does the claim self-reference with keywords that are
+      // NOT present in evidence?  e.g. claim="all tests pass" evidence=[]
+      const crossWarnings = crossCheckClaimAgainstEvidence(claim, evidenceList);
 
-      const conclusion = drawConclusion(results);
+      const results = evaluateCriteria(criteriaList, evidenceList, crossWarnings);
 
-      return formatVerificationReport(claim, criteriaList, evidenceList, results, conclusion);
+      const conclusion = drawConclusion(results, crossWarnings);
+
+      return formatVerificationReport(claim, criteriaList, evidenceList, results, conclusion, crossWarnings);
     },
   };
 }
@@ -88,7 +92,7 @@ export default function verify() {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-function evaluateCriteria(criteriaList, evidenceList) {
+function evaluateCriteria(criteriaList, evidenceList, crossWarnings = []) {
   return criteriaList.map((criterion, index) => {
     const matchedEvidence = findMatchingEvidence(criterion, evidenceList);
 
@@ -179,10 +183,51 @@ function isSpecificEvidence(evidence, criterion) {
   return domainWords.some((word) => evidenceLower.includes(word));
 }
 
-function drawConclusion(results) {
+// ---------------------------------------------------------------------------
+// Cross-check: does the claim contain keywords that are NOT present in evidence?
+// e.g. claim="All tests pass" but evidence=["code written"] → warning
+// ---------------------------------------------------------------------------
+function crossCheckClaimAgainstEvidence(claim, evidenceList) {
+  const warnings = [];
+  const claimLower = String(claim || '').toLowerCase();
+  const evidenceJoined = evidenceList.join(' ').toLowerCase();
+
+  // Test-related claims need test evidence
+  const testKeywords = ['test', 'tests', 'pass', 'passed', 'lint', 'build', 'compile', 'typecheck', 'verify', '验证', '测试', '通过'];
+  if (testKeywords.some(k => claimLower.includes(k))) {
+    const evidenceHasTest = testKeywords.some(k => evidenceJoined.includes(k))
+      || /\b(run|executed|ran|passed|passing|0 failing)\b/i.test(evidenceJoined)
+      || /\b(node|npm|pnpm|bun|python|pytest|cargo|go)\b/i.test(evidenceJoined);
+    if (!evidenceHasTest && evidenceList.length < 3) {
+      warnings.push('claim_references_tests_but_evidence_lacks_verification_details');
+    }
+  }
+
+  // Modification claims need modification evidence
+  const modifyKeywords = ['implement', 'implemented', 'created', 'modified', 'changed', 'fixed', 'added', 'refactor', '实现', '创建', '修改', '修复', '写了'];
+  if (modifyKeywords.some(k => claimLower.includes(k))) {
+    const evidenceHasModify = modifyKeywords.some(k => evidenceJoined.includes(k))
+      || /\b(file|files|write|write_file|edit_file|edit)\b/i.test(evidenceJoined);
+    if (!evidenceHasModify && evidenceList.length < 3) {
+      warnings.push('claim_references_changes_but_evidence_lacks_file_details');
+    }
+  }
+
+  // Empty evidence with non-trivial claim
+  if (evidenceList.length === 0 && claimLower.length > 10) {
+    warnings.push('claim_made_without_any_evidence_items');
+  }
+
+  return warnings;
+}
+
+function drawConclusion(results, crossWarnings = []) {
   const passCount = results.filter((r) => r.status === 'PASS').length;
   const failCount = results.filter((r) => r.status === 'FAIL').length;
   const needsCheckCount = results.filter((r) => r.status === 'NEEDS_CHECK').length;
+
+  // Cross-check warnings downgrade the verdict even if criteria "PASS"
+  const hasCrossWarning = crossWarnings.length > 0;
 
   if (failCount > 0) {
     return {
@@ -192,10 +237,10 @@ function drawConclusion(results) {
     };
   }
 
-  if (needsCheckCount > 0) {
+  if (needsCheckCount > 0 || hasCrossWarning) {
     return {
       verdict: 'NEED_MORE_INFO',
-      summary: `${passCount}/${results.length} criteria passed, but ${needsCheckCount} criterion(criteria) lack sufficient evidence.`,
+      summary: `${passCount}/${results.length} criteria passed, but ${needsCheckCount} criterion(criteria) lack sufficient evidence${hasCrossWarning ? ` and ${crossWarnings.length} claim/evidence mismatch(es) detected` : ''}.`,
       action: 'Provide fresh, specific evidence for each NEEDS_CHECK criterion.',
     };
   }
@@ -207,7 +252,7 @@ function drawConclusion(results) {
   };
 }
 
-function formatVerificationReport(claim, criteriaList, evidenceList, results, conclusion) {
+function formatVerificationReport(claim, criteriaList, evidenceList, results, conclusion, crossWarnings = []) {
   const lines = [
     '# Verification Report',
     '',
@@ -276,6 +321,26 @@ function formatVerificationReport(claim, criteriaList, evidenceList, results, co
     missingEvidence.forEach((r) => {
       lines.push(`- **${r.id}**: ${r.gap}`);
     });
+  }
+
+  // Cross-check warnings section
+  if (crossWarnings.length > 0) {
+    lines.push(
+      '',
+      '---',
+      '',
+      '## Claim-Evidence Cross-Check',
+      ''
+    );
+    lines.push('> **Warning**: The following mismatches were detected between the claim and the evidence provided:');
+    lines.push('');
+    crossWarnings.forEach((w) => {
+      lines.push(`- :warning: **${w}**`);
+    });
+    lines.push(
+      '',
+      '> These warnings indicate that the claim may be stronger than the evidence supports. Consider running additional verification before finalizing.'
+    );
   }
 
   lines.push(

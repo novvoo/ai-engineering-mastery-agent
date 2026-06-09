@@ -188,24 +188,37 @@ export function selectToolsForRequest(allTools, {
     /压缩上下文|handoff|交接|暂停|稍后继续|记忆压缩|compress|continue later/,
   ].some(pattern => pattern.test(input));
 
-  // Tiered exposure for coding tasks: always start with a minimal surface;
-  // heavy planning tools are unlocked only for non-trivial work.
+  // Tiered exposure for coding tasks based on risk level.
+  // LOW risk → no methodology tools at all (pure read/write/shell).
+  // MEDIUM risk → review/verify/diagnose/ask_user (light weight).
+  // HIGH risk → + brainstorm/grill/zoom_out.
+  // CRITICAL risk → + architect/tdd/coverage_check.
   if (taskProfile?.isCodingTask) {
     add(CORE_READ_TOOLS);
     add(CORE_WRITE_TOOLS);
     add(TERMINAL_TOOLS);
-    add(MINIMAL_METHOD_TOOLS);
     add(GIT_READ_TOOLS);
 
-    // State-centric / hash-anchored tools — light surface: analyze + query
-    // are always available for coding tasks because they're purely reading
-    // the project state; mutating harness_* tools are exposed with a lower
-    // priority alongside edit_file.
+    // State-centric / hash-anchored tools — always available for coding tasks
     add(HARNESS_STATE_TOOLS);
 
-    // Non-trivial / complex coding tasks get planning surface
-    if (!taskProfile.isLikelyTrivial || taskProfile?.requiresAutomaticPlanning) {
+    const risk = taskProfile?.riskLevel || 'medium';
+
+    if (risk === 'medium') {
+      add(MINIMAL_METHOD_TOOLS);
+    } else if (risk === 'high') {
+      add(MINIMAL_METHOD_TOOLS);
+      add(['brainstorm', 'grill', 'zoom_out']);
+    } else if (risk === 'critical') {
+      add(MINIMAL_METHOD_TOOLS);
       add(EXTENDED_PLANNING_TOOLS);
+      add(['coverage_check']);
+    }
+    // risk === 'low' → no methodology tools, pure fast path
+
+    // Bug-focused tasks get coverage_check (heuristic: only when bug-like)
+    if (taskProfile?.isBugTask || /bug|报错|错误|失败|崩溃|卡住|test failing|failing test/i.test(input)) {
+      add(['coverage_check']);
     }
 
     // User explicitly asked for doc/product artifacts
@@ -215,11 +228,6 @@ export function selectToolsForRequest(allTools, {
     ].some(pattern => pattern.test(input));
     if (asksForDocs) {
       add(DOC_PRODUCT_TOOLS);
-    }
-
-    // Bug-focused tasks get coverage_check (heuristic: only when bug-like)
-    if (taskProfile?.isBugTask || /bug|报错|错误|失败|崩溃|卡住|test failing|failing test/i.test(input)) {
-      add(['coverage_check']);
     }
 
     if (asksForGit) {
