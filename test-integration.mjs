@@ -7863,10 +7863,10 @@ runtimeAnalysisTests.test('WorkspaceState - directory and path existence', async
   const { WorkspaceState } = await import('./src/core/workspace-state.js');
   const state = new WorkspaceState();
   state.recordDirectoryListing('/test/dir', ['f1.js','f2.js','sub'], 'list_dir');
-  if (state.checkPathExists('/test/dir') !== 'exists') throw new Error('dir');
-  if (state.checkPathExists('/test/dir/f1.js') !== 'exists') throw new Error('child');
-  if (state.checkPathExists('/x') !== 'unknown') throw new Error('unknown');
-  if (state.directoryHasEntry('/test/dir','f1.js') !== true) throw new Error('hasEntry');
+  if (state.checkPathExists('/test/dir') !== 'exists') {throw new Error('dir');}
+  if (state.checkPathExists('/test/dir/f1.js') !== 'exists') {throw new Error('child');}
+  if (state.checkPathExists('/x') !== 'unknown') {throw new Error('unknown');}
+  if (state.directoryHasEntry('/test/dir','f1.js') !== true) {throw new Error('hasEntry');}
   console.log('     WorkspaceState directory tracking works');
 });
 
@@ -7874,13 +7874,13 @@ runtimeAnalysisTests.test('WorkspaceState - file lifecycle: read/write/not-found
   const { WorkspaceState } = await import('./src/core/workspace-state.js');
   const state = new WorkspaceState();
   state.recordFileRead('/a.js', true, {});
-  if (state.checkPathExists('/a.js') !== 'exists') throw new Error('read');
+  if (state.checkPathExists('/a.js') !== 'exists') {throw new Error('read');}
   state.recordPathNotFound('/b.js', 'ENOENT');
-  if (state.checkPathExists('/b.js') !== 'not_found') throw new Error('not_found');
+  if (state.checkPathExists('/b.js') !== 'not_found') {throw new Error('not_found');}
   state.recordFileWrite('/b.js');
-  if (state.checkPathExists('/b.js') !== 'exists') throw new Error('write');
+  if (state.checkPathExists('/b.js') !== 'exists') {throw new Error('write');}
   state.recordFileRead('/c.js', false, { error: 'X' });
-  if (state.checkPathExists('/c.js') !== 'not_found') throw new Error('fail');
+  if (state.checkPathExists('/c.js') !== 'not_found') {throw new Error('fail');}
   console.log('     WorkspaceState file lifecycle works');
 });
 
@@ -7888,7 +7888,7 @@ runtimeAnalysisTests.test('WorkspaceState - glob recording', async () => {
   const { WorkspaceState } = await import('./src/core/workspace-state.js');
   const state = new WorkspaceState();
   state.recordGlobResults('**/*.js',['a.js','b.js']);
-  if (state.checkPathExists('a.js') !== 'exists') throw new Error('glob');
+  if (state.checkPathExists('a.js') !== 'exists') {throw new Error('glob');}
   console.log('     WorkspaceState glob works');
 });
 
@@ -7897,13 +7897,13 @@ runtimeAnalysisTests.test('WorkspaceState - tool result prediction', async () =>
   const state = new WorkspaceState();
   state.recordPathNotFound('/m.json','NF');
   var p = state.predictToolResult('read_file',{path:'/m.json'});
-  if (!p.canSkip) throw new Error('skip');
+  if (!p.canSkip) {throw new Error('skip');}
   state.recordFileRead('/e.js',true,{});
   var e = state.predictToolResult('read_file',{path:'/e.js'});
-  if (e.type !== 'will_succeed') throw new Error('succeed');
+  if (e.type !== 'will_succeed') {throw new Error('succeed');}
   var s = state.predictToolResult('shell',{command:'cat /m.json'});
-  if (!s.canSkip) throw new Error('shell skip');
-  if (state.predictToolResult('x',{}).canSkip) throw new Error('no skip');
+  if (!s.canSkip) {throw new Error('shell skip');}
+  if (state.predictToolResult('x',{}).canSkip) {throw new Error('no skip');}
   console.log('     WorkspaceState prediction works');
 });
 
@@ -7911,15 +7911,15 @@ runtimeAnalysisTests.test('WorkspaceState - facts management', async () => {
   const { WorkspaceState } = await import('./src/core/workspace-state.js');
   const state = new WorkspaceState();
   state.addFact('t','a','high'); state.addFact('u','b','medium');
-  if (state.getCriticalFacts().length < 1) throw new Error('crit');
-  if (state.queryFacts('a').length===0) throw new Error('query');
+  if (state.getCriticalFacts().length < 1) {throw new Error('crit');}
+  if (state.queryFacts('a').length===0) {throw new Error('query');}
   state.addFact('t','a','high');
   var d = state.getCriticalFacts().filter(f=>f.type==='t');
-  if (d.length>1) throw new Error('dedup');
-  if (state.getSummary().facts < 2) throw new Error('summary');
-  if (!state.export().facts) throw new Error('export');
+  if (d.length>1) {throw new Error('dedup');}
+  if (state.getSummary().facts < 2) {throw new Error('summary');}
+  if (!state.export().facts) {throw new Error('export');}
   state.clear();
-  if (state.getSummary().facts !== 0) throw new Error('clear');
+  if (state.getSummary().facts !== 0) {throw new Error('clear');}
   console.log('     WorkspaceState facts works');
 });
 
@@ -7929,9 +7929,9 @@ runtimeAnalysisTests.test('ObservationSummarizer - read_file handler', async () 
   const state = new WorkspaceState();
   const sum = new ObservationSummarizer(state);
   var r = sum.processToolResult('read_file',{path:'/a.js'},'hello');
-  if (!r.summary) throw new Error('summary');
-  if (r.facts.length===0) throw new Error('facts');
-  if (state.checkPathExists('/a.js')!=='exists') throw new Error('recorded');
+  if (!r.summary) {throw new Error('summary');}
+  if (r.facts.length===0) {throw new Error('facts');}
+  if (state.checkPathExists('/a.js')!=='exists') {throw new Error('recorded');}
   console.log('     ObservationSummarizer read_file works');
 });
 
@@ -7941,9 +7941,9 @@ runtimeAnalysisTests.test('ObservationSummarizer - glob and shell handlers', asy
   const state = new WorkspaceState();
   const sum = new ObservationSummarizer(state);
   var g = sum.processToolResult('glob',{pattern:'*.js'},['a.js','b.js','c.js']);
-  if (!g.summary||!g.summary.includes('3')) throw new Error('glob');
+  if (!g.summary||!g.summary.includes('3')) {throw new Error('glob');}
   var s = sum.processToolResult('shell',{command:'ls'},'f.js');
-  if (!s.summary||s.facts.length===0) throw new Error('shell');
+  if (!s.summary||s.facts.length===0) {throw new Error('shell');}
   console.log('     ObservationSummarizer glob/shell works');
 });
 
@@ -7955,9 +7955,9 @@ runtimeAnalysisTests.test('ObservationSummarizer - context summary', async () =>
   sum.processToolResult('read_file',{path:'/a.js'},'x');
   sum.processToolResult('read_file',{path:'/b.json'},'{}');
   var c = sum.generateContextSummary(5);
-  if (typeof c!=='string'||c.length===0) throw new Error('ctx');
+  if (typeof c!=='string'||c.length===0) {throw new Error('ctx');}
   var d = sum.generateWorkspaceDescription();
-  if (typeof d!=='string'||d.length===0) throw new Error('desc');
+  if (typeof d!=='string'||d.length===0) {throw new Error('desc');}
   console.log('     ObservationSummarizer context works');
 });
 
@@ -7969,18 +7969,18 @@ runtimeAnalysisTests.test('WorkspaceKnowledge tool - query facts and check paths
   state.recordFileRead('/m.js', true, {});
   state.recordPathNotFound('/x.js', 'ENOENT');
   var tools = createWorkspaceKnowledgeTools(state);
-  if (tools.length===0) throw new Error('tools');
+  if (tools.length===0) {throw new Error('tools');}
   var t = tools[0];
-  if (t.name !== 'workspace_knowledge') throw new Error('name');
+  if (t.name !== 'workspace_knowledge') {throw new Error('name');}
   var ctx = { observationSummarizer: { generateWorkspaceDescription: ()=>'desc' } };
   var f = await t.handler({ action: 'get_facts' }, ctx);
-  if (!f||f.count<1) throw new Error('facts');
+  if (!f||f.count<1) {throw new Error('facts');}
   var s = await t.handler({ action: 'get_summary' }, ctx);
-  if (!s||!s.summary) throw new Error('summary');
+  if (!s||!s.summary) {throw new Error('summary');}
   var c = await t.handler({ action: 'check_path', path: '/m.js' }, ctx);
-  if (!c||!c.exists) throw new Error('check');
+  if (!c||!c.exists) {throw new Error('check');}
   var q = await t.handler({ action: 'query', query: 'bun' }, ctx);
-  if (!q||q.count===0) throw new Error('query');
+  if (!q||q.count===0) {throw new Error('query');}
   console.log('     WorkspaceKnowledge tool works');
 });
 // ============ 10. Adapter & Desktop Unit Tests ============
@@ -7993,8 +7993,8 @@ adapterUnitTests.test("tests/adapters/cli.test.js passes all tests", async () =>
     child.stdout.on("data", (d) => { output += d.toString(); });
     child.stderr.on("data", (d) => { output += d.toString(); });
     child.on("exit", (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`CLI adapter tests failed (exit ${code}):\n${output.slice(-300)}`));
+      if (code === 0) {resolve();}
+      else {reject(new Error(`CLI adapter tests failed (exit ${code}):\n${output.slice(-300)}`));}
     });
     child.on("error", reject);
   });
@@ -8007,8 +8007,8 @@ adapterUnitTests.test("tests/adapters/desktop.test.js passes all tests", async (
     child.stdout.on("data", (d) => { output += d.toString(); });
     child.stderr.on("data", (d) => { output += d.toString(); });
     child.on("exit", (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`Desktop adapter tests failed (exit ${code}):\n${output.slice(-300)}`));
+      if (code === 0) {resolve();}
+      else {reject(new Error(`Desktop adapter tests failed (exit ${code}):\n${output.slice(-300)}`));}
     });
     child.on("error", reject);
   });
@@ -8021,8 +8021,8 @@ adapterUnitTests.test("desktop/tests/desktop.test.js passes all tests", async ()
     child.stdout.on("data", (d) => { output += d.toString(); });
     child.stderr.on("data", (d) => { output += d.toString(); });
     child.on("exit", (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`Desktop IPC init tests failed (exit ${code}):\n${output.slice(-300)}`));
+      if (code === 0) {resolve();}
+      else {reject(new Error(`Desktop IPC init tests failed (exit ${code}):\n${output.slice(-300)}`));}
     });
     child.on("error", reject);
   });

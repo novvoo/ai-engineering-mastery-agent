@@ -114,7 +114,7 @@ export class SymbolIndex {
     const visited = new Set();
 
     const collectDependencies = async (sym, depth) => {
-      if (depth > maxDepth || visited.has(sym.hash)) return;
+      if (depth > maxDepth || visited.has(sym.hash)) {return;}
       visited.add(sym.hash);
 
       // 查找导入的符号
@@ -306,8 +306,8 @@ export class SymbolIndex {
    * 获取可见性
    */
   _getVisibility(line) {
-    if (line.includes('private') || line.startsWith('_')) return 'private';
-    if (line.includes('protected')) return 'protected';
+    if (line.includes('private') || line.startsWith('_')) {return 'private';}
+    if (line.includes('protected')) {return 'protected';}
     return 'public';
   }
 

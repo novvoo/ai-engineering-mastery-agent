@@ -112,11 +112,11 @@ function hashContent(content) {
 function generateUnifiedDiff(oldText, newText, filename) {
   const a = oldText.split('\n');
   const b = newText.split('\n');
-  if (a.length > 0 && a[a.length - 1] === '') a.pop();
-  if (b.length > 0 && b[b.length - 1] === '') b.pop();
+  if (a.length > 0 && a[a.length - 1] === '') {a.pop();}
+  if (b.length > 0 && b[b.length - 1] === '') {b.pop();}
   const n = a.length;
   const m = b.length;
-  if (n === 0 && m === 0) return '(no changes)';
+  if (n === 0 && m === 0) {return '(no changes)';}
 
   // Build LCS DP table. For large diffs, fall back to whole-file presentation.
   const SAFE_CELLS = 16_000_000;
@@ -125,8 +125,8 @@ function generateUnifiedDiff(oldText, newText, filename) {
     const dp = Array.from({length: n + 1}, () => new Uint32Array(m + 1));
     for (let i = n - 1; i >= 0; i--) {
       for (let j = m - 1; j >= 0; j--) {
-        if (a[i] === b[j]) dp[i][j] = dp[i + 1][j + 1] + 1;
-        else dp[i][j] = Math.max(dp[i + 1][j], dp[i][j + 1]);
+        if (a[i] === b[j]) {dp[i][j] = dp[i + 1][j + 1] + 1;}
+        else {dp[i][j] = Math.max(dp[i + 1][j], dp[i][j + 1]);}
       }
     }
     let i = 0, j = 0;
@@ -144,8 +144,8 @@ function generateUnifiedDiff(oldText, newText, filename) {
     }
   } else {
     // Large diff fallback: delete all then add all
-    for (let i = 0; i < n; i++) ops.push({ type: 'del', oldIdx: i, newIdx: 0, text: a[i] });
-    for (let j = 0; j < m; j++) ops.push({ type: 'add', oldIdx: n, newIdx: j, text: b[j] });
+    for (let i = 0; i < n; i++) {ops.push({ type: 'del', oldIdx: i, newIdx: 0, text: a[i] });}
+    for (let j = 0; j < m; j++) {ops.push({ type: 'add', oldIdx: n, newIdx: j, text: b[j] });}
   }
 
   const CONTEXT = 3;
@@ -155,7 +155,7 @@ function generateUnifiedDiff(oldText, newText, filename) {
     if (ops[k].type === 'equal') { k++; continue; }
     let startIdx = Math.max(0, k - CONTEXT);
     let nonEqEnd = k;
-    while (nonEqEnd < ops.length && ops[nonEqEnd].type !== 'equal') nonEqEnd++;
+    while (nonEqEnd < ops.length && ops[nonEqEnd].type !== 'equal') {nonEqEnd++;}
     let endIdx = Math.min(ops.length, nonEqEnd + CONTEXT);
 
     const firstOp = ops[startIdx];
@@ -172,21 +172,21 @@ function generateUnifiedDiff(oldText, newText, filename) {
     const body = [];
     for (let p = startIdx; p < endIdx; p++) {
       const o = ops[p];
-      if (o.type === 'equal') body.push(' ' + o.text);
-      else if (o.type === 'del') body.push('-' + o.text);
-      else body.push('+' + o.text);
+      if (o.type === 'equal') {body.push(' ' + o.text);}
+      else if (o.type === 'del') {body.push('-' + o.text);}
+      else {body.push('+' + o.text);}
     }
     hunks.push(`@@ -${oldStart + 1},${oldCount} +${newStart + 1},${newCount} @@\n${body.join('\n')}`);
     k = endIdx;
   }
 
-  if (hunks.length === 0) return '(no changes)';
+  if (hunks.length === 0) {return '(no changes)';}
   return `--- a/${filename}\n+++ b/${filename}\n${hunks.join('\n')}\n`;
 }
 
 // Count occurrences of a substring in a string
 function countOccurrences(text, sub) {
-  if (!sub) return 0;
+  if (!sub) {return 0;}
   let count = 0;
   let idx = 0;
   while ((idx = text.indexOf(sub, idx)) !== -1) {

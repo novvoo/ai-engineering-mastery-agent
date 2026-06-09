@@ -258,7 +258,7 @@ export class WorkspaceState {
     const normalized = this._normalizePath(dirPath);
     const dir = this._directories.get(normalized);
     
-    if (!dir) return null;
+    if (!dir) {return null;}
     
     // 检查直接匹配
     const entryPath = this._normalizePath(`${dirPath}/${entryName}`);
@@ -323,7 +323,7 @@ export class WorkspaceState {
       case 'read_file':
       case 'file_read': {
         const path = args?.path || args?.file_path || args?.file;
-        if (!path) break;
+        if (!path) {break;}
         
         const exists = this.checkPathExists(path);
         if (exists === 'not_found') {
@@ -347,7 +347,7 @@ export class WorkspaceState {
 
       case 'list_dir': {
         const path = args?.path || args?.dir || args?.directory;
-        if (!path) break;
+        if (!path) {break;}
         
         const exists = this.checkPathExists(path);
         if (exists === 'not_found') {
@@ -480,7 +480,7 @@ export class WorkspaceState {
    * 路径规范化
    */
   _normalizePath(path) {
-    if (!path) return '';
+    if (!path) {return '';}
     return path
       .replace(/\/+/g, '/')
       .replace(/\/$/, '')

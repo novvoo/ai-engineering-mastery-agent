@@ -70,11 +70,11 @@ export class DependencyGraph {
     const result = [];
 
     const traverse = (currentPath, depth) => {
-      if (depth > maxDepth || visited.has(currentPath)) return;
+      if (depth > maxDepth || visited.has(currentPath)) {return;}
       visited.add(currentPath);
 
       const node = this._nodes.get(currentPath);
-      if (!node) return;
+      if (!node) {return;}
 
       for (const dep of node.dependencies) {
         if (!dep.isExternal) {
@@ -108,11 +108,11 @@ export class DependencyGraph {
     const result = [];
 
     const traverse = (currentPath, depth) => {
-      if (depth > maxDepth || visited.has(currentPath)) return;
+      if (depth > maxDepth || visited.has(currentPath)) {return;}
       visited.add(currentPath);
 
       const node = this._nodes.get(currentPath);
-      if (!node) return;
+      if (!node) {return;}
 
       for (const dependent of node.dependents) {
         result.push({ depth: depth + 1, path: dependent });
@@ -161,11 +161,11 @@ export class DependencyGraph {
         return path;
       }
 
-      if (visited.has(current)) continue;
+      if (visited.has(current)) {continue;}
       visited.add(current);
 
       const node = this._nodes.get(current);
-      if (!node) continue;
+      if (!node) {continue;}
 
       for (const dep of node.dependencies) {
         if (!dep.isExternal && !visited.has(dep.target)) {

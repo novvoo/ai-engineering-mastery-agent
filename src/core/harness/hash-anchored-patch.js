@@ -343,7 +343,7 @@ export class StateGraph {
 
     while (current && count < limit) {
       const node = this._nodes.get(current);
-      if (!node) break;
+      if (!node) {break;}
 
       history.push({
         hash: node.hash,

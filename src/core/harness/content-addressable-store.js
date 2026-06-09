@@ -94,7 +94,7 @@ export class FileTreeIndex {
    * 按路径查找
    */
   async findByPath(rootDir, path) {
-    if (!this.rootHash) return null;
+    if (!this.rootHash) {return null;}
 
     const parts = path.split('/').filter(Boolean);
     let currentHash = this.rootHash;
@@ -102,7 +102,7 @@ export class FileTreeIndex {
     for (const part of parts) {
       const tree = this.getTree(currentHash);
       const entry = tree.find(e => e.name === part);
-      if (!entry) return null;
+      if (!entry) {return null;}
 
       if (entry.type === 'tree') {
         currentHash = entry.hash;
@@ -427,7 +427,7 @@ export class CompleteIndex {
       const entries = await readdir(dir, { withFileTypes: true });
 
       for (const entry of entries) {
-        if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
+        if (entry.name.startsWith('.') || entry.name === 'node_modules') {continue;}
 
         const fullPath = join(dir, entry.name);
 

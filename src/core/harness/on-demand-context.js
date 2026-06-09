@@ -451,9 +451,9 @@ export class OnDemandContextExpansion {
    * 获取置信度级别
    */
   _getConfidenceLevel(score) {
-    if (score >= this._confidenceThresholds.high) return CONFIDENCE_HIGH;
-    if (score >= this._confidenceThresholds.medium) return CONFIDENCE_MEDIUM;
-    if (score >= this._confidenceThresholds.low) return CONFIDENCE_LOW;
+    if (score >= this._confidenceThresholds.high) {return CONFIDENCE_HIGH;}
+    if (score >= this._confidenceThresholds.medium) {return CONFIDENCE_MEDIUM;}
+    if (score >= this._confidenceThresholds.low) {return CONFIDENCE_LOW;}
     return CONFIDENCE_UNKNOWN;
   }
 

@@ -66,7 +66,7 @@ export class ASTMetadataExtractor {
    */
   getFunctionMetadata(filePath, functionName) {
     const cached = this._cache.get(filePath);
-    if (!cached) return null;
+    if (!cached) {return null;}
     return cached.functions.get(functionName) || null;
   }
 
@@ -75,7 +75,7 @@ export class ASTMetadataExtractor {
    */
   getClassMetadata(filePath, className) {
     const cached = this._cache.get(filePath);
-    if (!cached) return null;
+    if (!cached) {return null;}
     return cached.classes.get(className) || null;
   }
 
@@ -84,7 +84,7 @@ export class ASTMetadataExtractor {
    */
   getCodeRegion(filePath, line) {
     const cached = this._cache.get(filePath);
-    if (!cached) return null;
+    if (!cached) {return null;}
 
     const findRegion = (regions) => {
       for (const region of regions) {
@@ -260,7 +260,7 @@ export class ASTMetadataExtractor {
    */
   _extractParams(line) {
     const match = line.match(/\(([^)]*)\)/);
-    if (!match) return [];
+    if (!match) {return [];}
 
     const params = [];
     const paramStr = match[1];

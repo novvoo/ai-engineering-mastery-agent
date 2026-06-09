@@ -221,7 +221,7 @@ export class StateGraph {
 
     while (currentId && history.length < limit) {
       const node = this.getNode(currentId);
-      if (!node) break;
+      if (!node) {break;}
 
       history.push(node);
 
@@ -276,7 +276,7 @@ export class StateGraph {
 
     while (toVisit.length > 0) {
       const id = toVisit.shift();
-      if (ids.has(id)) continue;
+      if (ids.has(id)) {continue;}
 
       ids.add(id);
       const node = this.getNode(id);
@@ -349,7 +349,7 @@ export class ContextProjectionEngine {
 
     for (const nodeId of nodeIds) {
       const node = this.graph.getNode(nodeId);
-      if (!node) continue;
+      if (!node) {continue;}
 
       lines.push(`---`);
       lines.push(`Node ID: ${nodeId.substring(0, 16)}...`);
@@ -399,7 +399,7 @@ export class ContextProjectionEngine {
    */
   updateProjection(taskId, updates) {
     const existing = this.getProjection(taskId);
-    if (!existing) return null;
+    if (!existing) {return null;}
 
     const updated = { ...existing, ...updates, timestamp: Date.now() };
     this.projections.set(taskId, updated);
