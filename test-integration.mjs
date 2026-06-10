@@ -2169,9 +2169,17 @@ conversationProtocolTests.test('Agent routes coding tasks to a compact engineeri
   }
 
   const firstTools = functionSnapshots[0] || [];
-  for (const expected of ['read_file', 'write_file', 'shell', 'pty_start', 'brainstorm', 'tdd', 'review', 'verify']) {
+  // Phase-driven routing: first iteration is exploration phase, which includes
+  // brainstorm/architect but NOT tdd/review/verify (those appear in later phases).
+  for (const expected of ['read_file', 'write_file', 'shell', 'pty_start', 'brainstorm', 'architect']) {
     if (!firstTools.includes(expected)) {
       throw new Error(`Expected routed coding tools to include ${expected}, got ${firstTools.join(', ')}`);
+    }
+  }
+  // Verify that phase-inappropriate tools are NOT exposed in exploration phase
+  for (const phaseInappropriate of ['tdd', 'review', 'verify']) {
+    if (firstTools.includes(phaseInappropriate)) {
+      throw new Error(`Expected exploration phase to exclude ${phaseInappropriate}, got ${firstTools.join(', ')}`);
     }
   }
   for (const excluded of ['web_search', 'web_fetch', 'mcp_connect', 'task_create', 'schedule_create', 'subagent_spawn']) {
