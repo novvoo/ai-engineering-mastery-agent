@@ -409,8 +409,9 @@ class ToolMiddleware {
       const result = await executor(toolName, middlewareContext.args, context);
       middlewareContext.result = result;
       
-      // 执行 after 中间件
-      for (const middleware of this.#middlewares) {
+      // 执行 after 中间件（反向：后注册的先执行 after，洋葱模型）
+      for (let i = this.#middlewares.length - 1; i >= 0; i--) {
+        const middleware = this.#middlewares[i];
         if (middleware.after) {
           try {
             await middleware.after(middlewareContext);

@@ -246,9 +246,10 @@ describe('性能基准测试', () => {
       it('事件缓存命中率测试', () => {
         eventBus = getEventBus({ cache: { enabled: true, maxSize: 100, ttl: 60000 } });
         
-        // 发射相同事件多次
-        for (let i = 0; i < 100; i++) {
-          eventBus.emit('test:cache', { data: 'cached' }, { cache: true });
+        // 缓存事件后反复读取以产生缓存命中
+        eventBus.emit('test:cache', { data: 'cached' }, { cache: true });
+        for (let i = 0; i < 10; i++) {
+          eventBus.getCachedEvent('test:cache');
         }
         
         const stats = eventBus.getStats();

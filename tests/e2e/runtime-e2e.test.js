@@ -11,6 +11,7 @@ import {
   getEventBus, 
   resetEventBus 
 } from '../../src/runtime/index.js';
+import { RuntimeEventBus } from '../../src/runtime/event-bus.js';
 import { 
   PlatformType, 
   AgentState, 
@@ -1612,6 +1613,9 @@ describe('事件系统完整流程端到端测试', () => {
 
   describe('事件统计', () => {
     it('应该正确追踪事件统计', async () => {
+      // 先订阅事件以验证 subscriberCount
+      const unsub = eventBus.subscribe(RuntimeEvent.STATUS_UPDATE, () => {});
+      
       // 发射多个事件
       for (let i = 0; i < 5; i++) {
         eventBus.emit(RuntimeEvent.STATUS_UPDATE, { message: `消息${i}` });
@@ -1634,6 +1638,8 @@ describe('事件系统完整流程端到端测试', () => {
       eventBus.resetStats();
       const newStats = eventBus.getStats();
       expect(newStats.totalEvents).toBe(0);
+      
+      unsub();
     });
   });
 

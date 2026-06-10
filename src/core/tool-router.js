@@ -30,24 +30,11 @@ const WEB_TOOLS = [
   'preview_list',
 ];
 
-// Tiered methodology tools. The default coding surface only exposes the
-// review/verify/diagnose/ask_user tier; heavier planning tools are deferred
-// to non-trivial tasks, and doc/product tools are exposed only when the user
-// explicitly asks for them.
-const MINIMAL_METHOD_TOOLS = [
-  'ask_user',
-  'review',
-  'verify',
-  'diagnose',
-];
-
-const EXTENDED_PLANNING_TOOLS = [
-  'brainstorm',
-  'grill',
-  'zoom_out',
-  'architect',
-  'tdd',
-];
+// Legacy methodology tool tiers — kept for reference but no longer used
+// since tool selection is now driven by PHASE_CANDIDATE_TOOLS.
+// const MINIMAL_METHOD_TOOLS = ['ask_user', 'review', 'verify', 'diagnose'];
+// const EXTENDED_PLANNING_TOOLS = ['brainstorm', 'grill', 'zoom_out', 'architect', 'tdd'];
+// const ADVANCED_METHOD_TOOLS = ['coverage_check', 'handoff'];
 
 const DOC_PRODUCT_TOOLS = [
   'to_prd',
@@ -55,10 +42,7 @@ const DOC_PRODUCT_TOOLS = [
   'setup',
 ];
 
-const ADVANCED_METHOD_TOOLS = [
-  'coverage_check',
-  'handoff',
-];
+// See PHASE_CANDIDATE_TOOLS above for phase-driven tool selection.
 
 const GENERAL_METHODOLOGY_TOOLS = [
   'ask_user',
@@ -140,6 +124,40 @@ const COMPRESS_TOOLS = [
   'handoff',
 ];
 
+// =============================================================
+// Phase-aware methodology tool selection
+//
+// 核心思想：方法论工具按执行阶段动态加载，所有编码任务走完整流程。
+// - 探索阶段：需要 brainstorm/architect/zoom_out，不需要 verify/review
+// - 规划阶段：需要 brainstorm/grill/architect/tdd，不需要 verify/review
+// - 实现阶段：需要 diagnose，不需要 brainstorm/architect
+// - 检查阶段：需要 review/diagnose，不需要 brainstorm/architect
+// - 验证阶段：需要 verify/review/coverage_check，不需要 brainstorm/architect
+//
+// 风险等级不再限制工具可见性，仅影响迭代预算和完成门严格度。
+// =============================================================
+
+export const PHASE = {
+  EXPLORATION: 'exploration',
+  PLANNING: 'planning',
+  IMPLEMENTATION: 'implementation',
+  INSPECTION: 'inspection',
+  VERIFICATION: 'verification',
+};
+
+// 每个执行阶段适用的方法论工具候选集
+const PHASE_CANDIDATE_TOOLS = {
+  [PHASE.EXPLORATION]: ['ask_user', 'brainstorm', 'grill', 'zoom_out', 'architect'],
+  [PHASE.PLANNING]: ['ask_user', 'brainstorm', 'grill', 'zoom_out', 'architect', 'tdd'],
+  [PHASE.IMPLEMENTATION]: ['ask_user', 'diagnose'],
+  [PHASE.INSPECTION]: ['ask_user', 'review', 'diagnose'],
+  [PHASE.VERIFICATION]: ['ask_user', 'review', 'verify', 'diagnose', 'coverage_check'],
+};
+
+// 注意：风险等级不再限制方法论工具可见性。
+// 工具可见性完全由执行阶段决定（PHASE_CANDIDATE_TOOLS）。
+// 风险等级仅影响迭代预算和完成门严格度。
+
 /**
  * Select the smallest useful set of tools for the current request.
  * This is deliberately local and cheap: it avoids a preflight LLM call on
@@ -149,6 +167,7 @@ export function selectToolsForRequest(allTools, {
   userInput = '',
   taskProfile = null,
   intent = null,
+  currentPhase = null,
   maxTools = 32,
 } = {}) {
   const byName = new Map(allTools.map(tool => [tool.name, tool]));
@@ -190,11 +209,9 @@ export function selectToolsForRequest(allTools, {
     /压缩上下文|handoff|交接|暂停|稍后继续|记忆压缩|compress|continue later/,
   ].some(pattern => pattern.test(input));
 
-  // Tiered exposure for coding tasks based on risk level.
-  // LOW risk → no methodology tools at all (pure read/write/shell).
-  // MEDIUM risk → review/verify/diagnose/ask_user (light weight).
-  // HIGH risk → + brainstorm/grill/zoom_out.
-  // CRITICAL risk → + architect/tdd/coverage_check.
+  // Tiered exposure for coding tasks based on execution phase.
+  // All coding tasks get the same complete methodology flow;
+  // phase determines which tools are visible at each step.
   if (taskProfile?.isCodingTask) {
     add(CORE_READ_TOOLS);
     add(CORE_WRITE_TOOLS);
@@ -204,19 +221,17 @@ export function selectToolsForRequest(allTools, {
     // State-centric / hash-anchored tools — always available for coding tasks
     add(HARNESS_STATE_TOOLS);
 
-    const risk = taskProfile?.riskLevel || 'medium';
-
-    if (risk === 'medium') {
-      add(MINIMAL_METHOD_TOOLS);
-    } else if (risk === 'high') {
-      add(MINIMAL_METHOD_TOOLS);
-      add(EXTENDED_PLANNING_TOOLS);
-    } else if (risk === 'critical') {
-      add(MINIMAL_METHOD_TOOLS);
-      add(EXTENDED_PLANNING_TOOLS);
-      add(['coverage_check', 'architect']);
+    // Phase-aware methodology tool selection:
+    // 工具可见性完全由执行阶段决定。
+    // - 有 currentPhase → 按阶段动态暴露（所有编码任务都有阶段）
+    // - 无 currentPhase → 退化为基础方法论集（非编码任务）
+    if (currentPhase) {
+      const phaseCandidates = PHASE_CANDIDATE_TOOLS[currentPhase] || [];
+      add(phaseCandidates);
+    } else {
+      // 非编码任务或无 ExecutionPlan 的降级路径：暴露基础方法论
+      add(GENERAL_METHODOLOGY_TOOLS);
     }
-    // risk === 'low' → no methodology tools, pure fast path
 
     // Bug-focused tasks get coverage_check (heuristic: only when bug-like)
     if (taskProfile?.isBugTask || /bug|报错|错误|失败|崩溃|卡住|test failing|failing test/i.test(input)) {

@@ -867,17 +867,17 @@ describe('边缘情况测试', () => {
           dependencies: ['plugin-a']
         });
         
-        // 先注册一个
-        await pluginManager.register(pluginA);
-        
+        // A→B, B→A: 注册A会因缺少B而失败，注册B会因缺少A而失败
+        // PluginManager 的缺失依赖检测已拒绝循环注册
         try {
-          await pluginManager.register(pluginB);
-          // 可能成功（因为 plugin-a 已存在）或失败
+          await pluginManager.register(pluginA);
         } catch (error) {
-          // 循环依赖应该被检测
+          // 缺少依赖 plugin-b
         }
         
-        // 应该安全处理
+        // 不应该有插件被部分注册
+        expect(pluginManager.getPlugin('plugin-a')).toBeUndefined();
+        expect(pluginManager.getPlugin('plugin-b')).toBeUndefined();
       });
 
       it('应该检测间接循环依赖', async () => {
@@ -896,16 +896,26 @@ describe('边缘情况测试', () => {
           dependencies: ['plugin-b-indirect']
         });
         
-        await pluginManager.register(pluginA);
-        
+        // A→C→B→A 间接循环：注册任一插件都会因缺失依赖链而失败
+        try {
+          await pluginManager.register(pluginA);
+        } catch (error) {
+          // 缺少依赖 plugin-c-indirect（间接循环被缺失依赖检测阻止）
+        }
         try {
           await pluginManager.register(pluginB);
+        } catch (error) {
+          // 缺少依赖 plugin-a-indirect
+        }
+        try {
           await pluginManager.register(pluginC);
         } catch (error) {
-          // 循环依赖应该被检测
+          // 缺少依赖 plugin-b-indirect
         }
         
-        // 应该安全处理
+        expect(pluginManager.getPlugin('plugin-a-indirect')).toBeUndefined();
+        expect(pluginManager.getPlugin('plugin-b-indirect')).toBeUndefined();
+        expect(pluginManager.getPlugin('plugin-c-indirect')).toBeUndefined();
       });
 
       it('应该处理自依赖插件', async () => {

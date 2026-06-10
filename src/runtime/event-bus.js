@@ -88,6 +88,9 @@ export class RuntimeEventBus extends EventEmitter {
     // 延迟订阅队列，用于延迟订阅激活
     this.pendingSubscriptions = new Map();
     
+    // 通配符订阅者（匹配所有事件）
+    this.wildcardSubscribers = [];
+    
     // 事件过滤器映射表
     this.filters = new Map();
     
@@ -160,6 +163,13 @@ export class RuntimeEventBus extends EventEmitter {
       id: this._generateId()
     };
 
+    // 通配符订阅：匹配所有事件
+    if (event === '*') {
+      this.wildcardSubscribers.push(subscriber);
+      this.wildcardSubscribers.sort((a, b) => b.weight - a.weight);
+      return () => this.unsubscribe(event, callback);
+    }
+
     // 添加到订阅者列表
     if (!this.subscribers.has(event)) {
       this.subscribers.set(event, []);
@@ -228,6 +238,15 @@ export class RuntimeEventBus extends EventEmitter {
    * @param {Function} callback - 回调函数
    */
   unsubscribe(event, callback) {
+    // 通配符取消订阅
+    if (event === '*') {
+      const index = this.wildcardSubscribers.findIndex(s => s.callback === callback);
+      if (index > -1) {
+        this.wildcardSubscribers.splice(index, 1);
+      }
+      return;
+    }
+
     // 从订阅者列表中移除
     if (this.subscribers.has(event)) {
       const subscribers = this.subscribers.get(event);
@@ -297,6 +316,15 @@ export class RuntimeEventBus extends EventEmitter {
       }
     }
 
+    // 通知通配符订阅者（匹配所有事件）
+    for (const subscriber of this.wildcardSubscribers) {
+      try {
+        subscriber.callback(eventData);
+      } catch (error) {
+        this._handleCallbackError(error, event, subscriber);
+      }
+    }
+
     // 同时触发 EventEmitter 的监听器（用于兼容直接使用 on/off 的场景）
     // 注意：这些监听器不遵循优先级顺序
     super.emit(event, eventData);
@@ -346,6 +374,15 @@ export class RuntimeEventBus extends EventEmitter {
     
     // 按优先级顺序执行异步回调
     for (const subscriber of subscribers) {
+      try {
+        await Promise.resolve(subscriber.callback(eventData));
+      } catch (error) {
+        this._handleCallbackError(error, event, subscriber);
+      }
+    }
+
+    // 通知通配符订阅者（异步版本）
+    for (const subscriber of this.wildcardSubscribers) {
       try {
         await Promise.resolve(subscriber.callback(eventData));
       } catch (error) {
@@ -594,6 +631,16 @@ export class RuntimeEventBus extends EventEmitter {
           this._handleCallbackError(error, event.type, subscriber);
         }
       }
+      
+      // 通知通配符订阅者
+      for (const subscriber of this.wildcardSubscribers) {
+        try {
+          subscriber.callback(replayData);
+        } catch (error) {
+          this._handleCallbackError(error, event.type, subscriber);
+        }
+      }
+      
       // 触发 EventEmitter 监听器
       super.emit(event.type, replayData);
       
@@ -697,9 +744,16 @@ export class RuntimeEventBus extends EventEmitter {
    * @returns {Object} 统计信息
    */
   getStats() {
+    // 计算总订阅者数：事件特定订阅者 + 通配符订阅者
+    let totalSubs = 0;
+    for (const subs of this.subscribers.values()) {
+      totalSubs += subs.length;
+    }
+    totalSubs += this.wildcardSubscribers.length;
+    
     return {
       ...this.stats,
-      subscriberCount: this.subscribers.size,
+      subscriberCount: totalSubs > 0 ? totalSubs : this.subscribers.size,
       historySize: this.history.length,
       cacheSize: this.cache.size,
       pendingSubscriptions: this.pendingSubscriptions.size
@@ -734,6 +788,7 @@ export class RuntimeEventBus extends EventEmitter {
 
     this.removeAllListeners();
     this.subscribers.clear();
+    this.wildcardSubscribers = [];
     this.pendingSubscriptions.clear();
     this.filters.clear();
     this.globalFilter = createDefaultFilter();

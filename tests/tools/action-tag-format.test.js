@@ -1,0 +1,64 @@
+import { describe, it, expect } from 'bun:test';
+import { TextToolParser } from '../../src/core/text-tool-parser.js';
+
+const makeRegistry = (names) => ({
+  has: (n) => names.includes(n),
+  getAll: () => names.map((n) => ({ name: n, description: 'x' })),
+});
+
+describe('TextToolParser: detectMalformedToolCall', () => {
+  it('returns null for plain English responses', () => {
+    const p = new TextToolParser(makeRegistry(['write_file']));
+    expect(p.detectMalformedToolCall('Sure, I will help you write the file.')).toBeNull();
+  });
+
+  it('returns null for well-formed <action>...</action>', () => {
+    const p = new TextToolParser(makeRegistry(['write_file']));
+    const res = '<action>{"name": "write_file", "arguments": {"path": "x", "content": "y"}}</action>';
+    expect(p.detectMalformedToolCall(res)).toBeNull();
+  });
+
+  it('returns null for well-formed CALL ...({...})', () => {
+    const p = new TextToolParser(makeRegistry(['shell']));
+    const res = 'CALL shell({"command": "ls -la"})';
+    expect(p.detectMalformedToolCall(res)).toBeNull();
+  });
+
+  it('detects <action>...</annotation> (mismatched close tag)', () => {
+    const p = new TextToolParser(makeRegistry(['write_file']));
+    const res = `<action>{"name": "write_file", "arguments": {"path": "x.js", "content": "hi"}}</annotation>`;
+    const diag = p.detectMalformedToolCall(res);
+    expect(diag).not.toBeNull();
+    expect(diag.tag).toBe('xml_close_mismatch_or_missing');
+    expect(diag.opening.toLowerCase()).toContain('<action');
+    expect(diag.closing).toBe('</annotation>');
+    expect(typeof diag.hint).toBe('string');
+    expect(diag.hint.length).toBeGreaterThan(5);
+  });
+
+  it('detects <action>...</action_tag> (another mismatch)', () => {
+    const p = new TextToolParser(makeRegistry(['shell']));
+    const res = `<action>{"name": "shell", "arguments": {"command": "ls"}}</action_tag>`;
+    const diag = p.detectMalformedToolCall(res);
+    expect(diag).not.toBeNull();
+    expect(diag.tag).toBe('xml_close_mismatch_or_missing');
+    expect(diag.closing).toBe('</action_tag>');
+  });
+
+  it('detects <action> with no close tag at all', () => {
+    const p = new TextToolParser(makeRegistry(['shell']));
+    const res = `<action>{"name": "shell", "arguments": {"command": "ls"}}`;
+    const diag = p.detectMalformedToolCall(res);
+    expect(diag).not.toBeNull();
+    expect(diag.tag).toBe('xml_close_mismatch_or_missing');
+    expect(diag.closing.toLowerCase()).toContain('missing');
+  });
+
+  it('parse() does NOT force-parse the mismatched-tag case', () => {
+    const p = new TextToolParser(makeRegistry(['write_file']));
+    const res = `<action>{"name": "write_file", "arguments": {"path": "x.js", "content": "hi"}}</annotation>`;
+    // Should not parse as a tool call — let the correction loop ask LLM to retry.
+    const parsed = p.parse(res).filter(c => c.source !== 'natural_language');
+    expect(parsed.length).toBe(0);
+  });
+});

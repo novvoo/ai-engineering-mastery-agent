@@ -309,10 +309,18 @@ export class DesktopCore {
       throw new Error('ipcMain 参数必须提供');
     }
     
+    // 如果已附加同一适配器，直接返回
+    if (this.#ipcAdapter) {
+      return this.#ipcAdapter;
+    }
+    
     this.#ipcAdapter = createMainProcessIPCAdapter(ipcMain, this.#eventBus, {
       ...this.#config.ipc,
       debug: this.#config.debug
     });
+    
+    // 初始化 IPC 适配器（建立连接、注册处理器、设置心跳等）
+    this.#ipcAdapter.initialize();
     
     // 附加引擎到 IPC 适配器
     if (this.#engine) {
@@ -335,6 +343,9 @@ export class DesktopCore {
     }
     
     this.#uiBridge = bridge;
+    
+    // 建立直接连接模式（无 IPC 时也能获取工具/状态）
+    bridge.attachCoreRef(this);
     
     // 如果有缓冲的事件，发送给 UI
     if (this.#config.ui.eventBuffering && this.#eventBuffer.length > 0) {
@@ -611,6 +622,15 @@ export class DesktopCore {
     const previousState = this.#state;
     this.#state = DesktopState.DISPOSED;
     
+    // 通知状态监听器（在清理前通知）
+    for (const listener of this.#stateListeners) {
+      try {
+        listener({ oldState: previousState, newState: DesktopState.DISPOSED, timestamp: Date.now() });
+      } catch (error) {
+        // 忽略监听器自身错误，确保清理流程继续
+      }
+    }
+    
     try {
       // 停止当前执行（不改变状态）
       if (this.#engine) {
@@ -623,13 +643,19 @@ export class DesktopCore {
       }
       this.#subscriptions = [];
       
-      // 清理状态监听器
+      // 清理状态监听器（通知完成后再清理）
       this.#stateListeners.clear();
       
       // 断开 IPC 适配器
       if (this.#ipcAdapter) {
         this.#ipcAdapter.disconnect();
         this.#ipcAdapter = null;
+      }
+      
+      // 断开 UI Bridge
+      if (this.#uiBridge) {
+        this.#uiBridge.disconnect();
+        this.#uiBridge = null;
       }
       
       // 销毁引擎
@@ -671,6 +697,7 @@ export class UIBridge {
   #config;
   #isConnected;
   #ipcAdapter;
+  #coreRef;
 
   constructor(config = {}) {
     this.#listeners = new Map();
@@ -683,6 +710,7 @@ export class UIBridge {
     };
     this.#isConnected = false;
     this.#ipcAdapter = null;
+    this.#coreRef = null;
   }
 
   /**
@@ -839,43 +867,63 @@ export class UIBridge {
   }
 
   /**
+   * 附加 DesktopCore 引用（直接模式，无需 IPC）
+   */
+  attachCoreRef(core) {
+    this.#coreRef = core;
+    this.#isConnected = true;
+  }
+
+  /**
    * 便捷方法：处理输入
    */
   async processInput(input, options = {}) {
+    if (this.#coreRef) {
+      return this.#coreRef.processInput(input, options);
+    }
     if (this.#ipcAdapter) {
       return this.#ipcAdapter.processInput(input, options);
     }
-    throw new Error('IPC 适配器未连接');
+    throw new Error('未连接到 DesktopCore 或 IPC 适配器');
   }
 
   /**
    * 便捷方法：停止执行
    */
   async stop() {
+    if (this.#coreRef) {
+      return this.#coreRef.stop();
+    }
     if (this.#ipcAdapter) {
       return this.#ipcAdapter.stop();
     }
-    throw new Error('IPC 适配器未连接');
+    throw new Error('未连接到 DesktopCore 或 IPC 适配器');
   }
 
   /**
    * 便捷方法：获取状态
    */
-  async getState() {
+  getState() {
+    if (this.#coreRef) {
+      return this.#coreRef.getState();
+    }
     if (this.#ipcAdapter) {
       return this.#ipcAdapter.getState();
     }
-    throw new Error('IPC 适配器未连接');
+    throw new Error('未连接到 DesktopCore 或 IPC 适配器');
   }
 
   /**
    * 便捷方法：获取工具列表
    */
-  async getTools() {
+  getTools() {
+    if (this.#coreRef) {
+      return this.#coreRef.getTools();
+    }
     if (this.#ipcAdapter) {
       return this.#ipcAdapter.getTools();
     }
-    throw new Error('IPC 适配器未连接');
+    throw new Error('未连接到 DesktopCore 或 IPC 适配器');
   }
 
   /**

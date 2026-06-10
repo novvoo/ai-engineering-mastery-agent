@@ -94,6 +94,9 @@ export class AgentEngine {
   #mcpClient;
   #schedulerEngine;
   
+  // 工具调用包装状态
+  #toolCallsWrapped;
+  
   // UI 适配器
   #uiAdapter;
 
@@ -107,6 +110,7 @@ export class AgentEngine {
     this.#isInitialized = false;
     this.#modelProvider = null;
     this.#toolGroups = new Map();
+    this.#toolCallsWrapped = false;
     this.#uiAdapter = null;
   }
 
@@ -207,6 +211,9 @@ export class AgentEngine {
     
     // 10. 初始化工具分组
     this.#initializeToolGroups();
+    
+    // 10.5 包装工具调用以触发钩子和中间件（在初始化时就安装，确保直接调用 registry.execute 也走钩子）
+    this.#wrapToolCalls();
     
     // 11. 注册安全策略
     this.#securityPolicy.registerDefaultPolicies(this.#toolRegistry.getAll());
@@ -716,7 +723,7 @@ export class AgentEngine {
 
     let result;
     try {
-      // 包装工具调用以触发钩子和中间件
+      // 包装工具调用（幂等，initialize时已调用，此处为防御性调用）
       this.#wrapToolCalls();
 
       // 运行 Agent（使用 run 方法）
@@ -815,9 +822,12 @@ export class AgentEngine {
   }
 
   /**
-   * 包装工具调用以触发钩子和中间件
+   * 包装工具调用以触发钩子和中间件（幂等：多次调用不会重复包装）
    */
   #wrapToolCalls() {
+    // 幂等保护：如果已经包装过，跳过
+    if (this.#toolCallsWrapped) return;
+    
     const originalExecute = this.#toolRegistry.execute.bind(this.#toolRegistry);
     const eventBus = this.#eventBus;
     const pluginManager = this.#pluginManager;
@@ -854,6 +864,8 @@ export class AgentEngine {
         }
       );
     };
+    
+    this.#toolCallsWrapped = true;
   }
 
   /**
@@ -919,6 +931,7 @@ export class AgentEngine {
     this.#toolRegistry.register(tool);
     // 触发工具注册钩子
     this.#pluginManager.triggerHook(HOOKS.ON_TOOL_REGISTER, tool.name, tool);
+    this.#eventBus.emit(RuntimeEvent.TOOL_LOADED, { toolName: tool.name, tool });
   }
 
   registerTools(tools) {

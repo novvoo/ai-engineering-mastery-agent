@@ -30,7 +30,7 @@ const STRESS_CONFIG = {
   MEMORY_THRESHOLD_MB: 50,           // 内存增长阈值（MB）
   
   // 长时间运行配置
-  LONG_RUN_DURATION_MS: 5000,        // 长时间运行测试持续时间（毫秒）
+  LONG_RUN_DURATION_MS: 3000,        // 长时间运行测试持续时间（毫秒），低于Bun默认5s超时
   LONG_RUN_INTERVAL_MS: 10,          // 长时间运行测试间隔（毫秒）
   
   // 队列压力配置

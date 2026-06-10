@@ -450,130 +450,52 @@ export function computeIterationBudget(riskLevelOrProfile, maxIterationsDefault 
 }
 
 // =============================================================
-// 各风险等级的工具白名单（决定 tool-router 暴露什么工具）
-// 返回: { always, byLevel } —— always 是各等级都暴露的核心工具名
+// 各风险等级的工具白名单已移除。
+// 工具选择现在由 tool-router.js 的阶段感知逻辑驱动，
+// 不再按风险等级分层暴露工具。
 // =============================================================
-const CORE_TOOLS_ALWAYS = [
-  // 读
-  'read_file', 'list_dir', 'glob', 'search', 'semantic_search',
-  // 写
-  'write_file', 'edit_file',
-  // 终端
-  'shell', 'pty_start', 'pty_write', 'pty_read', 'pty_stop',
-  // git 读
-  'git_status', 'git_diff', 'git_log', 'git_branch',
-  // harness / state-centric（只读，用于锚点编辑）
-  'harness_analyze', 'harness_replace', 'harness_insert', 'harness_delete',
-  'harness_query', 'harness_rollback',
-];
-
-const SKILL_TOOLS_BY_LEVEL = {
-  [RISK_LEVEL.LOW]: [],  // low 不暴露任何方法论工具，直接读改验
-  [RISK_LEVEL.MEDIUM]: ['ask_user', 'review', 'verify', 'diagnose'],
-  [RISK_LEVEL.HIGH]: ['ask_user', 'review', 'verify', 'diagnose', 'brainstorm', 'grill', 'zoom_out'],
-  [RISK_LEVEL.CRITICAL]: ['ask_user', 'review', 'verify', 'diagnose', 'brainstorm', 'grill', 'zoom_out', 'architect', 'tdd', 'coverage_check'],
-};
-
-export function getToolNamesForRiskLevel(riskLevel, opts = {}) {
-  const extras = [];
-  if (opts.needsDocs) {
-    extras.push('to_prd', 'to_issues');
-  }
-  if (opts.needsCompression) {
-    extras.push('caveman', 'handoff');
-  }
-  return [
-    ...CORE_TOOLS_ALWAYS,
-    ...(SKILL_TOOLS_BY_LEVEL[riskLevel] || SKILL_TOOLS_BY_LEVEL[RISK_LEVEL.MEDIUM]),
-    ...extras,
-  ];
-}
 
 // =============================================================
 // 各风险等级的必做 gate（决定 completion gate 检查哪些证据）
 // 返回: 一个描述"完成前必须满足"的约束对象
 // =============================================================
 export function getCompletionGates(riskLevel, profile = {}) {
+  // 统一完成门：所有编码修改任务走相同的质量标准
+  // 风险等级不再决定门的开关，只影响迭代预算
   const gates = {
     requireMutation: profile.isModificationTask !== false,
-    requireRuntimeVerification: true,  // 所有等级都必须真实验证
-    requireMethodologyTool: false,     // 默认不强制"必须调某个方法论工具"
-    requireSemanticRiskReview: false,
+    requireRuntimeVerification: true,
+    requireMethodologyTool: profile.isModificationTask !== false,
+    requireSemanticRiskReview: (profile.semanticDomains || []).length > 0,
   };
 
-  switch (riskLevel) {
-    case RISK_LEVEL.LOW:
-      // LOW: 编码任务需要运行验证（功能测试），纯只读/查询任务无需验证
-      gates.requireRuntimeVerification = profile.isCodingTask !== false;
-      return gates;
-
-    case RISK_LEVEL.MEDIUM:
-      // MEDIUM: 改了 + 验证，review/verify 推荐但不强制
-      return gates;
-
-    case RISK_LEVEL.HIGH:
-      // HIGH: 改了 + 验证 + 需要 review/verify/diagnose 至少一个
-      gates.requireMethodologyTool = true;
-      gates.requireSemanticRiskReview = (profile.semanticDomains || []).length > 0;
-      return gates;
-
-    case RISK_LEVEL.CRITICAL:
-      // CRITICAL: 全部 gate
-      gates.requireMethodologyTool = true;
-      gates.requireSemanticRiskReview = true;
-      return gates;
-
-    default:
-      return gates;
-  }
+  return gates;
 }
 
 // =============================================================
-// 给 coding task operating prompt 用的：根据风险等级生成方法论使用建议
-// 关键区别：不再说"proactively use all methodology tools"，而是说"按需使用"
+// 给 coding task operating prompt 用的：统一方法论使用建议
+// 不再按风险等级分层——所有编码任务走相同的完整流程，
+// 工具按阶段按需加载，方法论按阶段按需使用。
+// 风险等级仅影响迭代预算和完成门严格度。
 // =============================================================
 export function getMethodologyGuidance(riskLevel, profile = {}) {
-  const lines = [];
   const domains = profile.semanticDomains || [];
 
-  switch (riskLevel) {
-    case RISK_LEVEL.LOW:
-      lines.push(
-        'This task is low-risk: make the smallest necessary change, inspect it, and run a real shell command (syntax check, existing test, linter, or build) to confirm.',
-      );
-      lines.push('You MUST run a functional test at the final step before finishing — this is mandatory for all coding tasks.');
-      lines.push('Do NOT call brainstorm/grill/zoom_out/architect/tdd — they are overkill for a small change.');
-      break;
+  const lines = [
+    'All coding tasks follow the same methodology flow, driven by execution phases:',
+    '- Exploration: use brainstorm/grill/zoom_out/architect if the scope is unclear.',
+    '- Planning: use brainstorm/grill/architect/tdd to design the approach.',
+    '- Implementation: make focused edits; use diagnose if you encounter issues.',
+    '- Inspection: review changed files for correctness.',
+    '- Verification: verify/review/coverage_check with real runtime evidence.',
+    '',
+    'The execution plan advances automatically; just follow the DAG.',
+    'You MUST run a functional test at the final step before finishing — this is mandatory for all coding tasks.',
+  ];
 
-    case RISK_LEVEL.MEDIUM:
-      lines.push(
-        'This task is medium-risk: read the project first, make focused edits, then run a real verification command (test/lint/build).',
-      );
-      lines.push('You MUST run a functional test at the final step before finishing — this is mandatory for all coding tasks.');
-      lines.push('Call review/verify/diagnose only if you are uncertain about the change; do NOT call them as a ritual.');
-      break;
-
-    case RISK_LEVEL.HIGH:
-      lines.push(
-        'This task is high-risk: read relevant code first, consider calling grill or zoom_out if the scope is unclear, then implement and review.',
-      );
-      lines.push('After editing, call review on changed files AND run a real verification command.');
-      break;
-
-    case RISK_LEVEL.CRITICAL:
-      lines.push(
-        'This task is critical-risk: call architect or zoom_out to clarify the plan before touching code.',
-      );
-      lines.push('If tests exist or should exist, consider tdd. After editing, call review AND verify AND run tests/build.');
-      break;
-
-    default:
-      lines.push('Make the smallest necessary change and verify it with a real command.');
-  }
-
-  if (domains.length > 0 && (riskLevel === RISK_LEVEL.HIGH || riskLevel === RISK_LEVEL.CRITICAL)) {
+  if (domains.length > 0) {
     const checklist = domains.map((d) => `- ${d.label}: ${d.checklist}`).join('\n');
-    lines.push('High-risk semantics detected. Before finishing, verify these specifically:\n' + checklist);
+    lines.push('Semantic risk domains detected. Before finishing, verify these specifically:\n' + checklist);
   }
 
   return lines.join('\n');
@@ -589,7 +511,6 @@ export default {
   quickAssess,
   deepAssess,
   computeIterationBudget,
-  getToolNamesForRiskLevel,
   getCompletionGates,
   getMethodologyGuidance,
 };

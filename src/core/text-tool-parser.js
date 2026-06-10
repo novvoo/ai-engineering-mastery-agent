@@ -56,6 +56,137 @@ export class TextToolParser {
   }
 
   /**
+   * Detect responses that *look like* tool calls but fail to parse with
+   * one of the strict formats.  The caller should use this information
+   * to ask the LLM to re-emit in a supported format rather than treating
+   * the malformed text as a final answer.
+   *
+   * Returns null when nothing suspicious is found; otherwise returns an
+   * object describing the issue, e.g.
+   *   { tag: "action_close_mismatch",
+   *     opening: "<action>",
+   *     closing: "</annotation>",
+   *     hint: "Opening tag <action> must be closed by </action>" }
+   */
+  detectMalformedToolCall(text) {
+    if (!text || typeof text !== 'string') {return null;}
+
+    // If strict parsing already yielded a tool call, it's not malformed.
+    const strictCalls = this.#strictParse(text);
+    if (strictCalls.length > 0) {return null;}
+
+    return this.#scanForToolIntentWithoutParse(text);
+  }
+
+  /**
+   * A slimmed-down version of `parse()` that only runs the strict,
+   * unambigous format detectors.  Used to answer "did the LLM already
+   * emit a properly-formed tool call?" without the NL heuristic fallback.
+   */
+  #strictParse(text) {
+    const toolCalls = [];
+    toolCalls.push(...this.#parseDSMLFormat(text));
+    toolCalls.push(...this.#parseCALLFormat(text));
+    toolCalls.push(...this.#parseJSONBlockFormat(text));
+    toolCalls.push(...this.#parseActionTagFormat(text));
+    toolCalls.push(...this.#parseRawJSONActionFormat(text));
+    toolCalls.push(...this.#parseFunctionCallsFormat(text));
+    toolCalls.push(...this.#parseFunctionCallTagFormat(text));
+    toolCalls.push(...this.#parseToolCallTagFormat(text));
+    toolCalls.push(...this.#parseXMLFormat(text));
+    toolCalls.push(...this.#parseNamedToolXMLFormat(text));
+    return this.#deduplicate(toolCalls);
+  }
+
+  #scanForToolIntentWithoutParse(text) {
+    // --- 1. XML-style opening tags without a matching close
+    const tagPatterns = [
+      { open: /<action\b[^>]*>/gi, expectedClose: '</action>' },
+      { open: /<tool_call\b[^>]*>/gi, expectedClose: '</tool_call>' },
+      { open: /<function_call\b[^>]*>/gi, expectedClose: '</function_call>' },
+      { open: /<tool_code\b[^>]*>/gi, expectedClose: '</tool_code>' },
+      { open: /<invoke\b[^>]*>/gi, expectedClose: '</invoke>' },
+    ];
+
+    for (const { open, expectedClose } of tagPatterns) {
+      const m = text.match(open);
+      if (!m || m.length === 0) continue;
+
+      // Look at what *follows* the first opening tag to find the
+      // actual close tag (if any).
+      const openStart = text.search(open);
+      const afterOpen = text.substring(openStart + m[0].length);
+
+      // Is there a *different* close tag before any expected one?
+      const anyClose = afterOpen.match(/<\/[A-Za-z_][\w-]*>\s*$/);
+      const firstCloseMatch = afterOpen.match(/<\/[A-Za-z_][\w-]*>/);
+      const closeTag = firstCloseMatch ? firstCloseMatch[0] : null;
+
+      // Does the text end with the expected close tag?
+      const trimmed = text.trim();
+      const endsWithExpected = trimmed.endsWith(expectedClose);
+
+      if (!endsWithExpected) {
+        return {
+          tag: 'xml_close_mismatch_or_missing',
+          opening: m[0],
+          closing: closeTag || '(missing — response ended without a close tag)',
+          hint: `Opening tag ${m[0].replace(/\s+$/, '')} must be closed by ${expectedClose}. The current response has a malformed closing tag.`,
+          sample: text.substring(openStart, Math.min(openStart + 160, text.length)) + (openStart + 160 < text.length ? '…' : ''),
+        };
+      }
+    }
+
+    // --- 2. ```tool fence with invalid JSON inside
+    const fenceRegex = /```(?:tool|json)?\s*\n?([\s\S]*?)```/gi;
+    let fence;
+    while ((fence = fenceRegex.exec(text)) !== null) {
+      const body = fence[1].trim();
+      if (body.startsWith('{') && body.endsWith('}')) {
+        const parsed = this.#safeJSONParse(body);
+        if (!parsed || typeof parsed !== 'object') {
+          return {
+            tag: 'tool_code_block_invalid_json',
+            opening: '```tool',
+            closing: '```',
+            hint: 'The JSON inside the ```tool code fence could not be parsed.',
+            sample: body.substring(0, 160),
+          };
+        }
+      }
+    }
+
+    // --- 3. CALL format prefix without a well-formed JSON argument
+    const callMatch = text.match(/\bCALL\s+\/?([A-Za-z_][\w-]*)\s*\(\s*\{/);
+    if (callMatch) {
+      const braceIdx = callMatch.index + callMatch[0].length - 1;
+      const found = this.#findBalancedJSON(text, braceIdx);
+      if (!found) {
+        return {
+          tag: 'call_unbalanced_json',
+          opening: `CALL ${callMatch[1]}({`,
+          closing: '(no matching })',
+          hint: `CALL ${callMatch[1]}({'{...}'}) must contain a balanced JSON object.`,
+          sample: text.substring(callMatch.index, Math.min(callMatch.index + 160, text.length)),
+        };
+      }
+      const jsonText = text.substring(braceIdx, found.endIdx);
+      const parsed = this.#safeJSONParse(jsonText);
+      if (!parsed || typeof parsed !== 'object') {
+        return {
+          tag: 'call_invalid_json',
+          opening: `CALL ${callMatch[1]}({`,
+          closing: '})',
+          hint: `CALL ${callMatch[1]}({'{...}'}) contains text that cannot be parsed as JSON (unescaped quotes inside string values are the most common cause).`,
+          sample: jsonText.substring(0, 160),
+        };
+      }
+    }
+
+    return null;
+  }
+
+  /**
    * 格式 1: CALL tool_name({"param": "value"})
    */
   /**
@@ -138,8 +269,23 @@ export class TextToolParser {
       if (!found) {continue;}
 
       try {
-        const args = this.#safeJSONParse(found.content);
-        if (args) {
+        let args = this.#safeJSONParse(found.content);
+
+        // Fallback: if JSON parsing fails (common when the argument value
+        // contains code with unescaped quotes like: {"command": "echo "abc""}),
+        // try to extract the first string value for a few well-known keys
+        // (command, path, query, url, content) directly from the raw text.
+        // This keeps the tool call functional instead of being silently
+        // dropped, which would cause the raw CALL text to leak back to the
+        // user as an unhandled final answer.
+        if (!args || typeof args !== 'object' || Array.isArray(args)) {
+          const recovered = this.#recoverCallArguments(found.content);
+          if (recovered && Object.keys(recovered).length > 0) {
+            args = recovered;
+          }
+        }
+
+        if (args && typeof args === 'object' && !Array.isArray(args)) {
           const { name, args: normalizedArgs } = this.#normalizeJSONToolCall(toolName, args);
           if (this.#toolRegistry?.has && !this.#toolRegistry.has(name)) {
             headerRegex.lastIndex = found.endIdx;
@@ -148,7 +294,9 @@ export class TextToolParser {
           toolCalls.push({
             id: `call_${Date.now()}_${toolCalls.length}`,
             name,
-            arguments: args && typeof args === 'object' && !Array.isArray(args) ? normalizedArgs : args,
+            arguments: normalizedArgs && typeof normalizedArgs === 'object' && !Array.isArray(normalizedArgs)
+              ? normalizedArgs
+              : args,
             source: 'CALL_format',
           });
         }
@@ -160,6 +308,219 @@ export class TextToolParser {
     }
 
     return toolCalls;
+  }
+
+  /**
+   * Recover arguments from a raw CALL {...} payload when strict JSON
+   * parsing fails. The most common failure mode is unescaped double
+   * quotes inside string values — e.g.,
+   *   {"command": "node -e 'console.log(\"hi\");'" }
+   * has internal `"` characters that break JSON parsing.
+   *
+   * Strategy: scan for top-level `"key" :` markers and pair each key
+   * with the raw content up to the next `"key" :` marker, a trailing
+   * `}`, or end-of-text. This is tolerant of unescaped quotes inside
+   * the value. When the value itself starts with `{` or `[`, we fall
+   * back to balanced-delimiter extraction.
+   */
+  #recoverCallArguments(rawContent) {
+    if (!rawContent || typeof rawContent !== 'string') {return null;}
+
+    const content = rawContent.trim();
+    if (!content.startsWith('{')) {return null;}
+
+    // Work on the text inside the outer braces.
+    const endBrace = this.#findMatchingBrace(content, 0);
+    const innerEnd = endBrace === -1 ? content.length : endBrace;
+    const inner = content.slice(1, innerEnd);
+
+    // Find top-level `"key"` markers followed by `:` or `=`. A marker is
+    // "top-level" only when it appears outside nested `{...}` / `[...]`
+    // / quoted strings. We re-use the same balanced scanner as the
+    // CALL parser but with inverted semantics: record each
+    // `  "identifier"  :` boundary position.
+    const keyPositions = this.#findTopLevelKeyPositions(inner);
+
+    const result = {};
+    for (let i = 0; i < keyPositions.length; i++) {
+      const { key, keyEnd } = keyPositions[i];
+      const nextStart = i + 1 < keyPositions.length
+        ? keyPositions[i + 1].keyStart
+        : inner.length;
+      // Extract the value slice between this key's `:` and the next
+      // key (or the end of the inner text).
+      const valueRaw = inner.slice(keyEnd, nextStart).trim();
+      const value = this.#extractRecoveredValue(valueRaw);
+      if (value !== null && value !== undefined) {
+        result[key] = value;
+      }
+    }
+
+    return Object.keys(result).length > 0 ? result : null;
+  }
+
+  #findMatchingBrace(text, openIdx) {
+    if (text[openIdx] !== '{') {return -1;}
+    let depth = 0;
+    let inString = false;
+    let stringChar = '';
+    let escaped = false;
+    for (let i = openIdx; i < text.length; i++) {
+      const ch = text[i];
+      if (inString) {
+        if (escaped) {escaped = false; continue;}
+        if (ch === '\\') {escaped = true; continue;}
+        if (ch === stringChar) {inString = false;}
+        continue;
+      }
+      if (ch === '"' || ch === "'") {inString = true; stringChar = ch; continue;}
+      if (ch === '{' || ch === '[') {depth++; continue;}
+      if (ch === '}' || ch === ']') {
+        depth--;
+        if (depth === 0 && ch === '}') {return i;}
+      }
+    }
+    return -1;
+  }
+
+  #findTopLevelKeyPositions(text) {
+    const positions = [];
+    let depth = 0;
+    let inString = false;
+    let stringChar = '';
+    let escaped = false;
+
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (inString) {
+        if (escaped) {escaped = false; continue;}
+        if (ch === '\\') {escaped = true; continue;}
+        if (ch === stringChar) {inString = false;}
+        continue;
+      }
+      if (ch === '"' || ch === "'") {
+        // Potential key start: a "..." or '...' that ends with `:` or `=`.
+        const quoteChar = ch;
+        const afterOpen = i + 1;
+        const closeIdx = this.#findNextUnescapedQuote(text, afterOpen, quoteChar);
+        if (closeIdx === -1) {
+          // No matching quote — treat this as an interior quote and
+          // continue scanning; it will be absorbed into an outer value.
+          continue;
+        }
+        const candidateKey = text.slice(afterOpen, closeIdx);
+        // Only recognise ASCII identifier-style keys (with dashes &
+        // underscores). Anything else is a quote inside a value.
+        if (!/^[A-Za-z_][\w-]*$/.test(candidateKey)) {
+          // Not a key candidate — but still consume up to closeIdx
+          // so the scanner stays aware of the quote balance.
+          i = closeIdx;
+          continue;
+        }
+        // After the closing quote, skip whitespace; there must be
+        // a `:` or `=` to call this a key.
+        let j = closeIdx + 1;
+        while (j < text.length && /\s/.test(text[j])) {j++;}
+        if (j < text.length && (text[j] === ':' || text[j] === '=')) {
+          positions.push({
+            key: candidateKey,
+            keyStart: i,
+            keyEnd: j + 1,
+          });
+          i = j;
+          continue;
+        }
+        // Not a key — treat as value interior, advance past close quote.
+        i = closeIdx;
+        continue;
+      }
+      if (ch === '{' || ch === '[') {depth++; continue;}
+      if (ch === '}' || ch === ']') {depth = Math.max(0, depth - 1); continue;}
+    }
+    return positions;
+  }
+
+  #findNextUnescapedQuote(text, start, quoteChar) {
+    let escaped = false;
+    for (let i = start; i < text.length; i++) {
+      const ch = text[i];
+      if (escaped) {escaped = false; continue;}
+      if (ch === '\\') {escaped = true; continue;}
+      if (ch === quoteChar) {return i;}
+    }
+    return -1;
+  }
+
+  #extractRecoveredValue(raw) {
+    if (!raw || typeof raw !== 'string') {return null;}
+    let value = raw.trim();
+
+    // Strip a trailing comma (left over when the next key follows).
+    if (value.endsWith(',')) {value = value.slice(0, -1).trim();}
+
+    if (value.length === 0) {return '';}
+
+    // Quoted value: strip the matched outer quote pair.
+    if (value.startsWith('"') || value.startsWith("'")) {
+      const openQuote = value[0];
+      // Prefer a matching closing quote at the very end; otherwise
+      // search backwards (skipping escaped ones).
+      if (value.length >= 2 && value[value.length - 1] === openQuote) {
+        return value.slice(1, -1);
+      }
+      for (let i = value.length - 1; i > 0; i--) {
+        if (value[i] === openQuote && value[i - 1] !== '\\') {
+          return value.slice(1, i);
+        }
+      }
+      return value.slice(1);
+    }
+
+    // Object / array literal: try balanced-extraction and JSON.parse,
+    // but fall back to the raw slice if JSON.parse still fails.
+    if (value.startsWith('{') || value.startsWith('[')) {
+      const closed = value.startsWith('{')
+        ? this.#findMatchingBrace(value, 0)
+        : this.#findMatchingBracket(value, 0);
+      const sliceEnd = closed === -1 ? value.length : closed + 1;
+      const candidate = value.slice(0, sliceEnd);
+      try {
+        return JSON.parse(candidate);
+      } catch {
+        return candidate;
+      }
+    }
+
+    // Simple literal — try JSON.parse for number/boolean/null, else raw.
+    try {
+      return JSON.parse(value);
+    } catch {
+      return value;
+    }
+  }
+
+  #findMatchingBracket(text, openIdx) {
+    if (text[openIdx] !== '[') {return -1;}
+    let depth = 0;
+    let inString = false;
+    let stringChar = '';
+    let escaped = false;
+    for (let i = openIdx; i < text.length; i++) {
+      const ch = text[i];
+      if (inString) {
+        if (escaped) {escaped = false; continue;}
+        if (ch === '\\') {escaped = true; continue;}
+        if (ch === stringChar) {inString = false;}
+        continue;
+      }
+      if (ch === '"' || ch === "'") {inString = true; stringChar = ch; continue;}
+      if (ch === '[' || ch === '{') {depth++; continue;}
+      if (ch === ']' || ch === '}') {
+        depth--;
+        if (depth === 0 && ch === ']') {return i;}
+      }
+    }
+    return -1;
   }
 
   /**
@@ -458,17 +819,22 @@ export class TextToolParser {
   /**
    * 格式 3: <action>{"tool_name": {"param": "value"}}</action>
    * Some models emit XML-wrapped JSON even when instructed to use CALL.
+   *
+   * Only strict matches are accepted here.  When the opening tag is
+   * `<action>` but the close tag is something else (e.g. `</annotation>`,
+   * `</action_tag>`), the parser deliberately falls through without
+   * emitting a tool call — that case is surfaced as a *malformed tool
+   * call* by `detectMalformedToolCall()` below, so the agent can ask
+   * the LLM to re-emit in a supported format instead of guessing.
    */
   #parseActionTagFormat(text) {
     const toolCalls = [];
     const actionRegex = /<action>\s*([\s\S]*?)\s*<\/action>/gi;
     let match;
-
     while ((match = actionRegex.exec(text)) !== null) {
       const json = this.#safeJSONParse(match[1].trim());
       toolCalls.push(...this.#toolCallsFromJSON(json, 'action_tag', toolCalls.length));
     }
-
     return toolCalls;
   }
 

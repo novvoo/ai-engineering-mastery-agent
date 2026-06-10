@@ -330,12 +330,12 @@ describe('Desktop Event Forwarding', () => {
       throw new Error('Expected ipcConnected to be a boolean, got ' + typeof state.ipcConnected);
     }
 
-    // After attach with mock, ipcConnected should be true
+    // After attach with mock, adapter gets initialized automatically
     const mockIpcMain = { handle: () => {}, on: () => {} };
     core.attachIPCAdapter(mockIpcMain);
     const afterAttach = core.getState();
-    if (afterAttach.ipcConnected !== false) {
-      throw new Error('Expected ipcConnected to be false (adapter not initialized), got ' + afterAttach.ipcConnected);
+    if (afterAttach.ipcConnected !== true) {
+      throw new Error('Expected ipcConnected to be true after attach (initialized), got ' + afterAttach.ipcConnected);
     }
 
     await core.dispose();
@@ -357,9 +357,9 @@ describe('Desktop Event Forwarding', () => {
       throw new Error('Expected adapter to have initialize method');
     }
 
-    // Adapter is not connected by default
-    if (adapter.isConnected !== false) {
-      throw new Error('Expected adapter isConnected to be false, got ' + adapter.isConnected);
+    // Adapter gets initialized automatically on attach
+    if (adapter.isConnected !== true) {
+      throw new Error('Expected adapter isConnected to be true after attach, got ' + adapter.isConnected);
     }
 
     await core.dispose();

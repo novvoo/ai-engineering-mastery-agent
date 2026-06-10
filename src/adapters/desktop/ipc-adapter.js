@@ -460,6 +460,7 @@ export class MainProcessIPCAdapter extends IPCAdapterBase {
   #windows;
   #windowSenders;
   #handlers;
+  #handlersSetup;
 
   constructor(ipcMain, eventBus, config = {}) {
     super(config);
@@ -468,10 +469,11 @@ export class MainProcessIPCAdapter extends IPCAdapterBase {
     this.#windows = new Set();
     this.#windowSenders = new Map();
     this.#handlers = new Map();
+    this.#handlersSetup = false;
   }
 
   /**
-   * 初始化适配器
+   * 初始化适配器（幂等：重复调用不会重新注册 IPC handler）
    */
   async initialize() {
     this.#setupIPCHandlers();
@@ -484,9 +486,12 @@ export class MainProcessIPCAdapter extends IPCAdapterBase {
   }
 
   /**
-   * 设置 IPC 处理器
+   * 设置 IPC 处理器（幂等：只注册一次，避免 Electron 抛出重复 handler 错误）
    */
   #setupIPCHandlers() {
+    if (this.#handlersSetup) return;
+    this.#handlersSetup = true;
+
     // 处理连接请求
     this.#ipcMain.handle(IPCMessageType.CONNECT, (event) => {
       const windowId = event.sender.id;
@@ -945,6 +950,7 @@ export class MainProcessIPCAdapter extends IPCAdapterBase {
     super.disconnect();
     this.#windows.clear();
     this.#windowSenders.clear();
+    this.#handlersSetup = false;
     this.removeAllListeners();
     
     if (this.config.debug) {

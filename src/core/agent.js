@@ -381,7 +381,7 @@ export class ReActAgent {
     // 异步预热工作目录索引（不阻塞首轮迭代）
     // 首次构建 1-3s，后续 <100ms。摘要在第 2-3 轮到达，
     // 正好 Agent 还在探索阶段，不影响决策质量
-    if (this.#workspaceIndex && taskProfile.isCodingTask && !taskProfile.isLikelyTrivial) {
+    if (this.#workspaceIndex && taskProfile.isCodingTask) {
       this.#warmWorkspaceCache().then(summary => {
         if (summary && this.#sessionManager) {
           this.#sessionManager.addUserMessage(summary);
@@ -431,6 +431,7 @@ export class ReActAgent {
           userInput,
           taskProfile: this.#activeTaskProfile,
           intent,
+          currentPhase: this.#deriveCurrentPhase(iteration, maxIterations),
         });
         const functions = this.#toolRegistry.toFunctionDefinitions(routedTools);
 
@@ -442,6 +443,7 @@ export class ReActAgent {
           toolDefinitions: functions.length,
           registeredToolDefinitions: this.#toolRegistry.size,
           routedToolNames: functions.map(tool => tool.name),
+          currentPhase: this.#deriveCurrentPhase(iteration, maxIterations),
           maxTokens: this.#config.maxTokens,
           lastUserMessage: this.#preview(
             [...messages].reverse().find(message => message.role === 'user')?.content || '',
@@ -1125,6 +1127,41 @@ export class ReActAgent {
     );
   }
 
+  /**
+   * Derive the current execution phase from the active execution plan.
+   *
+   * 所有编码修改任务现在都有 ExecutionPlan，所以阶段总是从 plan 推导。
+   * 只读编码任务和非编码任务返回 null，由 tool-router 降级处理。
+   */
+  #deriveCurrentPhase(iteration, maxIterations) {
+    // 从 ExecutionPlan 推导
+    if (this.#activeExecutionPlan && this.#activeExecutionPlan.status === TaskStatus.RUNNING) {
+      const runningTask = Array.from(this.#activeExecutionPlan.tasks.values())
+        .find(task => task.status === TaskStatus.RUNNING);
+
+      if (runningTask) {
+        switch (runningTask.id) {
+          case 'inspect_workspace': return 'exploration';
+          case 'plan_solution': return 'planning';
+          case 'implement_changes': return 'implementation';
+          case 'inspect_changes': return 'inspection';
+          case 'semantic_risk_review':
+          case 'verify_result': return 'verification';
+        }
+      }
+
+      // 所有 task 都已完成但 plan 尚未关闭 → 验证阶段
+      const allCompleted = Array.from(this.#activeExecutionPlan.tasks.values())
+        .every(task => task.status === TaskStatus.COMPLETED);
+      if (allCompleted) {
+        return 'verification';
+      }
+    }
+
+    // 无 Plan（非修改类编码任务、非编码任务）→ 无阶段感知
+    return null;
+  }
+
   #advanceAutomaticPlan(toolName, args, result) {
     const plan = this.#activeExecutionPlan;
     if (!plan || plan.status !== TaskStatus.RUNNING) {
@@ -1797,6 +1834,12 @@ export class ReActAgent {
 
   #containsUnparsedToolSyntax(responseText) {
     const response = String(responseText || '');
+    // Prefer the new TextToolParser diagnostics (it is format-aware
+    // and tells us *what* went wrong). Falls back to regex heuristics.
+    if (this.#textToolParser?.detectMalformedToolCall) {
+      const diag = this.#textToolParser.detectMalformedToolCall(response);
+      if (diag) return true;
+    }
     return [
       /<tool_code>[\s\S]*?<\/tool_code>/i,
       /<tool_call>[\s\S]*?<\/tool_call>/i,
@@ -1810,8 +1853,17 @@ export class ReActAgent {
 
   #buildToolSyntaxCorrectionPrompt(responseText) {
     const toolNames = this.#toolRegistry.getAll().map(tool => tool.name).slice(0, 24).join(', ');
+    const diag = this.#textToolParser?.detectMalformedToolCall
+      ? this.#textToolParser.detectMalformedToolCall(String(responseText || ''))
+      : null;
+
+    const diagnosis = diag
+      ? `\nParser diagnosis:\n  - problem: ${diag.tag}\n  - opening: ${diag.opening}\n  - closing: ${diag.closing}\n  - detail: ${diag.hint}\n`
+      : '';
+
     return (
       `Your previous response looked like a tool call, but this runtime could not parse it, so it must not be treated as a final answer.\n` +
+      `${diagnosis}\n` +
       `Previous response:\n${responseText}\n\n` +
       `Use one valid tool-call format now. Prefer: CALL tool_name({"param":"value"}). ` +
       `Available tools include: ${toolNames}. If you are actually finished, respond with FINAL_ANSWER: and summarize the completed work for the user.`
@@ -1836,15 +1888,9 @@ export class ReActAgent {
       risk = mergeIntentProfile(risk, intent, userInput);
     }
 
-    const mentionsMultipleArtifacts = /(多个|拆分|分离|接口|controller|route|schema|resolver|service|component|module|html.*js|js.*html|css|测试)/i.test(String(userInput || ''))
-      || /\b(multiple|separate|separate|split|html.*js|js.*html|css|tests?|docs?|route|controller|schema|resolver|endpoint|component|service|module)\b/i.test(String(userInput || ''));
-    const likelyFeatureWork = /(实现|创建|新建|写一个|做一个|开发|生成)/i.test(String(userInput || ''))
-      || /\b(implement|create|build|write|develop|generate|add)\b/i.test(String(userInput || ''));
-
-    // 自动执行计划仅在"需要修改代码"的任务上生成
-    const requiresAutomaticPlanning = risk.isModificationTask &&
-      risk.riskLevel !== RISK_LEVEL.LOW &&
-      (mentionsMultipleArtifacts || likelyFeatureWork || risk.isBugTask);
+    // 所有编码修改任务都走 ExecutionPlan → 提供阶段感知的工具加载
+    // 不再因风险等级或 trivial 标记跳过计划。简单任务在计划中自然快速通过各阶段。
+    const requiresAutomaticPlanning = risk.isModificationTask;
 
     return {
       isCodingTask: risk.isCodingTask,
@@ -1852,8 +1898,8 @@ export class ReActAgent {
       isBugTask: risk.isBugTask,
       isLikelyTrivial: risk.isLikelyTrivial,
       requiresAutomaticPlanning,
-      // semantic risk review 仅在需要修改代码的任务上启用
-      requiresSemanticRiskReview: risk.semanticDomains.length > 0 && risk.isModificationTask && !risk.isLikelyTrivial,
+      // semantic risk review 在修改代码的任务上启用（不因 isLikelyTrivial 跳过）
+      requiresSemanticRiskReview: risk.semanticDomains.length > 0 && risk.isModificationTask,
       semanticRiskDomains: risk.semanticDomains,
       riskLevel: risk.riskLevel,
       riskScore: risk.score,
