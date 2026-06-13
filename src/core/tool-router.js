@@ -6,6 +6,8 @@ const CORE_READ_TOOLS = [
   'search',
   'glob',
   'semantic_search',
+  'web_search',
+  'web_fetch',
 ];
 
 const CORE_WRITE_TOOLS = [

@@ -32,7 +32,7 @@ import {
  * @param {Function} props.onClear - 清空消息回调
  * @param {Function} props.onAskAgent - 将错误消息交给 Agent 处理
  */
-function MessageLog({ messages, status, onClear, onAskAgent }) {
+function MessageLog({ messages, status, workingDirectory, fileServerUrl, onClear, onAskAgent }) {
   const ipc = useIPC();
 
   // 在消息容器上用事件委托捕获所有 <a> 标签的点击
@@ -497,6 +497,8 @@ function MessageLog({ messages, status, onClear, onAskAgent }) {
             text={msg.content || msg.message || ''}
             isCollapsed={isCollapsed}
             isUser={isUser}
+            workingDirectory={workingDirectory}
+            fileServerUrl={fileServerUrl}
             markdownComponents={markdownComponents}
             onLinkClick={handleMessageContainerClick}
           />

@@ -22,6 +22,8 @@ export function ChatWorkspace({
   onOpenPreview,
   onToggleInspector,
   summaryPanelVisible,
+  workingDirectory,
+  fileServerUrl,
 }) {
   return (
     <div style={styles.chatArea}>
@@ -48,6 +50,8 @@ export function ChatWorkspace({
         <MessageLog
           messages={runtime.messages}
           status={runtime.status}
+          workingDirectory={workingDirectory}
+          fileServerUrl={fileServerUrl}
           onClear={runtime.clearMessages}
           onAskAgent={onAskAgentFromMessage}
         />

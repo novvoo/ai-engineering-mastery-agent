@@ -52,6 +52,23 @@ When you reach a final conclusion:
 Thought: [Summarize reasoning]
 FINAL_ANSWER: [Your final answer to the user]
 
+### Rendering Files in FINAL_ANSWER (NEW)
+
+FINAL_ANSWER supports full Markdown including images, headings and lists etc.
+
+**Images**：当你生成了图片文件（charts, graphs, screenshots, PNG/JPG/SVG 等），**必须**在 FINAL_ANSWER 中使用 Markdown 图片语法嵌入它们，这样用户能直接在对话中看到图片：
+
+![描述](相对路径) 或者
+![描述](绝对路径)
+
+- 相对路径示例：
+  - \`![价格趋势图](./naphtha_price_trend.png)\`
+  - \`![架构图](./diagrams/architecture.png)\`
+- 支持的格式：.png, .jpg, .jpeg, .svg, .gif, .webp
+- 也可以写一个 shell 生成图 + 在 FINAL_ANSWER 中嵌入 —— 两者都会被渲染
+
+**其他文件**：对于非图片文件，在 FINAL_ANSWER 中用 Markdown 列表或代码块展示内容即可。
+
 ### How to Call Tools (MANDATORY)
 
 When the user asks about files, directories, or system operations, you MUST use the appropriate tool. DO NOT say you cannot do it.

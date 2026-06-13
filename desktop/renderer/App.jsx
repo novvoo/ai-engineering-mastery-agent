@@ -63,6 +63,7 @@ function App() {
   // 状态管理
   const [activeTab, setActiveTab] = useState('agent');
   const [workingDirectory, setWorkingDirectory] = useState('');
+  const [fileServerUrl, setFileServerUrl] = useState('');
   const [llmConfigStatus, setLLMConfigStatus] = useState(null);
   const [showLLMSetup, setShowLLMSetup] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -260,6 +261,11 @@ function App() {
       }
 
       setWorkingDirectory(nextDirectory);
+      ipc.getAppInfo().then(info => {
+        if (isMounted && info?.fileServerUrl) {
+          setFileServerUrl(info.fileServerUrl);
+        }
+      }).catch(() => {});
       setDirectoryChildren({});
       setExpandedDirectories(new Set(['']));
       setProjectTreeError('');
@@ -354,6 +360,9 @@ function App() {
         }
         console.log('[App] 应用信息:', info);
         setWorkingDirectory(info.workingDirectory);
+        if (info.fileServerUrl) {
+          setFileServerUrl(info.fileServerUrl);
+        }
       });
 
       ipc.getLLMConfigStatus().then(status => {
@@ -1103,6 +1112,8 @@ function App() {
           }}
           onToggleInspector={() => setSummaryPanelVisible(prev => !prev)}
           summaryPanelVisible={summaryPanelVisible}
+          workingDirectory={workingDirectory}
+          fileServerUrl={fileServerUrl}
         />
 
         {summaryPanelVisible && (

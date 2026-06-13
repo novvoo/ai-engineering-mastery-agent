@@ -7,6 +7,7 @@ import electron from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import http from 'http';
 import { APP_COPYRIGHT, APP_CREDITS, APP_NAME } from './app-metadata.js';
 
 // 获取当前目录
@@ -56,6 +57,8 @@ class ElectronMainApp {
   #isQuitting = false;
   #userEnvPath = null;
   #workspaceWatcher = null;
+  #fileServer = null;
+  #fileServerUrl = null;
 
   constructor(config = {}) {
     this.#userEnvPath = config.userEnvPath || getUserEnvPath();
@@ -127,6 +130,95 @@ class ElectronMainApp {
   }
 
   /**
+   * 启动工作目录静态文件服务器
+   * 用于在渲染进程中通过 HTTP 加载本地图片（绕过 Electron webSecurity 对 file:// 的限制）
+   */
+  #startFileServer() {
+    try {
+      this.#stopFileServer();
+
+      const root = path.resolve(this.#config.workingDirectory);
+      const server = http.createServer((req, res) => {
+        if (req.method !== 'GET' && req.method !== 'HEAD') {
+          res.writeHead(405); res.end('Method Not Allowed'); return;
+        }
+
+        try {
+          const urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
+          const safePath = urlPath.replace(/\.\.\//g, '').replace(/^\//, '');
+          const candidate = path.join(root, safePath);
+
+          const normalizedRoot = path.resolve(root);
+          const normalizedCandidate = path.resolve(candidate);
+          if (!normalizedCandidate.startsWith(normalizedRoot + path.sep) && normalizedCandidate !== normalizedRoot) {
+            res.writeHead(403); res.end('Forbidden'); return;
+          }
+
+          if (!fs.existsSync(candidate) || !fs.statSync(candidate).isFile()) {
+            res.writeHead(404); res.end('Not Found'); return;
+          }
+
+          const ext = path.extname(candidate).toLowerCase();
+          const mime = {
+            '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+            '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml',
+            '.bmp': 'image/bmp', '.ico': 'image/x-icon',
+            '.txt': 'text/plain', '.md': 'text/markdown',
+            '.html': 'text/html', '.htm': 'text/html',
+            '.json': 'application/json',
+            '.pdf': 'application/pdf',
+          }[ext] || 'application/octet-stream';
+
+          res.writeHead(200, {
+            'Content-Type': mime,
+            'Cache-Control': 'no-store',
+            'Access-Control-Allow-Origin': '*',
+          });
+
+          if (req.method === 'HEAD') { res.end(); return; }
+          fs.createReadStream(candidate).pipe(res);
+        } catch (err) {
+          res.writeHead(500); res.end('Internal Server Error');
+        }
+      });
+
+      server.on('error', (err) => {
+        console.error('⚠️ 文件服务器错误:', err.message);
+      });
+
+      // 使用 41730~42730 范围的端口，从 41730 开始尝试
+      let port = 41730;
+      const tryListen = () => {
+        server.listen(port, '127.0.0.1', () => {
+          const actualPort = server.address().port;
+          this.#fileServerUrl = `http://127.0.0.1:${actualPort}`;
+          console.log(`📁 文件服务器已启动: ${this.#fileServerUrl} (root=${root})`);
+        }).on('error', (err) => {
+          if (err.code === 'EADDRINUSE' && port < 42730) {
+            port++;
+            server.removeAllListeners('error');
+            tryListen();
+          } else {
+            console.error('❌ 无法启动文件服务器:', err.message);
+          }
+        });
+      };
+      tryListen();
+      this.#fileServer = server;
+    } catch (err) {
+      console.error('❌ 文件服务器启动失败:', err.message);
+    }
+  }
+
+  #stopFileServer() {
+    if (this.#fileServer) {
+      try { this.#fileServer.close(); } catch {}
+      this.#fileServer = null;
+      this.#fileServerUrl = null;
+    }
+  }
+
+  /**
    * 初始化应用
    */
   async initialize() {
@@ -140,6 +232,9 @@ class ElectronMainApp {
 
     // 创建菜单
     this.#createMenu();
+
+    // 启动工作目录静态文件服务器（用于渲染 Markdown 中的本地图片）
+    this.#startFileServer();
 
     // 先初始化 Desktop Core 和 IPC，再创建窗口
     // 确保 ipc:connect 等处理器在渲染进程连接前已注册
@@ -625,6 +720,7 @@ class ElectronMainApp {
         platform: process.platform,
         arch: process.arch,
         workingDirectory: this.#config.workingDirectory,
+        fileServerUrl: this.#fileServerUrl,
         electronVersion: process.versions.electron
       };
     });
@@ -743,6 +839,7 @@ class ElectronMainApp {
     }
 
     this.#config.workingDirectory = directory;
+    this.#startFileServer();
 
     if (this.#desktopCore) {
       await this.#desktopCore.dispose();
@@ -757,7 +854,7 @@ class ElectronMainApp {
     await this.#desktopCore.initialize();
     this.#startWorkspaceWatcher();
 
-    return { success: true, workingDirectory: directory };
+    return { success: true, workingDirectory: directory, fileServerUrl: this.#fileServerUrl };
   }
 
   /**
