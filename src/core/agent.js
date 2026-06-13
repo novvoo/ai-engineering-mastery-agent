@@ -46,6 +46,13 @@ import {
   VERIFICATION_TOOLS,
 } from './agent-constants.js';
 
+import { TaskClassifier } from './task-classifier.js';
+import { ExecutionPlanManager, isWorkspaceInspectionTool, isPlanningTool, isMutationTool, isChangeInspectionTool, isVerificationTool, isSemanticRiskReviewTool, isSuccessfulToolResult } from './execution-plan-manager.js';
+import { ToolExecutor } from './tool-executor.js';
+import { ContextManager } from './context-manager.js';
+import { buildToolSyntaxCorrectionPrompt, buildToolUseCorrectionPrompt, buildCodingTaskOperatingPrompt, buildCodingCompletionGatePrompt, buildSemanticRiskGuidance, suggestVerificationStrategy, isTermination as isTerminationResponse, extractFinalAnswer, normalizeFinalAnswer, containsUnparsedToolSyntax as containsUnparsedSyntax, shouldCorrectToolRefusal as shouldCorrectRefusal, shouldBlockCodingFinal } from './prompt-builder.js';
+import { StagnationDetector } from './termination-detector.js';
+
 export class ReActAgent {
   /** @type {import('./tool-registry.js').ToolRegistry} */
   #modelProvider;
@@ -127,6 +134,18 @@ export class ReActAgent {
   #fileAnalyzer = null;
   #stopRequested = false;
 
+  // ============ 模块化子系统（模块化拆分 - 新模块引用 ============
+  /** @type {TaskClassifier|null} */
+  #taskClassifier = null;
+  /** @type {ExecutionPlanManager|null} */
+  #executionPlanManager = null;
+  /** @type {ToolExecutor|null} */
+  #toolExecutor = null;
+  /** @type {ContextManager|null} */
+  #contextManager = null;
+  /** @type {StagnationDetector|null} */
+  #stagnationDetector = null;
+
   constructor(modelProvider, toolRegistry, memoryManager, config = {}, customUI = ui) {
     this.#modelProvider = modelProvider;
     this.#toolRegistry = toolRegistry;
@@ -192,7 +211,21 @@ export class ReActAgent {
     this.#contentStore = new ContentAddressableStore();
     this.#fileAnalyzer = new FileAnalyzer(this.#contentStore);
 
-    
+    // 模块化子系统：任务分类、执行计划、工具执行、上下文管理、停滞检测
+    this.#taskClassifier = new TaskClassifier({ maxIterations: this.#config.maxIterations });
+    this.#executionPlanManager = new ExecutionPlanManager();
+    this.#toolExecutor = new ToolExecutor({
+      toolRegistry,
+      securityPolicy: this.#securityPolicy || null,
+      textToolParser: this.#textToolParser,
+      ui: this.#ui,
+      config: this.#config,
+      contentStore: this.#contentStore,
+      fileAnalyzer: this.#fileAnalyzer,
+    });
+    this.#contextManager = null; // 在 run() 内懒创建（需要 sessionManager 就绪）
+    this.#stagnationDetector = new StagnationDetector();
+
     // 初始化工作区状态追踪
     this.#initializeWorkspaceState(config);
   }
@@ -1512,20 +1545,8 @@ export class ReActAgent {
    * Check if the response indicates termination
    */
   #isTermination(response) {
-    if (!response) {
-      return false;
-    }
-
-    // Explicit termination keywords
-    if (TERMINATION_KEYWORDS.some(kw => response.includes(kw))) {
-      return true;
-    }
-
-    // Empty response detection
-    if (response.trim().length === 0) {
-      return true;
-    }
-
+    // 委托给 Termination 模块的关键字检测 + 重复响应检测（保留本地逻辑）
+    if (isTerminationResponse(response)) return true;
     // Repeated response detection (prevent infinite loops)
     if (this.#lastResponse === response) {
       this.#repeatCount++;
@@ -1535,10 +1556,8 @@ export class ReActAgent {
       }
     } else {
       this.#repeatCount = 0;
-
     }
     this.#lastResponse = response;
-
     return false;
   }
 
@@ -1546,50 +1565,11 @@ export class ReActAgent {
    * Extract the final answer from a termination response
    */
   #extractFinalAnswer(response) {
-    for (const keyword of TERMINATION_KEYWORDS) {
-      const idx = response.indexOf(keyword);
-      if (idx !== -1) {
-        return response.substring(idx + keyword.length).trim();
-      }
-    }
-    return response;
+    return extractFinalAnswer(response);
   }
 
   #normalizeFinalAnswer(response) {
-    const text = String(response || '').trim();
-    if (!text) {
-      return text;
-    }
-
-    const parsed = this.#parseJSONAnswer(text);
-    const doneText = parsed?.action?.done?.text || parsed?.done?.text;
-    if (typeof doneText === 'string' && doneText.trim()) {
-      return doneText.trim();
-    }
-
-    const directText = parsed?.text || parsed?.answer || parsed?.final_answer;
-    if (typeof directText === 'string' && directText.trim()) {
-      return directText.trim();
-    }
-
-    return text;
-  }
-
-  #parseJSONAnswer(text) {
-    try {
-      return JSON.parse(text);
-    } catch {
-      const firstBrace = text.indexOf('{');
-      const lastBrace = text.lastIndexOf('}');
-      if (firstBrace === -1 || lastBrace <= firstBrace) {
-        return null;
-      }
-      try {
-        return JSON.parse(text.slice(firstBrace, lastBrace + 1));
-      } catch {
-        return null;
-      }
-    }
+    return normalizeFinalAnswer(response);
   }
 
   /**
@@ -1954,41 +1934,15 @@ export class ReActAgent {
   }
 
   #classifyTask(userInput, intent = null) {
-    let risk = quickAssess(userInput);
-
-    // 如果有 intent 结果，用 LLM 意图识别覆盖/增强硬编码判断
-    if (intent) {
-      risk = mergeIntentProfile(risk, intent, userInput);
-    }
-
-    // 所有编码修改任务都走 ExecutionPlan → 提供阶段感知的工具加载
-    // 不再因风险等级或 trivial 标记跳过计划。简单任务在计划中自然快速通过各阶段。
-    const requiresAutomaticPlanning = risk.isModificationTask;
-
-    return {
-      isCodingTask: risk.isCodingTask,
-      isModificationTask: risk.isModificationTask,
-      isBugTask: risk.isBugTask,
-      isLikelyTrivial: risk.isLikelyTrivial,
-      requiresAutomaticPlanning,
-      // semantic risk review 在修改代码的任务上启用（不因 isLikelyTrivial 跳过）
-      requiresSemanticRiskReview: risk.semanticDomains.length > 0 && risk.isModificationTask,
-      semanticRiskDomains: risk.semanticDomains,
-      riskLevel: risk.riskLevel,
-      riskScore: risk.score,
-      riskReasons: risk.reasons,
-    };
+    return this.#taskClassifier.classify(userInput, intent);
   }
 
   #inferSemanticRiskDomains(userInput) {
-    const text = String(userInput || '');
-    return SEMANTIC_RISK_DOMAINS
-      .filter(domain => domain.pattern.test(text))
-      .map(({ id, label, checklist }) => ({ id, label, checklist }));
+    return this.#taskClassifier.inferSemanticRiskDomains(userInput);
   }
 
   #buildSemanticRiskGuidance() {
-    return buildSemanticRiskGuidanceText(this.#activeTaskProfile?.semanticRiskDomains || []);
+    return buildSemanticRiskGuidance(this.#activeTaskProfile?.semanticRiskDomains || []);
   }
 
   // ---------------------------------------------------------------
