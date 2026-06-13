@@ -17,6 +17,7 @@ import { WorkspaceState } from './workspace-state.js';
 import { ObservationSummarizer } from './observation-summarizer.js';
 import { ContentAddressableStore, FileAnalyzer } from './harness/content-addressing.js';
 import { withRoutedToolContext } from './routed-tool-context.js';
+import { TokenScope } from './token-scope.js';
 import {
   buildCodingCompletionGatePrompt as buildCodingCompletionGatePromptText,
   buildCodingTaskOperatingPrompt as buildCodingTaskOperatingPromptText,
@@ -24,8 +25,8 @@ import {
 } from './coding-prompts.js';
 import { quickAssess, deepAssess, mergeIntentProfile, computeIterationBudget as rbComputeIterationBudget, getCompletionGates } from './risk-budget.js';
 import { isMutationEvent as evIsMutationEvent, isRuntimeVerificationEvent, isSemanticRiskReviewEvent as evIsSemanticRiskReviewEvent, checkCompletionGates as evCheckCompletionGates, crossCheckVerifyClaim, finalAnswerMentionsVerification } from './evidence-verifier.js';
-import { MAX_ITERATIONS_DEFAULT } from '../runtime/types.js';
-import { readFile } from 'fs/promises';
+import { MAX_ITERATIONS_DEFAULT } from './agent-constants.js';
+import { readFile, appendFile, mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
 
 import {
@@ -80,6 +81,10 @@ export class ReActAgent {
   #toolCallHistory = [];
   /** @type {Map<string, string>} */
   #toolResultCache = new Map();
+  #toolResultCachePath;
+  #toolResultCacheMaxSize = 500;
+  #toolResultCacheLoaded = false;
+  #toolResultCacheEnabled = true;
   /** @type {TextToolParser} */
   #textToolParser;
   /** @type {IntentClassifier|null} */
@@ -102,6 +107,8 @@ export class ReActAgent {
   #tokenJuice = null;
   /** @type {WorkspaceIndex|null} */
   #workspaceIndex = null;
+  /** @type {TokenScope} */
+  #tokenScope;
   
   // ============ 工作区状态追踪（新功能）============
   /** @type {WorkspaceState|null} */
@@ -147,6 +154,36 @@ export class ReActAgent {
     this.#contextPruner = config.contextPruner || new DynamicContextPruning();
     this.#tokenJuice = config.tokenJuice || null;
     this.#workspaceIndex = new WorkspaceIndex(this.#config.workingDirectory);
+
+    // Tool result cache: 跨进程持久化 (JSONL, 最多 500 条)
+    // workingDirectory 下 .agent-data/tool-cache.jsonl
+    // 可通过 config.toolResultCacheEnabled=false 或 TOOL_CACHE=false 环境变量关闭
+    this.#toolResultCacheEnabled = config.toolResultCacheEnabled !== false;
+    const agentDataDir = `${this.#config.workingDirectory}/.agent-data`;
+    this.#toolResultCachePath = this.#toolResultCacheEnabled ? `${agentDataDir}/tool-cache.jsonl` : null;
+    this.#toolResultCacheMaxSize = 500;
+    // lazy load: 在第一次工具调用时同步加载，避免启动时 I/O 阻塞
+    this.#toolResultCacheLoaded = false;
+
+    this.#tokenScope =
+      config.tokenScope ||
+      new TokenScope({
+        budgetLimits: config.tokenBudget
+          ? {
+              global: {
+                limit: config.tokenBudget,
+                warningThreshold: config.tokenBudgetWarningThreshold ?? 70,
+              },
+            }
+          : null,
+        onBudgetWarning: (info) => {
+          this.#debugEvent('Token budget warning', info);
+        },
+        onBudgetExceeded: (info) => {
+          this.#debugEvent('Token budget exceeded - stopping', info);
+          this.#stopRequested = true;
+        },
+      });
 
     // Content-addressable store: session-scoped (not global singleton).
     // Lives for the duration of this agent instance, is passed to all
@@ -388,6 +425,39 @@ export class ReActAgent {
           textPreview: this.#preview(response.text, 300),
           nativeToolCalls: response.toolCalls?.length || 0,
         });
+
+        // TokenScope: record token cost for this LLM request. When provider
+        // returns usage we use it verbatim; otherwise we estimate based on
+        // character counts (roughly 1 token per 4 chars of English text).
+        try {
+          const modelName = this.#modelProvider.getModelName?.() || this.#modelProvider.constructor?.name || 'unknown';
+          let inputTokens;
+          let outputTokens;
+          if (response.usage && response.usage.inputTokens != null) {
+            inputTokens = response.usage.inputTokens;
+            outputTokens = response.usage.outputTokens || Math.ceil((response.text || '').length / 4);
+          } else {
+            let inputChars = 0;
+            for (const msg of messages) {
+              inputChars += (typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content || '')).length;
+            }
+            inputTokens = Math.ceil(inputChars / 4);
+            outputTokens = Math.ceil((response.text || '').length / 4);
+          }
+          this.#tokenScope.recordRequest({
+            model: modelName,
+            inputTokens,
+            outputTokens,
+            userId: 'global',
+            metadata: {
+              source: 'agent-run',
+              iteration: this.#lastRunResult?.iterations || 0,
+            },
+          });
+        } catch (err) {
+          // Token accounting is best-effort — never let it crash the run loop.
+        }
+
         this.#debug(`Response: ${response.text.substring(0, 200)}...`);
         
         // Parse text-based tool calls for models that don't support function calling
@@ -661,6 +731,54 @@ export class ReActAgent {
   }
 
   /**
+   * 从 JSONL 文件加载工具结果缓存。失败时静默忽略 — 只是损失缓存，不影响功能。
+   */
+  async #loadToolResultCache() {
+    if (this.#toolResultCacheLoaded) return;
+    this.#toolResultCacheLoaded = true;
+
+    if (!this.#toolResultCachePath) return;
+    try {
+      if (!existsSync(this.#toolResultCachePath)) return;
+      const content = await readFile(this.#toolResultCachePath, 'utf-8');
+      const lines = content.split('\n').filter(Boolean);
+      for (const line of lines.slice(-this.#toolResultCacheMaxSize)) {
+        try {
+          const { signature, result } = JSON.parse(line);
+          if (signature && typeof result === 'string') {
+            this.#toolResultCache.set(signature, result);
+          }
+        } catch {
+          // 单行 JSON 解析失败，跳过 — 文件可能被截断/损坏过
+        }
+      }
+    } catch (err) {
+      // cache 加载失败不阻断：只是下次会重新跑工具
+      try { console.warn('[ToolCache] 加载失败:', err.message); } catch {}
+    }
+  }
+
+  /** 把一条新结果追加到 JSONL。失败时静默忽略。 */
+  async #flushToolResultCacheEntry(signature, result) {
+    if (!this.#toolResultCachePath) return;
+    try {
+      const dir = this.#toolResultCachePath.substring(0, this.#toolResultCachePath.lastIndexOf('/'));
+      if (!existsSync(dir)) {
+        await mkdir(dir, { recursive: true });
+      }
+      const line = JSON.stringify({
+        signature,
+        result,
+        createdAt: Date.now(),
+      }) + '\n';
+      await appendFile(this.#toolResultCachePath, line, 'utf-8');
+    } catch (err) {
+      // 写入失败不阻断：下次只是会重新跑工具
+      try { console.warn('[ToolCache] 写入失败:', err.message); } catch {}
+    }
+  }
+
+  /**
    * Execute a single tool call
    */
   async #executeToolCall(toolCall, options = {}) {
@@ -670,9 +788,12 @@ export class ReActAgent {
     const resultMode = options.resultMode || 'tool';
     const startedAt = Date.now();
 
-    // Deduplication check
+    // Deduplication check (内存 + 持久化缓存双层检查)
     const callSignature = `${name}:${JSON.stringify(args)}`;
-    if (this.#toolCallHistory.includes(callSignature)) {
+    // Step 1: 从 JSONL 加载持久化缓存（仅首次调用时加载，lazy）
+    await this.#loadToolResultCache();
+    // Step 2: 同一次 agent 运行内的重复（toolCallHistory）或跨进程复用（toolResultCache）
+    if (this.#toolCallHistory.includes(callSignature) || this.#toolResultCache.has(callSignature)) {
       this.#ui.warn(`Duplicate tool call detected: ${name}. Skipping.`);
       const cachedResult = this.#toolResultCache.get(callSignature);
       this.#debugEvent('Tool call skipped', {
@@ -746,10 +867,27 @@ export class ReActAgent {
       return { name, result: errorMsg, error: errorMsg };
     }
 
-    // 验证必填参数
+    // 参数 schema 校验 + coerce（非阻断）
+    // 有错误时只警告，agent 仍继续执行；常见错误（字符串 vs 数字）会被自动纠正
+    let effectiveArgs = args || {};
+    if (typeof this.#toolRegistry.validateAndCoerceArgs === 'function') {
+      const v = this.#toolRegistry.validateAndCoerceArgs(name, args);
+      if (!v.valid) {
+        this.#ui.warn(`[Tool args] ${name}: ${v.errors.join('; ')}`);
+        this.#debugEvent('Tool args validation issues', {
+          tool: name,
+          issues: v.errors,
+          originalArgs: args,
+          coercedArgs: v.coercedArgs,
+        });
+      }
+      effectiveArgs = v.coercedArgs;
+    }
+
+    // 验证必填参数（保持原逻辑 —— 对没定义 schema 的工具做兜底检查）
     if (tool.required && Array.isArray(tool.required)) {
       const missing = tool.required.filter(param => {
-        const value = args ? args[param] : undefined;
+        const value = effectiveArgs ? effectiveArgs[param] : undefined;
         return value === undefined || value === null || value === '';
       });
       if (missing.length > 0) {
@@ -809,7 +947,7 @@ export class ReActAgent {
       };
 
       const result = await withTimeout(
-        () => tool.handler(args, context),
+        () => tool.handler(effectiveArgs, context),
         60000, // 1 minute timeout per tool
         `Tool ${name}`
       );
@@ -825,6 +963,7 @@ export class ReActAgent {
       this.#ui.toolResult(name, finalResult);
       this.#recordToolEvent(name, args, true, finalResult);
       this.#toolResultCache.set(callSignature, typeof finalResult === 'string' ? finalResult : JSON.stringify(finalResult));
+      this.#flushToolResultCacheEntry(callSignature, this.#toolResultCache.get(callSignature));
       
       // ============ 记录到工作区状态（新功能）============
       if (this.#workspaceStateEnabled && this.#observationSummarizer) {
@@ -852,6 +991,7 @@ export class ReActAgent {
       this.#ui.toolError(name, errorMsg);
       this.#recordToolEvent(name, args, false, `Error: ${errorMsg}`);
       this.#toolResultCache.set(callSignature, `Error: ${errorMsg}`);
+      this.#flushToolResultCacheEntry(callSignature, `Error: ${errorMsg}`);
       
       // ============ 记录错误到工作区状态（新功能）============
       if (this.#workspaceStateEnabled && this.#observationSummarizer) {

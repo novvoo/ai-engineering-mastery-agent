@@ -88,6 +88,13 @@ export class OpenAIModelProvider {
             text: data.choices[0]?.message?.content || '',
             toolCalls: data.choices[0]?.message?.tool_calls || [],
             finishReason: data.choices[0]?.finish_reason,
+            usage: data.usage
+              ? {
+                  inputTokens: data.usage.prompt_tokens,
+                  outputTokens: data.usage.completion_tokens,
+                  totalTokens: data.usage.total_tokens,
+                }
+              : null,
           };
         } finally {
           clearTimeout(timeoutId);

@@ -21,45 +21,14 @@ import { MemoryManager } from '../memory/memory-manager.js';
 import { SecurityPolicy } from '../core/security-policy.js';
 import { ExperienceMemory } from '../core/experience-memory.js';
 import { TokenJuice } from '../core/token-juice.js';
+import { TokenScope } from '../core/token-scope.js';
 import { SessionManager } from '../core/session-manager.js';
 import { IntelligentReasoning } from '../core/intelligent-reasoning.js';
 import { AutomationEngine } from '../core/automation-engine.js';
 import { Embedder } from '../core/embedder.js';
 
-// Import tools - 工具导入
-import { createFileSystemTools } from '../tools/filesystem/filesystem-tools.js';
-import { createShellTool } from '../tools/system/shell.js';
-import { createPtyTools } from '../tools/system/pty.js';
-import { createWorkspaceKnowledgeTools } from '../tools/system/workspace-knowledge.js';
-import { createStateCentricTools } from '../tools/harness/state-centric-tools.js';
-import { createStateGraphTools } from '../tools/harness/state-graph-tools.js';
-import { createContextExpansionTools } from '../tools/harness/context-expansion.js';
-import { createSemanticSearchTool } from '../tools/memory/semantic-search.js';
-import { createDocumentRagTools } from '../tools/memory/document-rag.js';
-import { createGitTools } from '../tools/git/git-tools.js';
-import { createWebTools } from '../tools/web/web-tools.js';
-import { createPreviewTools } from '../tools/web/preview-tools.js';
-import { createMCPTools } from '../tools/mcp/mcp-tools.js';
-import { createTaskTools } from '../tools/scheduler/task-tools.js';
-import { createScheduleTools } from '../tools/scheduler/schedule-tools.js';
-import { createSubAgentTools } from '../tools/scheduler/subagent-tools.js';
-
-// Import skill tools - 技能工具导入
-import createBrainstormTool from '../tools/skills/brainstorm.js';
-import createGrillTool from '../tools/skills/grill.js';
-import createTddTool from '../tools/skills/tdd.js';
-import createDiagnoseTool from '../tools/skills/diagnose.js';
-import createVerifyTool from '../tools/skills/verify.js';
-import createCoverageCheckTool from '../tools/skills/coverage_check.js';
-import createAskUserTool from '../tools/skills/ask_user.js';
-import createReviewTool from '../tools/skills/review.js';
-import createArchitectTool from '../tools/skills/architect.js';
-import createZoomOutTool from '../tools/skills/zoom_out.js';
-import createCavemanTool from '../tools/skills/caveman.js';
-import createHandoffTool from '../tools/skills/handoff.js';
-import createToPrdTool from '../tools/skills/to_prd.js';
-import createToIssuesTool from '../tools/skills/to_issues.js';
-import createSetupTool from '../tools/skills/setup.js';
+// Tools — 工具编目层（单一入口）
+import { createCoreTools, createSchedulerTools, SKILL_TOOL_CREATORS } from '../tools/index.js';
 
 // Import MCP client - MCP客户端导入
 import { MCPClient } from '../mcp/mcp-client.js';
@@ -82,6 +51,7 @@ export class AgentEngine {
   #experienceMemory;
   #sessionManager;
   #tokenJuice;
+  #tokenScope;
   #intelligentReasoning;
   #automationEngine;
   #embedder;
@@ -157,6 +127,26 @@ export class AgentEngine {
     // 3. 初始化 TokenJuice（结果压缩）
     this.#tokenJuice = new TokenJuice({
       maxChars: parseInt(process.env.MAX_RESULT_CHARS || '4000')
+    });
+
+    // 3.1. 初始化 TokenScope（token 预算和成本追踪）
+    // 从 config 中读取 tokenBudget（数字，美元金额），未设置则只追踪不限额
+    const tokenBudget = this.#config.tokenBudget ?? (parseFloat(process.env.TOKEN_BUDGET) || null);
+    this.#tokenScope = new TokenScope({
+      ...(tokenBudget ? {
+        budgetLimits: {
+          global: {
+            limit: tokenBudget,
+            warningThreshold: this.#config.tokenBudgetWarningThreshold ?? 70,
+          },
+        },
+        onBudgetWarning: (info) => {
+          console.warn(`[TokenScope] 预算警告: ${(info.cost).toFixed(4)} / ${info.limit} (${info.percentage}%)`);
+        },
+        onBudgetExceeded: (info) => {
+          console.warn(`[TokenScope] 预算超限: ${(info.cost).toFixed(4)} / ${info.limit} — 停止任务`);
+        },
+      } : {}),
     });
 
     // 4. 初始化智能推理引擎
@@ -308,192 +298,31 @@ export class AgentEngine {
    */
   async #registerAllTools() {
     const registeredTools = [];
-    
-    // 1. 文件系统工具
-    try {
-      const fsTools = createFileSystemTools();
-      for (const tool of fsTools) {
-        this.#toolRegistry.register(tool);
-        registeredTools.push(tool.name);
-      }
-    } catch (error) {
-      console.warn('文件系统工具注册失败:', error.message);
-    }
 
-    // 2. Shell 工具
-    try {
-      const shellTool = createShellTool();
-      this.#toolRegistry.register(shellTool);
-      registeredTools.push(shellTool.name);
-    } catch (error) {
-      console.warn('Shell 工具注册失败:', error.message);
-    }
+    const registerBatch = (tools, label) => {
+      try {
+        for (const tool of tools) {
+          this.#toolRegistry.register(tool);
+          registeredTools.push(tool.name);
+        }
+      } catch (error) {
+        console.warn(`${label} 注册失败:`, error.message);
+      }
+    };
 
-    // 2.1 工作区知识工具（用于查询工作区状态）
-    try {
-      const workspaceKnowledgeTools = createWorkspaceKnowledgeTools(null); // 传入 null，稍后在 Agent 中设置
-      for (const tool of workspaceKnowledgeTools) {
-        this.#toolRegistry.register(tool);
-        registeredTools.push(tool.name);
-      }
-    } catch (error) {
-      console.warn('工作区知识工具注册失败:', error.message);
-    }
+    registerBatch(
+      createCoreTools({
+        workingDirectory: this.#config?.workingDirectory,
+        mcpClient: this.#mcpClient,
+      }),
+      '核心工具',
+    );
 
-    // 2.2 State-Centric 编辑工具（基于哈希锚点的状态驱动编辑）
-    try {
-      const stateCentricTools = createStateCentricTools();
-      for (const tool of stateCentricTools) {
-        this.#toolRegistry.register(tool);
-        registeredTools.push(tool.name);
-      }
-    } catch (error) {
-      console.warn('状态驱动编辑工具注册失败:', error.message);
-    }
-
-    // 2.3 State Graph 工具（操作项目状态图，替代直接读写文件）
-    try {
-      const stateGraphTools = createStateGraphTools();
-      for (const tool of stateGraphTools) {
-        this.#toolRegistry.register(tool);
-        registeredTools.push(tool.name);
-      }
-    } catch (error) {
-      console.warn('State Graph 工具注册失败:', error.message);
-    }
-
-    // 2.4 上下文扩展工具（按需加载上下文，避免上下文膨胀）
-    try {
-      const contextExpansionTools = createContextExpansionTools(this.#config?.workingDirectory);
-      for (const tool of contextExpansionTools) {
-        this.#toolRegistry.register(tool);
-        registeredTools.push(tool.name);
-      }
-    } catch (error) {
-      console.warn('上下文扩展工具注册失败:', error.message);
-    }
-
-    // 3. PTY 工具（交互式终端）
-    try {
-      const ptyTools = createPtyTools();
-      for (const tool of ptyTools) {
-        this.#toolRegistry.register(tool);
-        registeredTools.push(tool.name);
-      }
-    } catch (error) {
-      console.warn('PTY 工具注册失败:', error.message);
-    }
-
-    // 4. 语义搜索和文档 RAG 工具
-    try {
-      const searchTool = createSemanticSearchTool();
-      this.#toolRegistry.register(searchTool);
-      registeredTools.push(searchTool.name);
-    } catch (error) {
-      console.warn('语义搜索工具注册失败:', error.message);
-    }
-    
-    try {
-      const docRagTools = createDocumentRagTools();
-      for (const tool of docRagTools) {
-        this.#toolRegistry.register(tool);
-        registeredTools.push(tool.name);
-      }
-    } catch (error) {
-      console.warn('文档 RAG 工具注册失败:', error.message);
-    }
-    
-    // 5. Git 工具
-    try {
-      const gitTools = createGitTools();
-      for (const tool of gitTools) {
-        this.#toolRegistry.register(tool);
-        registeredTools.push(tool.name);
-      }
-    } catch (error) {
-      console.warn('Git 工具注册失败:', error.message);
-    }
-    
-    // 6. Web 工具
-    try {
-      const webTools = createWebTools();
-      for (const tool of webTools) {
-        this.#toolRegistry.register(tool);
-        registeredTools.push(tool.name);
-      }
-      const previewTools = createPreviewTools();
-      for (const tool of previewTools) {
-        this.#toolRegistry.register(tool);
-        registeredTools.push(tool.name);
-      }
-    } catch (error) {
-      console.warn('Web 工具注册失败:', error.message);
-    }
-    
-    // 7. MCP 工具
-    try {
-      const mcpTools = createMCPTools(this.#mcpClient);
-      for (const tool of mcpTools) {
-        this.#toolRegistry.register(tool);
-        registeredTools.push(tool.name);
-      }
-    } catch (error) {
-      console.warn('MCP 工具注册失败:', error.message);
-    }
-    
-    // 8. 调度器工具（如果调度器已初始化）
     if (this.#schedulerEngine) {
-      try {
-        const taskTools = createTaskTools(this.#schedulerEngine);
-        for (const tool of taskTools) {
-          this.#toolRegistry.register(tool);
-          registeredTools.push(tool.name);
-        }
-      } catch (error) {
-        console.warn('任务工具注册失败:', error.message);
-      }
-      
-      try {
-        const scheduleTools = createScheduleTools(this.#schedulerEngine);
-        for (const tool of scheduleTools) {
-          this.#toolRegistry.register(tool);
-          registeredTools.push(tool.name);
-        }
-      } catch (error) {
-        console.warn('调度工具注册失败:', error.message);
-      }
-      
-      try {
-        const subAgentTools = createSubAgentTools(this.#schedulerEngine);
-        for (const tool of subAgentTools) {
-          this.#toolRegistry.register(tool);
-          registeredTools.push(tool.name);
-        }
-      } catch (error) {
-        console.warn('子代理工具注册失败:', error.message);
-      }
+      registerBatch(createSchedulerTools(this.#schedulerEngine), '调度器工具');
     }
-    
-    // 9. 技能工具
-    const skillToolCreators = [
-      createBrainstormTool,
-      createGrillTool,
-      createTddTool,
-      createDiagnoseTool,
-      createVerifyTool,
-      createCoverageCheckTool,
-      createAskUserTool,
-      createReviewTool,
-      createArchitectTool,
-      createZoomOutTool,
-      createCavemanTool,
-      createHandoffTool,
-      createToPrdTool,
-      createToIssuesTool,
-      createSetupTool
-    ];
-    
-    for (const creator of skillToolCreators) {
+
+    for (const creator of SKILL_TOOL_CREATORS) {
       try {
         const tool = creator();
         this.#toolRegistry.register(tool);
@@ -502,8 +331,7 @@ export class AgentEngine {
         console.warn(`技能工具 ${creator.name || 'unknown'} 注册失败:`, error.message);
       }
     }
-    
-    // 批量触发工具注册钩子
+
     for (const toolName of registeredTools) {
       try {
         await this.#pluginManager.triggerHook(HOOKS.ON_TOOL_REGISTER, toolName, this.#toolRegistry.get(toolName));
@@ -517,36 +345,15 @@ export class AgentEngine {
    * 注册调度器工具（在 attachModelProvider 后调用）
    */
   async #registerSchedulerTools() {
-    if (!this.#schedulerEngine) {return;}
-    
+    if (!this.#schedulerEngine) return;
+
     try {
-      const taskTools = createTaskTools(this.#schedulerEngine);
-      for (const tool of taskTools) {
+      for (const tool of createSchedulerTools(this.#schedulerEngine)) {
         this.#toolRegistry.register(tool);
         await this.#pluginManager.triggerHook(HOOKS.ON_TOOL_REGISTER, tool.name, tool);
       }
     } catch (error) {
-      console.warn('任务工具注册失败:', error.message);
-    }
-    
-    try {
-      const scheduleTools = createScheduleTools(this.#schedulerEngine);
-      for (const tool of scheduleTools) {
-        this.#toolRegistry.register(tool);
-        await this.#pluginManager.triggerHook(HOOKS.ON_TOOL_REGISTER, tool.name, tool);
-      }
-    } catch (error) {
-      console.warn('调度工具注册失败:', error.message);
-    }
-    
-    try {
-      const subAgentTools = createSubAgentTools(this.#schedulerEngine);
-      for (const tool of subAgentTools) {
-        this.#toolRegistry.register(tool);
-        await this.#pluginManager.triggerHook(HOOKS.ON_TOOL_REGISTER, tool.name, tool);
-      }
-    } catch (error) {
-      console.warn('子代理工具注册失败:', error.message);
+      console.warn('调度器工具注册失败:', error.message);
     }
   }
 
@@ -689,6 +496,14 @@ export class AgentEngine {
     this.#state.startTime = Date.now();
     this.#state.iteration = 0;
 
+    // State sync: 记录当前任务描述到持久化 memory
+    try {
+      await this.#memoryManager.updateTask(input.substring(0, 500), 'execution');
+    } catch (err) {
+      // memory 写入是非阻塞的：失败不影响 agent 继续运行
+      try { console.warn('[MemoryManager] updateTask 失败:', err.message); } catch {}
+    }
+
     // 触发输入接收钩子
     await this.#pluginManager.triggerHook(HOOKS.ON_INPUT_RECEIVED, input);
 
@@ -714,9 +529,11 @@ export class AgentEngine {
         debug: this.#config.debug,
         securityPolicy: this.#securityPolicy,
         tokenJuice: this.#tokenJuice,
+        tokenScope: this.#tokenScope,
         model: this.#config.model,
         intentClassification: this.#config.intentClassification !== false,
-        session: this.#sessionManager  // 传递已有的 sessionManager，保留会话历史
+        toolResultCacheEnabled: this.#config.toolResultCacheEnabled,
+        session: this.#sessionManager
       },
       uiFacade
     );
@@ -731,7 +548,25 @@ export class AgentEngine {
       
       this.#state.status = result?.status === 'needs_user_input' ? 'needs_user_input' : 'completed';
       this.#eventBus.emit(RuntimeEvent.AGENT_COMPLETE, { result });
+
+      // State sync: 任务完成标记
+      if (this.#state.status === 'completed') {
+        try {
+          await this.#memoryManager.completeTask();
+        } catch (err) {
+          try { console.warn('[MemoryManager] completeTask 失败:', err.message); } catch {}
+        }
+      }
       
+      // TokenScope: 打印本次任务的 token 用量统计
+      const tokenStats = this.#tokenScope.getStats();
+      if (tokenStats.totalRequests > 0) {
+        const cost = tokenStats.totalCost ? `$${tokenStats.totalCost.toFixed(4)}` : 'N/A (未配置模型价格)';
+        console.log(
+          `[TokenScope] 本次任务: ${tokenStats.totalRequests} 请求, ${tokenStats.totalInputTokens}+${tokenStats.totalOutputTokens} tokens, ${cost} (${Math.round(tokenStats.duration / 1000)}s)`
+        );
+      }
+
       // 触发输出生成钩子
       await this.#pluginManager.triggerHook(HOOKS.ON_OUTPUT_GENERATED, result);
       
@@ -748,6 +583,12 @@ export class AgentEngine {
       
       throw error;
     } finally {
+      // State sync: 无论成功或失败，均持久化状态 (避免"失忆")
+      try {
+        await this.#memoryManager.save();
+      } catch (err) {
+        try { console.warn('[MemoryManager] save 失败:', err.message); } catch {}
+      }
       this.#state.lastActivity = Date.now();
     }
   }
@@ -915,6 +756,7 @@ export class AgentEngine {
   getExperienceMemory() { return this.#experienceMemory; }
   getSessionManager() { return this.#sessionManager; }
   getTokenJuice() { return this.#tokenJuice; }
+  getTokenScope() { return this.#tokenScope; }
   getIntelligentReasoning() { return this.#intelligentReasoning; }
   getAutomationEngine() { return this.#automationEngine; }
   getEmbedder() { return this.#embedder; }

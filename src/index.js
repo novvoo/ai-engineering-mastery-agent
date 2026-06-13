@@ -149,7 +149,15 @@ class AIEngineeringAgent {
   #loadConfig() {
     const provider = process.env.MODEL_PROVIDER || 'openai';
     const model = getProviderModel(provider);
-    
+
+    // Tool cache: TOOL_CACHE=false 禁用；默认启用
+    const toolCacheEnv = process.env.TOOL_CACHE;
+    const toolResultCacheEnabled = toolCacheEnv !== 'false' && toolCacheEnv !== '0';
+
+    // Token budget: TOKEN_BUDGET=0.5 意味着最多 $0.50；不设则无上限
+    const tokenBudgetRaw = process.env.TOKEN_BUDGET;
+    const tokenBudget = tokenBudgetRaw ? parseFloat(tokenBudgetRaw) : null;
+
     return {
       provider,
       model,
@@ -163,6 +171,9 @@ class AIEngineeringAgent {
       logDir: process.env.LOG_DIR || './logs',
       intentClassification: process.env.INTENT_CLASSIFICATION !== 'false',
       shellSandbox: shellSandboxConfigFromEnv(),
+      tokenBudget,
+      tokenBudgetWarningThreshold: parseFloat(process.env.TOKEN_BUDGET_WARN || '70'),
+      toolResultCacheEnabled,
     };
   }
 
@@ -288,6 +299,9 @@ class AIEngineeringAgent {
       maxIterations: this.config.maxIterations,
       maxTokens: this.config.maxTokens,
       temperature: this.config.temperature,
+      tokenBudget: this.config.tokenBudget,
+      tokenBudgetWarningThreshold: this.config.tokenBudgetWarningThreshold,
+      toolResultCacheEnabled: this.config.toolResultCacheEnabled,
     });
 
     // 设置事件转发到 enhancedUI

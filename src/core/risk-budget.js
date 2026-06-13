@@ -12,7 +12,7 @@
  * 2) deepAssess  - 轻量代码扫描，不阻塞首步，迭代中动态调整
  */
 
-import { MAX_ITERATIONS_DEFAULT } from '../runtime/types.js';
+import { MAX_ITERATIONS_DEFAULT } from './agent-constants.js';
 
 // =============================================================
 // 风险等级

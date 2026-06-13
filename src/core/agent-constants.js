@@ -1,3 +1,5 @@
+export const MAX_ITERATIONS_DEFAULT = 120;
+
 export const TERMINATION_KEYWORDS = ['FINAL_ANSWER:', 'Answer:', 'TASK_COMPLETE'];
 
 // 自适应迭代预算（占 maxIterations 的比例）

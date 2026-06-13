@@ -23,6 +23,8 @@ export default [
         decodeURIComponent: "readonly",
         fetch: "readonly",
         AbortController: "readonly",
+        Buffer: "readonly",
+        URL: "readonly",
       },
     },
     rules: {
@@ -42,6 +44,28 @@ export default [
       "eqeqeq": "warn",
       "curly": "warn",
       "no-throw-literal": "error",
+    },
+  },
+  {
+    // Tests directory: allow more flexibility
+    files: ["tests/**/*.{js,mjs}"],
+    languageOptions: {
+      globals: {
+        describe: "readonly",
+        it: "readonly",
+        beforeEach: "readonly",
+        afterEach: "readonly",
+        beforeAll: "readonly",
+        afterAll: "readonly",
+        expect: "readonly",
+      },
+    },
+    rules: {
+      "no-unused-vars": "off",
+      "no-empty": "off",
+      "no-throw-literal": "off",
+      "no-undef": "error",
+      "no-console": "off",
     },
   },
 ];

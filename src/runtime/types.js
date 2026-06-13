@@ -49,12 +49,11 @@ export const RuntimeEvent = {
 };
 
 /**
- * 默认最大迭代次数 —— 运行时层与 Agent 层共享的单一数据源
- * 对于编码类任务，120 次迭代是一个合理的中间值：
- *   - 简单任务: risk-budget 会按比例缩减 (25%~50%)
- *   - 复杂任务: risk-budget 会按比例扩容 (85%~100%)
+ * 默认最大迭代次数 —— 单一数据源定义在 core/agent-constants.js，
+ * 运行时层与 Agent 层共享。此处 re-export 以保持向后兼容。
  */
-export const MAX_ITERATIONS_DEFAULT = 120;
+import { MAX_ITERATIONS_DEFAULT } from '../core/agent-constants.js';
+export { MAX_ITERATIONS_DEFAULT } from '../core/agent-constants.js';
 
 /**
  * 运行时配置类
@@ -68,12 +67,17 @@ export class RuntimeConfig {
     this.modelProvider = opts.modelProvider;
     this.autoDownloadModels = opts.autoDownloadModels !== false;
     this.maxIterations = opts.maxIterations || MAX_ITERATIONS_DEFAULT;
-    
+
     // 新增配置项
     this.pluginConfig = opts.pluginConfig || {};
     this.enableMiddleware = opts.enableMiddleware !== false;
     this.enableToolGroups = opts.enableToolGroups !== false;
-    this.hookTimeout = opts.hookTimeout || 5000; // 钩子超时时间（毫秒）
+    this.hookTimeout = opts.hookTimeout || 5000;
+
+    // Budget & Cache 控制
+    this.tokenBudget = opts.tokenBudget ?? null;
+    this.tokenBudgetWarningThreshold = opts.tokenBudgetWarningThreshold ?? 70;
+    this.toolResultCacheEnabled = opts.toolResultCacheEnabled !== false;
   }
 
   /**
