@@ -528,7 +528,7 @@ export const styles = {
   messageContainer: {
     flex: 1,
     minHeight: 0,
-    overflow: 'hidden',
+    overflow: 'visible',
     padding: '10px 14px 0',
   },
   

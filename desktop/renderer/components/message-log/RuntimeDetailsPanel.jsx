@@ -154,11 +154,8 @@ export function RuntimeDetailsPanel({
     }
   }, [fileDiffs, ipc, loadingDiffs]);
 
-  if (visibleRuntimeDetails.length === 0 && !isRunningGroup && activitySummary.activities.length === 0) {
-    return null;
-  }
-
   // ===== 过滤活动 =====
+  // 注意：所有 Hooks 必须在条件返回之前调用，否则违反 Rules of Hooks
   const filteredActivities = useMemo(() => {
     let activities = activitySummary.activities;
     if (activityIntentFilter !== 'all') {
@@ -183,6 +180,12 @@ export function RuntimeDetailsPanel({
   const displayedActivities = showAllActivities ? filteredActivities : filteredActivities.slice(-8);
   const hasMoreFiles = activitySummary.files.length > 6;
   const hasMoreActivities = filteredActivities.length > 8;
+
+  // 使用 runtimeDetails（而非 visibleRuntimeDetails）判断，避免完成后过滤掉 thinking/status 消息导致面板消失
+  // 必须在所有 Hooks 之后才能条件返回，否则违反 Rules of Hooks
+  if (runtimeDetails.length === 0 && activitySummary.activities.length === 0) {
+    return null;
+  }
 
   // ===== 渲染 Tab 栏 =====
   const renderTabs = () => (
@@ -676,7 +679,10 @@ export function RuntimeDetailsPanel({
           </div>
         );
       })}
-      {visibleRuntimeDetails.length === 0 && (
+      {visibleRuntimeDetails.length === 0 && runtimeDetails.length > 0 && (
+        <div style={localStyles.emptyTab}>运行日志已过滤（仅显示工具调用与结果）</div>
+      )}
+      {visibleRuntimeDetails.length === 0 && runtimeDetails.length === 0 && (
         <div style={localStyles.emptyTab}>暂无运行日志</div>
       )}
     </div>
@@ -806,7 +812,7 @@ const localStyles = {
     textAlign: 'center',
   },
   tabContent: {
-    overflow: 'hidden',
+    overflow: 'visible',
   },
 
   // 概览

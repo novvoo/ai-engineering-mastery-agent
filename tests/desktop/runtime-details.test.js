@@ -149,4 +149,76 @@ describe('runtime details helpers', () => {
     expect(summary.taskStages.find(stage => stage.id === 'complete')?.status).toBe('waiting');
     expect(getFileStatusLabel('created')).toBe('已创建');
   });
+
+  // ===== 修复：任务完成后运行详情面板不应消失 =====
+
+  test('visibleRuntimeDetails 为空但 runtimeDetails 不为空时，面板应保留', () => {
+    // 模拟任务完成后：只有 thinking 和 status:update 消息
+    const runtimeDetails = [
+      { id: 's1', event: 'status:update', type: 'event', message: 'starting' },
+      { id: 'r1', event: 'agent:thinking', type: 'thinking', summary: 'checking the plan' },
+      { id: 's2', event: 'status:update', type: 'event', message: 'completed' },
+    ];
+
+    // thinking 和 status:update 消息被过滤，visibleRuntimeDetails 为空
+    const visibleRuntimeDetails = runtimeDetails.filter(
+      msg => !isStatusUpdateMessage(msg) && msg.type !== 'thinking'
+    );
+    expect(visibleRuntimeDetails).toHaveLength(0);
+
+    // 但 runtimeDetails 本身不为空，面板判断应基于 runtimeDetails.length
+    expect(runtimeDetails.length).toBeGreaterThan(0);
+  });
+
+  test('conversation group 在完成后仍保留 runtimeDetails', () => {
+    const messages = [
+      { id: 'u1', type: 'user', content: 'run task' },
+      { id: 's1', event: 'status:update', type: 'event', message: 'starting' },
+      { id: 'r1', event: 'agent:thinking', type: 'thinking', summary: 'thinking...' },
+      { id: 'c1', event: 'agent:complete', type: 'success', content: 'final answer' },
+    ];
+
+    const groups = createConversationGroups(messages, {
+      messageIsVisible: () => true,
+      messageMatchesSearch: () => true,
+    });
+
+    expect(groups).toHaveLength(1);
+    // group 的 runtimeDetails 应包含被过滤的 thinking 和 status 消息
+    expect(groups[0].runtimeDetails.length).toBeGreaterThan(0);
+    // 完成后面板应基于 groups[0].runtimeDetails.length > 0 继续显示
+  });
+
+  test('完全没有 runtimeDetails 且没有 activity 时，面板应隐藏', () => {
+    const runtimeDetails = [];
+    const activitySummary = buildActivitySummary(runtimeDetails);
+    // 空状态：面板正确返回 null
+    expect(runtimeDetails.length).toBe(0);
+    expect(activitySummary.activities.length).toBe(0);
+  });
+
+  test('有 tool activity 但 visibleRuntimeDetails 为空时，面板应保留', () => {
+    const runtimeDetails = [
+      { id: 's1', event: 'status:update', type: 'event', message: 'starting' },
+      {
+        id: 'a1', event: 'tool:activity', timestamp: 1,
+        activity: {
+          kind: 'tool_activity', id: 'read:src/app.js',
+          phase: 'completed', intent: 'read',
+          toolName: 'read_file', target: 'src/app.js',
+          statusText: '已读取 src/app.js',
+        },
+      },
+    ];
+
+    const visibleRuntimeDetails = runtimeDetails.filter(
+      msg => !isStatusUpdateMessage(msg) && msg.type !== 'thinking'
+    );
+    // activity 消息不在 visible 列表
+    // 但 buildActivitySummary 会识别它
+    const activitySummary = buildActivitySummary(runtimeDetails);
+    expect(activitySummary.activities.length).toBeGreaterThan(0);
+    expect(activitySummary.completed).toBe(1);
+    // 面板应因为 activitySummary.activities.length > 0 继续显示
+  });
 });

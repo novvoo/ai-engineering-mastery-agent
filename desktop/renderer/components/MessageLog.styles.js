@@ -4,7 +4,7 @@ export const styles = {
     display: 'flex',
     flexDirection: 'column',
     height: '100%',
-    overflow: 'hidden',
+    overflow: 'visible',
     backgroundColor: 'transparent',
     border: 'none',
     boxShadow: 'none'
@@ -118,7 +118,7 @@ export const styles = {
     borderRadius: '8px',
     border: '1px solid var(--border-subtle)',
     backgroundColor: 'rgba(16, 16, 17, 0.78)',
-    overflow: 'hidden',
+    overflow: 'visible',
     position: 'relative',
     zIndex: 2
   },
@@ -130,6 +130,7 @@ export const styles = {
     minHeight: '42px',
     padding: '0 12px',
     borderBottom: '1px solid var(--border-subtle)',
+    borderRadius: '8px 8px 0 0',
     color: 'var(--text-muted)',
     fontSize: '12px',
     fontWeight: '600'
@@ -618,7 +619,7 @@ export const styles = {
     borderRadius: '8px',
     border: '1px solid rgba(96, 165, 250, 0.16)',
     backgroundColor: 'rgba(96, 165, 250, 0.055)',
-    overflow: 'hidden'
+    overflow: 'visible'
   },
 
   thinkingHeader: {
@@ -631,6 +632,7 @@ export const styles = {
     padding: '0 10px',
     border: 'none',
     borderBottom: '1px solid rgba(96, 165, 250, 0.12)',
+    borderRadius: '8px 8px 0 0',
     backgroundColor: 'rgba(16, 16, 17, 0.42)',
     color: 'var(--text-color)',
     cursor: 'pointer',
