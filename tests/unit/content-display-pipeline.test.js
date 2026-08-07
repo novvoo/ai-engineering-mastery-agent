@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   createCollapsedContentPreview,
+  stripToolProtocolDelta,
   stripToolProtocolText,
 } from '../../desktop/renderer/app/content/content-pipeline.js';
 import { prepareMarkdownDisplay } from '../../desktop/renderer/components/MarkdownMessageContent.jsx';
@@ -24,6 +25,13 @@ describe('content display pipeline', () => {
 
   test('hides a complete bare control object', () => {
     expect(stripToolProtocolText('{"action":{"name":"shell"}}')).toBe('');
+  });
+
+  test('preserves stream token boundaries while filtering protocol frames', () => {
+    expect(stripToolProtocolDelta('hello ')).toBe('hello ');
+    expect(stripToolProtocolDelta('\n')).toBe('\n');
+    expect(stripToolProtocolDelta('\n\n')).toBe('\n\n');
+    expect(stripToolProtocolDelta('<tool_call>{"name":"shell"}</tool_call>')).toBe('');
   });
 
   test('falls back to the next content candidate when the preferred field is protocol-only', () => {

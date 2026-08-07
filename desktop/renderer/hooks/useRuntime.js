@@ -3,7 +3,10 @@
  * 提供 Agent Runtime 的状态管理和操作方法
  */
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
-import { stripToolProtocolText } from '../app/content/content-pipeline.js';
+import {
+  stripToolProtocolDelta,
+  stripToolProtocolText,
+} from '../app/content/content-pipeline.js';
 
 /**
  * 过滤掉内部控制 JSON 块（工具协议文本不应作为用户可见内容展示）
@@ -74,6 +77,34 @@ export function reconcileAssistantStreamCommit(streamText = '', terminalAnswer =
   }
 
   return `${stream.trimEnd()}\n\n${terminal.trimStart()}`;
+}
+
+export function mergeAssistantStreamFrame(currentText = '', frameText = '', frameMode = 'delta') {
+  const current = typeof currentText === 'string' ? currentText : '';
+  const frame = typeof frameText === 'string' ? frameText : '';
+  if (!frame) {
+    return current;
+  }
+  if (frameMode === 'snapshot') {
+    return reconcileAssistantStreamCommit(current, frame);
+  }
+  if (frameMode === 'block') {
+    if (!current || /\s$/.test(current) || /^\s/.test(frame)) {
+      return current + frame;
+    }
+    return `${current}\n\n${frame}`;
+  }
+  return current + frame;
+}
+
+export function getStreamDeltaIdentity(eventName, payload = {}) {
+  const stablePart = payload.deltaId
+    ?? payload.eventId
+    ?? payload.sequence
+    ?? payload.frameId;
+  return stablePart === undefined || stablePart === null || stablePart === ''
+    ? ''
+    : `${eventName}:${stablePart}:${payload.contentIndex ?? ''}`;
 }
 
 /**
@@ -231,6 +262,7 @@ export function useRuntime() {
   // 状态
   const [status, setStatus] = useState('idle');
   const [messages, setMessages] = useState([]);
+  const [subagents, setSubagents] = useState({});
   const [tools, setTools] = useState([]);
   const [loading, setLoading] = useState(false);
   const [askUserInfo, setAskUserInfo] = useState(null);
@@ -260,8 +292,7 @@ export function useRuntime() {
    */
   const pendingToolResultsRef = useRef(new Map());
   // 连续重复 delta 去重：OMP 有时会发送重复的 text_delta
-  const lastDeltaTextRef = useRef('');
-  const lastReasoningDeltaRef = useRef('');
+  const recentStreamDeltaIdsRef = useRef(new Map());
 
   const flushMessageDeltas = useCallback(() => {
     if (pendingMessageDeltaTimerRef.current) {
@@ -285,7 +316,10 @@ export function useRuntime() {
         return {
           ...msg,
           type: delta.type || msg.type,
-          content: (msg.content || '') + delta.text,
+          content: (delta.frames || []).reduce(
+            (content, frame) => mergeAssistantStreamFrame(content, frame.text, frame.mode),
+            msg.content || '',
+          ),
           ...(delta.toolName ? { toolName: delta.toolName } : {}),
         };
       }),
@@ -299,20 +333,28 @@ export function useRuntime() {
       }
 
       // 过滤掉内部控制 JSON 块
-      const filteredText = stripActionBlocks(textToAppend);
+      const filteredText = stripToolProtocolDelta(textToAppend);
       if (!filteredText) {
         return;
       }
+      const frameMode = updates.frameMode || 'delta';
 
       if (messageId === streamingMessageIdRef.current) {
-        streamingTextRef.current += filteredText;
+        streamingTextRef.current = mergeAssistantStreamFrame(
+          streamingTextRef.current,
+          filteredText,
+          frameMode,
+        );
       }
 
-      const existing = pendingMessageDeltasRef.current.get(messageId) || { text: '' };
+      const existing = pendingMessageDeltasRef.current.get(messageId) || { frames: [] };
       pendingMessageDeltasRef.current.set(messageId, {
         ...existing,
         ...updates,
-        text: existing.text + filteredText,
+        frames: [
+          ...(existing.frames || []),
+          { text: filteredText, mode: frameMode },
+        ],
       });
 
       if (!pendingMessageDeltaTimerRef.current) {
@@ -348,6 +390,25 @@ export function useRuntime() {
       return true;
     }
     recent.set(signature, now);
+    return false;
+  }, []);
+
+  const isDuplicateStreamDelta = useCallback((eventName, payload = {}) => {
+    const identity = getStreamDeltaIdentity(eventName, payload);
+    if (!identity) {
+      return false;
+    }
+    const recent = recentStreamDeltaIdsRef.current;
+    if (recent.has(identity)) {
+      return true;
+    }
+    recent.set(identity, Date.now());
+    if (recent.size > 256) {
+      const oldest = [...recent.entries()]
+        .sort((left, right) => left[1] - right[1])
+        .slice(0, recent.size - 192);
+      oldest.forEach(([key]) => recent.delete(key));
+    }
     return false;
   }, []);
 
@@ -409,6 +470,7 @@ export function useRuntime() {
     activeTurnIdRef.current = null;
     messageBufferRef.current = [];
     setMessages([]);
+    setSubagents({});
     setStats((prev) => ({
       ...prev,
       messageCount: 0,
@@ -451,6 +513,7 @@ export function useRuntime() {
 
     messageBufferRef.current = restoredMessages;
     setMessages(restoredMessages);
+    setSubagents({});
     setStatus(restoredMessages.length > 0 ? 'completed' : 'idle');
     setStats((prev) => ({
       ...prev,
@@ -557,6 +620,7 @@ export function useRuntime() {
 
       // 设置运行状态
       setStatus('running');
+      setSubagents({});
       setStats((prev) => ({
         ...prev,
         startTime: Date.now(),
@@ -754,7 +818,10 @@ export function useRuntime() {
             return {
               ...msg,
               type: delta.type || msg.type,
-              content: (msg.content || '') + delta.text,
+              content: (delta.frames || []).reduce(
+                (content, frame) => mergeAssistantStreamFrame(content, frame.text, frame.mode),
+                msg.content || '',
+              ),
               ...(delta.toolName ? { toolName: delta.toolName } : {}),
             };
           }),
@@ -825,7 +892,7 @@ export function useRuntime() {
       setMessages((prev) => prev.filter((msg) => msg.id !== msgId));
       streamingMessageIdRef.current = null;
       streamingTextRef.current = '';
-      lastDeltaTextRef.current = '';
+      recentStreamDeltaIdsRef.current.clear();
       return msgId;
     };
 
@@ -871,16 +938,17 @@ export function useRuntime() {
         }
         if (payload?.text) {
           // 过滤掉内部控制 JSON 块
-          const filteredText = stripActionBlocks(payload.text);
+          const filteredText = stripToolProtocolDelta(payload.text);
           if (!filteredText) {
             return;
           }
 
-          // 连续重复 delta 去重：跳过与上一次完全相同的文本
-          if (filteredText === lastDeltaTextRef.current) {
+          // 只有协议提供稳定帧身份时才去重；相邻同文本 token（尤其换行）
+          // 可能是合法 Markdown，禁止按字符内容去重。
+          if (isDuplicateStreamDelta(eventName, payload)) {
             return;
           }
-          lastDeltaTextRef.current = filteredText;
+          const frameMode = payload.frameMode || 'delta';
 
           if (!msgId) {
             // 当前没有活跃的流消息 → 创建新的消息气泡
@@ -896,7 +964,10 @@ export function useRuntime() {
             streamingTextRef.current = filteredText;
             setMessages((prev) => streamMessage ? [...prev, streamMessage] : prev);
           } else {
-            queueMessageDelta(msgId, filteredText, { type: 'assistant_stream' });
+            queueMessageDelta(msgId, filteredText, {
+              type: 'assistant_stream',
+              frameMode,
+            });
           }
         }
         return;
@@ -904,11 +975,10 @@ export function useRuntime() {
       if (eventName === 'agent:reasoning_delta') {
         const reasonId = streamingReasoningIdRef.current;
         if (payload?.text) {
-          const filteredText = stripActionBlocks(payload.text);
+          const filteredText = stripToolProtocolDelta(payload.text);
           if (!filteredText) return;
 
-          if (filteredText === lastReasoningDeltaRef.current) return;
-          lastReasoningDeltaRef.current = filteredText;
+          if (isDuplicateStreamDelta(eventName, payload)) return;
 
           if (!reasonId) {
             const now = Date.now();
@@ -926,7 +996,10 @@ export function useRuntime() {
               },
             ]);
           } else {
-            queueMessageDelta(reasonId, filteredText, { type: 'thinking' });
+            queueMessageDelta(reasonId, filteredText, {
+              type: 'thinking',
+              frameMode: payload.frameMode || 'delta',
+            });
           }
         }
         return;
@@ -1112,6 +1185,12 @@ export function useRuntime() {
           return;
         }
 
+        // subagent 事件：归并到 subagents Map，驱动 SubagentStatusPanel
+        if (eventName === 'subagent:update') {
+          setSubagents((prev) => mergeSubagentEvent(prev, data));
+          return;
+        }
+
         // OMP tool lifecycle → 按 toolCallId 合并成一个视觉单元。
         if (['tool:result', 'tool:error', 'tool:progress'].includes(eventName)) {
           if (normalized.message) {
@@ -1149,7 +1228,13 @@ export function useRuntime() {
       flushMessageDeltas();
       unsubIpcEvent?.();
     };
-  }, [addMessage, flushMessageDeltas, isDuplicateRuntimeEvent, queueMessageDelta]);
+  }, [
+    addMessage,
+    flushMessageDeltas,
+    isDuplicateRuntimeEvent,
+    isDuplicateStreamDelta,
+    queueMessageDelta,
+  ]);
 
   const dismissAskUser = useCallback(() => {
     setAskUserInfo(null);
@@ -1205,6 +1290,7 @@ export function useRuntime() {
     // 状态
     status,
     messages,
+    subagents,
     tools,
     loading,
     stats,
@@ -1459,6 +1545,12 @@ export function normalizeRuntimeEventMessage(eventName, payload = {}) {
         },
       };
     case 'workspace:changed':
+    case 'config:change':
+    case 'session:change':
+    case 'plugin:register':
+    case 'plugin:unregister':
+    case 'plugin:enable':
+    case 'plugin:disable':
       return {
         message: null,
       };
@@ -1474,9 +1566,55 @@ export function normalizeRuntimeEventMessage(eventName, payload = {}) {
 }
 
 /**
- * 在消息列表中查找最后一个与指定工具名匹配的 tool 消息。
- * 用于 tool:result 合并到 tool:call。
+ * 归并 subagent:update 事件到 subagents Map。
+ * payload 由 omp-adapter.js 转出：{ kind, id, agent, description, status, parentToolCallId, progress, ... }
+ * kind ∈ subagent_lifecycle | subagent_progress | subagent_event
  */
+function mergeSubagentEvent(prev, payload = {}) {
+  const id = payload.id;
+  if (!id) return prev;
+  const existing = prev[id] || { startedAt: Date.now() };
+  const next = { ...existing, id };
+
+  // lifecycle：status started/completed/failed/aborted
+  if (payload.kind === 'subagent_lifecycle') {
+    if (payload.status === 'started') {
+      next.startedAt = Date.now();
+      next.status = 'running';
+    } else {
+      // 终态
+      next.status = payload.status;
+      next.endedAt = Date.now();
+      // lifecycle 未必带 exitCode，failed/aborted 视为非 0
+      if (payload.status === 'completed') next.exitCode = 0;
+      else if (payload.status === 'failed' || payload.status === 'aborted') next.exitCode = 1;
+    }
+    if (payload.agent) next.agent = payload.agent;
+    if (payload.description) next.description = payload.description;
+    if (payload.parentToolCallId) next.parentToolCallId = payload.parentToolCallId;
+    if (payload.sessionFile) next.sessionFile = payload.sessionFile;
+  }
+
+  // progress：聚合快照
+  if (payload.kind === 'subagent_progress') {
+    const p = payload.progress || {};
+    next.status = p.status || next.status || 'running';
+    if (p.currentTool) next.currentTool = p.currentTool;
+    if (typeof p.toolCount === 'number') next.toolCount = p.toolCount;
+    if (typeof p.tokens === 'number') next.tokens = p.tokens;
+    if (typeof p.cost === 'number') next.cost = p.cost;
+    if (typeof p.durationMs === 'number') next.durationMs = p.durationMs;
+    if (p.id && !next.id) next.id = p.id;
+    if (p.agent && !next.agent) next.agent = p.agent;
+    if (p.description && !next.description) next.description = p.description;
+    if (payload.parentToolCallId && !next.parentToolCallId) next.parentToolCallId = payload.parentToolCallId;
+    next.progress = p;
+  }
+
+  // subagent_event：不消费原始事件流，避免高频刷新
+  return { ...prev, [id]: next };
+}
+
 function findLastToolCall(messages, toolName, toolCallId) {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];

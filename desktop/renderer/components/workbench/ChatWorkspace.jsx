@@ -35,6 +35,9 @@ export function ChatWorkspace({
   onStarterPrompt,
   onExport,
   onClear,
+  summaryPanelVisible,
+  renderControls,
+  toolbarSlot,
 }) {
   const [continuationInput, setContinuationInput] = useState('');
   const [showTaskMenu, setShowTaskMenu] = useState(false);
@@ -148,50 +151,18 @@ export function ChatWorkspace({
         onCancel={runtime.cancelInteraction}
         onDismiss={runtime.dismissAskUser}
       />
-      <div className="mastery-chat-header" style={styles.chatHeader}>
-        <div style={styles.chatTitle}>
-          <span className="mastery-chat-title-mark" style={styles.chatTitleMark}><Icon name="folder" size={17} /></span>
-          <span title={firstUserText || workspaceName || '新任务'}>{taskTitle}</span>
-          <span className="codex-message-count" style={styles.chatMessageCount}>
-            {t('chat.message_count', { count: runtime.messages.length })}
-          </span>
-          <div style={{ position: 'relative', display: 'inline-flex' }}>
-            <button
-              type="button"
-              className="codex-title-menu"
-              aria-label="任务菜单"
-              onClick={() => setShowTaskMenu((prev) => !prev)}
-            >
-              <Icon name="list" size={15} />
-            </button>
-            {showTaskMenu && (
-              <div ref={taskMenuRef} style={menuDropdownStyle}>
-                <button
-                  type="button"
-                  style={menuItemStyle}
-                  onClick={handleExportChat}
-                  onMouseEnter={(e) => Object.assign(e.currentTarget.style, menuItemHoverStyle)}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
-                >
-                  <Icon name="download" size={14} />
-                  导出对话
-                </button>
-                <button
-                  type="button"
-                  style={menuItemStyle}
-                  onClick={handleClearChat}
-                  onMouseEnter={(e) => Object.assign(e.currentTarget.style, menuItemHoverStyle)}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
-                >
-                  <Icon name="close" size={14} />
-                  清除对话
-                </button>
-              </div>
-            )}
-          </div>
+      {/* 工作台控件：侧栏收起时显示在主栏顶部，侧栏展开时由 InspectorPanel header 承载 */}
+      {!summaryPanelVisible && renderControls?.('default') && (
+        <div style={{
+          display: 'flex',
+          justifyContent: 'flex-end',
+          alignItems: 'center',
+          padding: '6px 14px 2px',
+          flexShrink: 0,
+        }}>
+          {renderControls('default')}
         </div>
-      </div>
-
+      )}
       <div
         className="mastery-message-stage"
         style={styles.messageContainer}
@@ -202,6 +173,7 @@ export function ChatWorkspace({
       >
         <MessageLog
           messages={runtime.messages}
+          subagents={runtime.subagents}
           status={runtime.status}
           workingDirectory={workingDirectory}
           fileServerUrl={fileServerUrl}
@@ -209,6 +181,14 @@ export function ChatWorkspace({
           onAskAgent={onAskAgentFromMessage}
           onStarterPrompt={onStarterPrompt}
           starterPromptsEnabled={inputEditable}
+          toolbarSlot={toolbarSlot}
+          taskInfo={{
+            title: taskTitle,
+            fullPath: firstUserText || workspaceName || '新任务',
+            messageCount: runtime.messages.length,
+            onExport: handleExportChat,
+            onClear: handleClearChat,
+          }}
         />
       </div>
 
@@ -223,7 +203,7 @@ export function ChatWorkspace({
           <div
             style={{
               padding: '8px 14px',
-              borderBottom: '1px solid var(--border-divider)',
+              borderBottom: 'none',
               backgroundColor: 'var(--surface-raised)',
               fontSize: '12px',
               color: 'var(--text-muted)',
@@ -280,7 +260,7 @@ export function ChatWorkspace({
           inputNotice={inputNotice}
           inputValue={chatInput}
         />
-        <div className="mastery-composer" style={styles.inputWrapper}>
+        <div className="mastery-composer ds-composer" style={styles.inputWrapper}>
           {showSuggestions && (
             <CommandSuggestions
               input={chatInput}
@@ -374,6 +354,7 @@ export function ChatWorkspace({
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5.5 3h13"/><path d="M5.5 21h13"/><path d="M12 3v2"/><path d="M12 19v2"/><path d="M7 7l10 10"/><path d="M17 7L7 17"/></svg>
               </button>
               <button
+                className="codex-stop-button"
                 style={{
                   ...styles.sendButton,
                   ...styles.sendButtonRunning,
@@ -387,7 +368,7 @@ export function ChatWorkspace({
             </div>
           ) : (
             <button
-              className={getSendButtonMotionClass(runtime.status, chatInput)}
+              className={`${getSendButtonMotionClass(runtime.status, chatInput)} ${runtime.status === 'running' ? 'codex-stop-button' : ''}`}
               style={{
                 ...styles.sendButton,
                 ...(runtime.status === 'running'

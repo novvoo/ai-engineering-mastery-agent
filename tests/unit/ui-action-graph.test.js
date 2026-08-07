@@ -5,6 +5,7 @@ import {
   UI_ACTION_GRAPH,
   UI_ACTION_STATUS,
   resolveUiActionState,
+  transitionUiActionState,
 } from '../../desktop/renderer/app/actions/ui-action-graph.js';
 
 describe('UI action graph', () => {
@@ -45,5 +46,25 @@ describe('UI action graph', () => {
     expect(source).toContain('className="mastery-starter-action"');
     expect(source).toContain('data-action-id={`composer.starter.${id}`}');
     expect(source).not.toContain('<span style={styles.emptyChip}>解释这个项目</span>');
+  });
+
+  test('action lifecycle forms a closed intent-to-outcome loop', () => {
+    const running = transitionUiActionState(
+      { status: UI_ACTION_STATUS.READY, reason: '' },
+      'admit',
+    );
+    expect(running).toEqual({ status: UI_ACTION_STATUS.RUNNING, reason: '' });
+
+    const failed = transitionUiActionState(running, 'fail', { reason: '保存失败' });
+    expect(failed).toEqual({ status: UI_ACTION_STATUS.FAILED, reason: '保存失败' });
+    expect(transitionUiActionState(failed, 'retry')).toEqual({
+      status: UI_ACTION_STATUS.READY,
+      reason: '',
+    });
+
+    expect(transitionUiActionState(
+      { status: UI_ACTION_STATUS.BLOCKED, reason: '能力不可用' },
+      'admit',
+    )).toEqual({ status: UI_ACTION_STATUS.BLOCKED, reason: '能力不可用' });
   });
 });

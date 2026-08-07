@@ -71,4 +71,15 @@ describe('workbench design system', () => {
     expect(layoutHook).toContain('INSPECTOR_WIDTH.keyboardLargeStep');
     expect(layoutHook).toContain("window.addEventListener('resize'");
   });
+
+  test('execution overview consumes the canonical message graph instead of raw tool counts', () => {
+    const inspector = readRendererFile('components/workbench/InspectorPanel.jsx');
+
+    expect(inspector).toContain('buildExecutionOverviewProjection(messages)');
+    expect(inspector).toContain('turn.requestPreview');
+    expect(inspector).toContain('turn.currentStep');
+    expect(inspector).toContain('turn.responsePreview');
+    expect(inspector).toContain('turn.toolCollections');
+    expect(inspector).not.toContain("filter((message) => message.type === 'tool')");
+  });
 });

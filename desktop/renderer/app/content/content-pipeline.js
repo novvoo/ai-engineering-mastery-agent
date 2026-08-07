@@ -3,7 +3,7 @@
  * This is the single sanitization stage shared by streaming ingestion and
  * final message selection.
  */
-export function stripToolProtocolText(text = '') {
+function removeToolProtocolText(text = '') {
   if (typeof text !== 'string') return text;
 
   let output = text
@@ -45,7 +45,26 @@ export function stripToolProtocolText(text = '') {
     return '';
   }
 
-  return output.trimEnd();
+  return output;
+}
+
+export function stripToolProtocolText(text = '') {
+  const output = removeToolProtocolText(text);
+  return typeof output === 'string' ? output.trimEnd() : output;
+}
+
+/**
+ * Stream deltas are token boundaries, not standalone messages. Removing their
+ * trailing spaces/newlines changes Markdown and can merge adjacent words.
+ */
+export function stripToolProtocolDelta(text = '') {
+  if (typeof text !== 'string') return text;
+  const output = removeToolProtocolText(text);
+  if (typeof output !== 'string') return output;
+  if (!output.trim() && text.trim()) {
+    return '';
+  }
+  return output;
 }
 
 export function createCollapsedContentPreview(text, maxChars = 1200) {

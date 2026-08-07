@@ -90,6 +90,100 @@ export function buildMessageDisplayGraph(messages = []) {
   });
 }
 
+function getOverviewMessageText(message = {}) {
+  if (!message) {
+    return '';
+  }
+  const candidates = [
+    message.answer,
+    message.finalAnswer,
+    message.content,
+    message.message,
+    message.text,
+    message.result,
+  ];
+  for (const candidate of candidates) {
+    const text = toSearchText(candidate).replace(/\s+/g, ' ').trim();
+    if (text) {
+      return text;
+    }
+  }
+  return '';
+}
+
+function clampOverviewText(value, maxLength) {
+  const text = String(value || '').trim();
+  if (text.length <= maxLength) {
+    return text;
+  }
+  return `${text.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+}
+
+function getToolOverviewStep(collection = {}) {
+  const target = collection.args?.path
+    || collection.args?.file
+    || collection.args?.query
+    || collection.request?.target
+    || '';
+  const label = collection.statusText || target || collection.toolName || '工具调用';
+  return clampOverviewText(label, 120);
+}
+
+export function buildExecutionOverviewProjection(messages = []) {
+  const groups = buildMessageDisplayGraph(messages);
+  const turns = groups.map((group, index) => {
+    const tools = group.toolCollections || [];
+    const runningTool = [...tools].reverse().find((tool) => (
+      ['running', 'pending', 'waiting'].includes(String(tool.phase || '').toLowerCase())
+    ));
+    const failedToolCount = tools.filter((tool) => (
+      String(tool.phase || '').toLowerCase() === 'failed'
+    )).length;
+    const completedToolCount = tools.filter((tool) => (
+      String(tool.phase || '').toLowerCase() === 'completed'
+    )).length;
+    const responseMessage = group.responseMessage
+      || [...(group.responseMessages || [])].reverse().find((message) => message.type !== 'plan')
+      || null;
+    const latestMessage = [...(group.messages || [])].reverse()[0] || null;
+
+    return {
+      id: group.id,
+      correlationId: group.correlationId,
+      status: group.status,
+      isCurrent: index === groups.length - 1,
+      requestPreview: clampOverviewText(getOverviewMessageText(group.requestMessage), 160),
+      responsePreview: clampOverviewText(getOverviewMessageText(responseMessage), 220),
+      currentStep: runningTool
+        ? getToolOverviewStep(runningTool)
+        : group.status === 'waiting'
+          ? clampOverviewText(getOverviewMessageText(latestMessage), 120)
+          : '',
+      toolCollections: tools,
+      toolProgress: {
+        total: tools.length,
+        completed: completedToolCount,
+        running: tools.length - completedToolCount - failedToolCount,
+        failed: failedToolCount,
+      },
+      timestamp: Number(latestMessage?.timestamp || latestMessage?.createdAt || 0) || null,
+    };
+  });
+  const activeTurn = [...turns].reverse().find((turn) => (
+    turn.status === 'running' || turn.status === 'waiting'
+  )) || turns.at(-1) || null;
+
+  return {
+    turns,
+    activeTurnId: activeTurn?.id || null,
+    totals: {
+      running: turns.filter((turn) => turn.status === 'running' || turn.status === 'waiting').length,
+      completed: turns.filter((turn) => turn.status === 'completed').length,
+      failed: turns.filter((turn) => turn.status === 'failed' || turn.status === 'stopped').length,
+    },
+  };
+}
+
 function toSearchText(value) {
   if (value == null) {
     return '';

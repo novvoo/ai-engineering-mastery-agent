@@ -3,6 +3,8 @@ import {
   createAssistantStreamMessage,
   extractAuthoritativeTerminalAnswer,
   getAssistantStreamBoundaryPolicy,
+  getStreamDeltaIdentity,
+  mergeAssistantStreamFrame,
   mergeToolLifecycleMessage,
   normalizeRuntimeEventMessage,
   reconcileAssistantStreamCommit,
@@ -58,6 +60,27 @@ describe('OMP tool lifecycle UI aggregation', () => {
     );
     expect(reconcileAssistantStreamCommit('第一段', '第二段')).toBe('第一段\n\n第二段');
     expect(reconcileAssistantStreamCommit(streamed, '')).toBe(streamed);
+  });
+
+  test('preserves stream formatting across typed frame modes', () => {
+    expect(mergeAssistantStreamFrame('hello', ' world', 'delta')).toBe('hello world');
+    expect(mergeAssistantStreamFrame('第一段', '\n\n第二段', 'delta')).toBe(
+      '第一段\n\n第二段',
+    );
+    expect(mergeAssistantStreamFrame('第一段', '第二段', 'block')).toBe(
+      '第一段\n\n第二段',
+    );
+    expect(mergeAssistantStreamFrame('完整', '完整回答', 'snapshot')).toBe('完整回答');
+    expect(mergeAssistantStreamFrame('完整回答', '完整', 'snapshot')).toBe('完整回答');
+  });
+
+  test('deduplicates stream frames only when the protocol provides stable identity', () => {
+    expect(getStreamDeltaIdentity('agent:text_delta', { text: '\n' })).toBe('');
+    expect(getStreamDeltaIdentity('agent:text_delta', {
+      text: '\n',
+      sequence: 42,
+      contentIndex: 0,
+    })).toBe('agent:text_delta:42:0');
   });
 
   test('terminal answer extraction ignores generic lifecycle content', () => {

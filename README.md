@@ -1,306 +1,211 @@
 # AI Engineering Mastery Agent
 
-AI Engineering Mastery Agent 是一个本地运行的 AI 工程助手，面向真实项目里的代码阅读、修改、验证、文档检索和日常排障。它同时提供 CLI 和 Desktop 两种入口：终端里足够快，桌面端更适合持续对话、浏览项目文件和管理文档知识库。
+AI Engineering Mastery Agent（Mastery）是一个本地优先的 AI 编码工作台。项目提供两条独立入口：
 
-## 架构说明
+- **CLI**：直接启动 [oh-my-pi（OMP）](https://github.com/oh-my-pi/oh-my-pi) CLI，并透传参数、环境和标准输入输出。
+- **Desktop**：基于 Electron + React 的工作台，通过独立 OMP RPC 子进程提供持续对话、工作区浏览、会话管理和运行过程展示。
 
-项目使用 **oh-my-pi (omp)** 作为核心执行引擎，替换了原有的自研执行器、hashline、LSP、MCP、记忆和模型层。mastery 保留了 Electron+React GUI 作为桌面壳，通过 OmpAdapter 实现事件转换和 API 桥接。
+Mastery 不实现 OMP 内部的推理、工具调度或模型 Provider 算法。它关注的是可靠、安全地把 Agent Runtime 接入本地开发工作流。
 
-核心架构：
-- **内核**：[oh-my-pi](https://github.com/oh-my-pi/oh-my-pi) — 完整的生产级编码 Agent，包含 pi-agent-core、pi-ai、hashline、mnemopi 等核心包
-- **适配器**：OmpAdapter — 处理 omp 事件格式转换、API 桥接和生命周期管理
-- **桌面壳**：Electron + React — 提供文件树、对话界面、模型管理等 UI
+> 完整架构、边界和演进状态见 [docs/architecture.md](./docs/architecture.md)，界面动作与能力映射见 [docs/ui-action-graph.md](./docs/ui-action-graph.md)。运行代码是行为真相来源，架构文档是设计意图和允许依赖的真相来源。
 
-## 运行环境与版本要求
+## 当前架构
 
-> ⚠️ **Node 18 不是推荐基线**：项目依赖的现代 JS 特性和 ESM 原生加载在 Node 18 上会遇到兼容性问题。以下是各入口的推荐版本矩阵：
+项目采用**端口适配器式模块化单体 + 进程外 Agent Runtime**。Electron Main Process 是本地特权边界，Renderer 被视为不可信；只有需要权限或故障隔离的能力进入独立进程。
 
-| 入口 | 推荐运行时 | 最低版本 | 说明 |
-|------|-----------|---------|------|
-| **CLI (开发/测试)** | Bun | **1.3.14** | `bun run start` · `bun test` · 所有单元/集成测试 |
-| **CLI (发布产物)** | Bun 或 Node | Bun 1.3+ / Node 20+ | `release:prepare` 可产出 Bun standalone 或 Node 模式 |
-| **Desktop (开发)** | Node | **20 LTS** | `bun run desktop:dev` · Electron 主进程用 Node 20 |
-| **Desktop (构建)** | Node + npm | **20 LTS** | `desktop:build:*` · electron-builder 需要 Node 20 |
-| **Renderer 构建** | Vite | **8.0** | 桌面端 React 渲染层通过 Vite 构建（5.4.6+ 安全基线） |
-| **CI / Release** | Bun + Node | Bun 1.3.14 / Node 20 | `.github/workflows/*` 已固定版本 |
+```mermaid
+flowchart LR
+  User["开发者"]
 
-当前 CI 锁死版本：**Bun 1.3.14** · **Node 20** · **Vite 8.x**。在本地 `bun install` 会按锁文件解析一致的依赖。
+  subgraph CLIPath["CLI 路径"]
+    CLI["src/index.js<br/>薄代理"]
+  end
 
----
+  subgraph Desktop["Electron Desktop"]
+    Renderer["React Renderer<br/>交互与展示"]
+    Preload["Preload<br/>能力白名单"]
+    Gateway["Main Process<br/>Contract / Policy / Dispatch"]
+    Core["DesktopCore<br/>状态投影"]
+    Supervisor["Runtime Supervisor<br/>生命周期与恢复"]
+    Adapter["OmpAdapter<br/>RPC 防腐层"]
+  end
 
-它的核心体验不是“问模型一个答案”，而是让 Agent 按工程方法论推进任务：先理解系统和风险，再选择合适工具，修改最小必要范围，最后用测试、构建、日志或人工可检查证据验证结果。
+  OMP["OMP 子进程"]
+  FS["本地工作区 / 会话 / 配置"]
 
-运行截图:
-![Desktop demo1](./images/demo_001.png)
-![Desktop demo2](./images/demo_002.png)
-![Desktop demo3](./images/demo_003.png)
-
-## 它和其他 AI Code Agent 的区别
-
-AI Engineering Mastery Agent 更像一个带方法论的本地工程协作者，而不是只会补全代码的聊天框。它把“怎么思考”和“能调用什么工具”都显式放进运行流程里。
-
-![Methodology workflow](./images/methodology-flow.svg)
-
-核心差异：
-
-- 方法论工具：`coverage_check`、`ask_user`、`grill`、`zoom_out`、`diagnose`、`brainstorm`、`tdd`、`review`、`verify`、`architect`、`to_prd`、`to_issues`、`handoff`。
-- 工程工具：文件读写、Shell、PTY、Git、文档 RAG、语义搜索、MCP、Web 搜索、本地代码预览。
-- 工程闭环：需求对齐、系统分析、执行、观察、审查、验证、交付摘要。
-- 本地体验：项目隔离的文档索引和历史会话，CLI/Desktop 共享 RAG，Desktop 可观察每轮执行过程。
-
-## 工具系统
-
-Agent 的工具不是简单堆在提示词里，而是按任务动态选择和约束。复杂任务会优先暴露当前真正需要的工具，降低模型误用工具、重复调用或跑偏的概率；涉及 RAG/Web 回答时，会先用 `coverage_check` 判断证据是否足够，并把缺口转成检索动作；如果缺的是用户掌握的业务约束、验收标准或确认信息，会用 `ask_user` 中断本轮并请你补充；涉及写文件、运行命令和访问工作区外路径时，会经过安全策略和上下文预算控制。
-
-## 你可以用它做什么
-
-- 让 Agent 阅读项目代码，定位问题，修改文件，并运行测试或构建命令验证结果。
-- 把 PDF、DOCX、Markdown、HTML、JSON、文本文件或网页加入文档知识库，再按自然语言检索和提问。
-- 在 Desktop 里查看工作目录文件树，上传文档，跟随文件变更自动刷新，并在每轮对话中查看独立的 Agent 执行过程。
-- 在 CLI 里用 `/doc`、`/preview`、`/debug` 等命令快速完成文档检索、代码预览、诊断和终端协作。
-- 连接不同模型 Provider，包括 OpenAI、DeepSeek、Zhipu、Llama、OpenRouter 等。
-- 按需使用 Web 搜索、Shell、PTY、文件读写、语义搜索、Git 只读/写入、MCP 等工具。
-
-## 使用体验
-
-### Desktop
-
-Desktop 适合日常连续使用。你可以打开一个工作目录，然后在同一个窗口里完成对话、浏览项目文件、上传文档、观察工具执行结果。
-
-- 工作目录文件树支持展开、折叠、手动刷新和系统文件变更自动刷新。
-- RAG 面板使用和 CLI 相同的文档索引，上传后会持久化，重启应用后仍可继续检索。
-- 每轮对话都有独立的执行过程面板，状态更新以进度条呈现，工具调用、调试信息和事件详情可以展开查看。
-- 历史记录可以恢复到之前的对话，也可以一键清空历史和可恢复会话。
-- HTML 页面和 Node Web 项目可以在右侧预览面板中打开，使用本地 localhost 服务承载，支持刷新、浏览器打开和停止预览。
-- Agent 消息、工具调用和关键事件会进入对应对话轮次，长内容可以滚动查看。
-- 对话窗口和文件区域独立滚动，适合边看项目结构边让 Agent 处理任务。
-
-### 这次版本的重点
-
-- Desktop 的执行过程按对话轮次拆分，不再把多轮任务日志混在同一个框里。
-- 状态更新从块状消息改为执行过程里的进度条和状态文案，主问答视角更稳定。
-- 历史记录支持恢复和清空；清空时会同时移除本地保存的会话快照。
-- 工作目录文件树、RAG 持久化、调试命令和文档搜索继续保持 CLI/Desktop 一致。
-
-### CLI
-
-CLI 适合习惯终端的工程任务。它启动轻、响应快，可以直接在当前目录里让 Agent 读文件、跑命令、改代码和搜索文档。
-
-常用入口：
-
-```text
-/doc init
-/doc add ./docs/spec.pdf
-/doc search "回滚策略"
-/doc list
-/preview index.html
-/preview node . "npm run dev"
-/debug on
+  User --> CLI -->|"spawn + stdio"| OMP
+  User --> Renderer --> Preload --> Gateway
+  Gateway --> FS
+  Gateway --> Adapter
+  Core --> Supervisor --> Adapter
+  Adapter <-->|"JSON-RPC"| OMP
+  Adapter -.->|"RuntimeEvent"| Core
 ```
 
-自然语言也可以直接触发文档索引：
+关键设计：
 
-```text
-根据 @./docs/spec.pdf 总结上线风险
-对比 @"./docs/Product Requirements.docx" 和当前实现
-读一下 @https://example.com/runbook.html，告诉我部署失败怎么恢复
-```
+- **CLI 与 Desktop 生命周期分离**：CLI 不创建 `DesktopCore`，避免为终端入口引入 Electron 成本。
+- **OMP 进程隔离**：`OmpAdapter` 负责 RPC 关联和协议转换，`RuntimeSupervisor` 负责异常退出恢复、重启预算和 Engine 重绑。
+- **契约优先的 IPC**：未注册 contract 的命令默认拒绝；Main Process 统一执行输入/输出校验、能力检查和策略决策。
+- **稳定事件语言**：OMP 原始帧被转换为带版本、顺序和因果元数据的 `RuntimeEvent Envelope v1`。
+- **本地状态权威**：工作区文件、会话和配置保存在本机；Renderer 状态是可丢弃的展示投影。
+- **最小权限 Renderer**：启用 Electron sandbox 和 context isolation，Preload 只暴露明确白名单，不向页面提供 Node 或原始 `ipcRenderer`。
 
-## 典型工作流
+## 已实现能力
 
-### 修复代码问题
+- OMP Agent 的启动、停止、状态查询、流式事件和异常退出恢复。
+- 单主窗口 Desktop 工作台、工作区文件浏览、会话保存与恢复。
+- Conversation Turn、Tool Run 和运行详情投影，增量文本批处理与历史内容折叠。
+- Capability Registry 与基础 Policy Engine；Renderer 可发现能力的 available、degraded 或 unavailable 状态。
+- 工作目录安全切换：Runtime 就绪后才提交文件服务、配置和 watcher。
+- 模型配置与密钥存储；Desktop 中密钥优先使用 Electron `safeStorage`。
+- 一次性 Terminal command；高风险命令的最终约束位于 Main Process。
+- 外部本地 Preview URL 的 sandboxed viewer。
 
-```text
-帮我审计这个项目里可能严重影响性能的部分，修复后跑测试验证。
-```
+内置 Preview runner 已移除，当前 Preview capability 会明确报告 `unavailable`；项目也尚未提供逐次授权界面、持久事件重放、消息列表虚拟化或跨设备同步。这些限制不应被描述为现有能力。
 
-Agent 会先理解仓库上下文，再选择需要的文件、终端、语义搜索或方法论工具。完成后会说明改了什么、验证了什么，以及仍然存在的风险。
+## 运行环境
 
-### 用文档辅助开发
+| 场景 | 运行时 | 要求 |
+| --- | --- | --- |
+| 安装、CLI、测试 | Bun | `>= 1.3.14` |
+| Desktop 开发与构建 | Node.js | `>= 20` |
+| Desktop Renderer | Vite | 以 `package.json` 锁定版本为准 |
 
-```text
-/doc add ./docs/api-design.pdf
-/doc search "鉴权失败时的错误码"
-```
-
-文档会被切分、索引并保存到当前项目的本地知识库。之后你可以继续追问，或者让 Agent 将文档要求和代码实现对照起来。
-
-### 桌面端持续协作
-
-打开 Desktop 后选择项目目录，文件树会显示当前项目。你可以在 Finder 或资源管理器里新增、删除、移动文件，桌面端会自动刷新；也可以在对话中让 Agent 修改项目并观察相关事件。
-
-## 文档知识库
-
-文档 RAG 是 CLI 和 Desktop 共享的能力。它会按工作目录隔离索引，避免不同项目的知识混在一起。
-
-支持来源：
-
-- 本地文件：`.txt`、`.md`、`.json`、`.html`、`.pdf`、`.docx`
-- 网络文档：`http(s)` URL
-- 对话中的 `@路径` 或显式 `/doc add`
-
-常用命令：
-
-```text
-/doc init
-/doc add ./docs/spec.pdf
-/doc add "docs/Product Requirements.docx"
-/doc add https://example.com/runbook.html
-/doc search "审批流程"
-/doc list
-/doc clear
-/doc clear <document-id>
-```
-
-说明：
-
-- `/doc add` 不带参数时，macOS 会弹出 Finder 文件选择器；其他环境会提示输入路径或 URL。
-- 路径包含空格时，建议使用引号，例如 `/doc add "docs/Product Requirements.docx"`。
-- 单个文档默认限制 15MB。
-- 文档索引会保存在当前工作目录下，重启 CLI 或 Desktop 后自动加载。
-
-## 代码预览
-
-业界常见做法有两类：VS Code/Codespaces 这类本地或云 IDE 通常启动 dev server，再把 localhost/转发端口放进预览面板；StackBlitz/WebContainers 这类浏览器 IDE 会在浏览器内运行 Node runtime。这个项目是本地 CLI/Desktop，所以采用第一种：工作区内 HTML 走本地静态 HTTP 服务，Node 项目走本机 dev server，并把 URL 返回给 CLI 或嵌入 Desktop 预览面板。
-
-常用命令：
-
-```text
-/preview index.html
-/preview .
-/preview node . "npm run dev"
-/preview list
-/preview stop <session-id>
-```
-
-说明：
-
-- HTML 不直接用 `file://` 打开，而是通过 `127.0.0.1` 静态服务预览，资源路径和模块脚本更接近真实浏览器环境。
-- Node 项目会优先使用 `package.json` 中的 `dev`、`start`、`preview` 或 `serve` 脚本，也可以显式传入命令。
-- 预览服务只允许访问当前工作目录内的文件；Desktop 只允许加载本地预览 URL，不会放开任意外部站点。
-
-## 工程守门
-
-Agent 会尽量按照工程任务的节奏工作：
-
-1. 先理解目标和上下文。
-2. 选择必要工具，不把无关工具暴露给模型。
-3. 小步修改，只改完成任务需要的内容。
-4. 对代码变更运行测试、lint、构建或等价验证。
-5. 最后说明变更、验证结果和残留风险。
-
-你不需要记住这些工具名，直接描述任务即可。Agent 会根据任务复杂度决定是直接执行，还是先调用方法论工具把目标、风险和验证标准讲清楚。
+Node 18 不是支持基线。依赖版本以 `package.json` 和 Bun lockfile 为准。
 
 ## 安装与启动
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/novvoo/mastery.git
 cd mastery
 bun install
 cp .env.example .env
 ```
 
-编辑 `.env` 后填入需要的模型 Provider 配置。
-
-启动 CLI：
+按需在 `.env` 中配置模型 Provider 和 API Key，然后启动：
 
 ```bash
+# CLI
 bun run start
-```
 
-启动 Desktop 开发模式：
-
-```bash
+# Desktop 开发模式
 bun run desktop:dev
 ```
 
-构建发布产物：
+CLI 会把额外参数直接传给 OMP：
 
 ```bash
+bun run start -- --help
+```
+
+常见模型配置示例：
+
+```env
+MODEL_PROVIDER=openai
+OPENAI_API_KEY=sk-xxx
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_MODEL=gpt-4o
+```
+
+更多 OpenAI-compatible、DeepSeek、Zhipu、OpenRouter、本地模型和代理配置见 [.env.example](./.env.example)。
+
+## 验证
+
+提交前统一门禁：
+
+```bash
+bun run verify
+```
+
+该命令依次运行 ESLint、Renderer 生产构建、单元测试和 Desktop 测试。也可以单独执行：
+
+```bash
+bun run lint
+bun run desktop:renderer:build
+bun run test:unit
+bun run test:desktop
+bun run test:architecture
+```
+
+架构契约测试位于 `tests/unit/architecture-contract.test.js`，用于检查关键依赖边界、安全配置和文档同步要求。
+
+## 构建与发布
+
+```bash
+# CLI 产物
 bun run build:cli
+
+# 当前平台 Desktop 产物
+bun run desktop:build
+
+# 指定或全部 Desktop 平台
+bun run desktop:build:mac
+bun run desktop:build:win
+bun run desktop:build:linux
 bun run desktop:build:all
+
+# CLI + Desktop
 bun run build:all
 ```
 
-CLI 和 Desktop 的 release 产物会分别输出到独立目录，方便按平台分发。
+Renderer 由 Vite 构建并打包进 Electron。Desktop 可生成 macOS DMG/ZIP、Windows NSIS/portable 和 Linux AppImage/DEB；实际跨平台构建能力仍取决于构建主机和工具链。
 
 ### macOS 首次打开
 
-macOS 用户下载 Desktop 版后，如果看到“应用已损坏，无法打开，你应该将它移到废纸篓”，通常不是文件真的损坏，而是当前社区构建没有完成 Apple Developer ID 签名和 notarization 公证，被 Gatekeeper 拦截了。
+社区构建尚未完成 Apple Developer ID 签名和 notarization 时，Gatekeeper 可能提示应用“已损坏”。请先确认安装包来自可信的项目 Release，并选择匹配架构的 `arm64` 或 `x64` 产物。
 
-推荐先确认来源是本项目的 GitHub Release，并优先下载与你的芯片匹配的包：
-
-- Apple Silicon：`arm64.dmg`
-- Intel Mac：`x64.dmg`
-
-如果你信任这个下载来源，可以在安装到 `/Applications` 后临时移除隔离标记：
+确认来源后，可在安装到 `/Applications` 后移除隔离标记：
 
 ```bash
 xattr -dr com.apple.quarantine "/Applications/AI Engineering Mastery Agent.app"
 ```
 
-然后再从 Finder 或 Launchpad 打开应用。后续如果发布流程接入正式签名和公证，这一步就不再需要。
+## 代码导航
 
-## 模型配置
+| 领域 | 主要位置 |
+| --- | --- |
+| CLI 薄代理 | `src/index.js` |
+| Desktop 生命周期 | `src/adapters/desktop/desktop-core.js` |
+| OMP RPC 适配 | `src/adapters/desktop/omp-adapter.js` |
+| Runtime Supervisor | `src/adapters/desktop/runtime-supervisor.js` |
+| Event Envelope | `src/runtime/event-bus/records.js` |
+| Command Contract | `src/adapters/desktop/protocol/command-contracts.js` |
+| Capability / Policy | `src/adapters/desktop/capability-registry.js`、`policy-engine.js` |
+| Main Process 路由 | `desktop/main-app/ipc-router.js` |
+| 安全 Preload | `desktop/preload.cjs` |
+| React 组合根 | `desktop/renderer/App.jsx` |
+| Renderer Runtime 投影 | `desktop/renderer/runtime/` |
+| 架构契约测试 | `tests/unit/architecture-contract.test.js` |
 
-项目支持多 Provider。你可以在 `.env` 中配置不同模型和 API Key，按自己的成本、上下文窗口和响应速度偏好选择。
+## 安全与数据边界
 
-常见配置项包括：
+- BrowserWindow 强制关闭 Node integration，并启用 context isolation、sandbox 和 web security。
+- Renderer 只能通过 Preload 白名单请求能力；路径在 Main Process 中相对当前工作区解析并防止目录穿越。
+- 外部链接只接受 `http:` 和 `https:`；预览内容在 sandboxed iframe 中运行。
+- RuntimeEvent 是 at-most-once 的实时通知，内存事件缓冲仅用于有限诊断，不是持久队列。
+- 当前默认策略 profile 为 `local-full`，尚无逐次 consent UI。Mastery 可以读写工作区和执行本地命令，因此只应在可信项目目录中使用。
 
-```env
-OPENAI_API_KEY=
-DEEPSEEK_API_KEY=
-ZHIPU_API_KEY=
-OPENROUTER_API_KEY=
-MODEL=
-DEBUG=false
-```
+## 当前限制与演进状态
 
-如果使用未知或私有模型，可以通过环境变量覆盖上下文窗口大小，避免长会话时过早或过晚裁剪上下文。
+架构演进使用三种状态：`完成`、`进行中` 和 `Target`。当前：
 
-## 本地安全
+- Event Envelope v1 与 Runtime Supervisor 已完成，并有自动化契约证据。
+- 版本化 Command Schema、Capability Registry / Policy 和 Renderer Projection 仍在进行中。
+- 部分 IPC channel 仍使用通用 object validator。
+- Policy 尚未消费 capability 实时状态，也没有逐次授权和团队策略 profile。
+- 消息列表尚未虚拟化；projection 不支持持久重建。
+- correlation / causation 元数据尚未端到端贯通 IPC、OMP RPC、工具调用和日志。
+- 当前只承诺单用户、单设备、单主窗口，不承诺多窗口一致性或跨设备同步。
 
-Agent 默认在你的本地工作目录里运行。它可以读写文件、运行命令和调用模型 Provider，所以建议只在你信任的项目目录中使用。
+涉及进程边界、状态权威、IPC 语义、安全不变量或一致性模型的变更，应同步更新 [架构文档](./docs/architecture.md)、相关 ADR、实现和测试。
 
-可选 Shell 沙箱：
+## 截图
 
-```env
-AGENT_SHELL_SANDBOX=true
-AGENT_SHELL_SANDBOX_BACKEND=auto
-AGENT_SHELL_SANDBOX_FAIL_IF_UNAVAILABLE=true
-AGENT_SANDBOX_ALLOW_WRITE=.
-AGENT_SANDBOX_NETWORK=false
-```
-
-沙箱会尽量限制工作区外写入、敏感路径访问和不必要的网络命令。不同系统可用能力不同：macOS 优先 Seatbelt，Linux 优先 bubblewrap，其他环境会退化为策略预检。
-
-## 给开发者
-
-日常验证命令：
-
-```bash
-bun run lint
-bun test tests/unit/
-bun run desktop:renderer:build
-```
-
-代码主要分为两个入口：
-
-- `src/adapters/desktop/`：桌面端核心适配器，包括 OmpAdapter、DesktopCore、IPC 通信层
-- `desktop/`：Electron 主进程、预加载脚本、渲染层和桌面集成
-
-项目依赖：
-- `@oh-my-pi/pi-coding-agent` — 核心执行引擎，通过 npm 包引入
-- OmpAdapter 自动从 `node_modules` 解析 omp CLI 路径，无需手动设置 `OMP_CLI_PATH` 环境变量
-
-## 已知限制
-
-- macOS Desktop 产物目前可能触发 Gatekeeper 提示，需要按“macOS 首次打开”里的方式处理；这属于发布签名/公证问题，不代表应用包一定损坏。
-- 文档解析依赖本地运行环境，PDF 渲染相关原生依赖缺失时可能需要安装或使用 fallback。
-- Shell 沙箱不是所有平台都能提供同等级隔离，生产级隔离建议配合容器或 VM。
-- Web 搜索结果受搜索服务和网络环境影响，实时信息应优先查看来源链接。
-- 大型仓库、超大文档或大量文件变更会消耗更多索引和刷新时间。
+![Desktop demo 1](./images/demo_001.png)
+![Desktop demo 2](./images/demo_002.png)
+![Desktop demo 3](./images/demo_003.png)
 
 ## License
 
-MIT
+MIT（以 `package.json` 中的包元数据为准）。

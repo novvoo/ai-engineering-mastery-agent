@@ -95,6 +95,9 @@ function App() {
     handleTerminalClose,
   } = useLayout();
 
+  // MessageLog 工具栏元素：侧栏展开时由 MessageLog 通过 toolbarSlot 传出，渲染到 InspectorPanel header
+  const [messageToolbar, setMessageToolbar] = useState(null);
+
   // ── 模型配置 ─────────────────────────────────────────────
   const {
     llmConfigStatus,
@@ -458,6 +461,44 @@ function App() {
     if (url) ipc.openExternal?.(url);
   }, [ipc]);
 
+  // ── 顶部工具栏渲染 ───────────────────────────────────────
+  // 顶栏已移除，工具按钮根据右侧面板状态在主栏或侧边栏显示
+  const renderWorkbenchControls = useCallback(
+    (variant = 'default') => (
+      <WorkbenchControls
+        key={`workbench-controls-${variant}`}
+        variant={variant}
+        sidebarCollapsed={sidebarCollapsed}
+        isTerminalVisible={!terminalClosed && terminalOpen}
+        summaryPanelVisible={summaryPanelVisible}
+        onExport={handleExport}
+        onOpenPreview={() => {
+          setSummaryPanelVisible(true);
+          setActiveInspectorTab('preview');
+        }}
+        onToggleSidebar={() => setSidebarCollapsed((prev) => !prev)}
+        onToggleTerminal={toggleTerminalPanel}
+        onToggleInspector={() => setSummaryPanelVisible((prev) => !prev)}
+        onClearMessages={handleClearMessages}
+        capabilityGraph={capabilities.graph}
+        messageCount={runtime.messages.length}
+      />
+    ),
+    [
+      sidebarCollapsed,
+      terminalClosed,
+      terminalOpen,
+      summaryPanelVisible,
+      handleExport,
+      setActiveInspectorTab,
+      setSidebarCollapsed,
+      toggleTerminalPanel,
+      handleClearMessages,
+      capabilities.graph,
+      runtime.messages.length,
+    ],
+  );
+
   // ── 渲染 ─────────────────────────────────────────────────
   return (
     <ActionLifecycleProvider
@@ -479,23 +520,6 @@ function App() {
 
       <IpcDiagnosticBanner diagnostic={ipcDiagnostic} onDismiss={() => setIpcDiagnostic(null)} />
       <CapabilityStatusBar capabilityState={capabilities} />
-
-      <WorkbenchControls
-        sidebarCollapsed={sidebarCollapsed}
-        isTerminalVisible={!terminalClosed && terminalOpen}
-        summaryPanelVisible={summaryPanelVisible}
-        onExport={handleExport}
-        onOpenPreview={() => {
-          setSummaryPanelVisible(true);
-          setActiveInspectorTab('preview');
-        }}
-        onToggleSidebar={() => setSidebarCollapsed((prev) => !prev)}
-        onToggleTerminal={toggleTerminalPanel}
-        onToggleInspector={() => setSummaryPanelVisible((prev) => !prev)}
-        onClearMessages={handleClearMessages}
-        capabilityGraph={capabilities.graph}
-        messageCount={runtime.messages.length}
-      />
 
       <div
         className="mastery-workbench"
@@ -596,6 +620,9 @@ function App() {
             onClear={handleClearMessages}
             workingDirectory={workingDirectory}
             fileServerUrl={fileServerUrl}
+            summaryPanelVisible={summaryPanelVisible}
+            renderControls={renderWorkbenchControls}
+            toolbarSlot={summaryPanelVisible ? setMessageToolbar : undefined}
           />
           {!terminalClosed && (
             <BottomTerminalPanel
@@ -658,6 +685,9 @@ function App() {
             onStopPreview={handleStopPreview}
             onSwitchSession={(id) => handleSelectSession(id, clearInput)}
             onTabChange={setActiveInspectorTab}
+            summaryPanelVisible={summaryPanelVisible}
+            renderControls={renderWorkbenchControls}
+            messageToolbar={messageToolbar}
           />
           </div>
         )}

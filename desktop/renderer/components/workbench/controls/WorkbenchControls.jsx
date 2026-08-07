@@ -1,6 +1,5 @@
 import React, { useCallback } from 'react';
 import { Button, Icon } from '../../ui/index.js';
-import { styles } from '../../../app/styles.js';
 import { t as i18nT } from '../../../i18n.js';
 import { resolveUiActionState, UI_ACTION_STATUS } from '../../../app/actions/ui-action-graph.js';
 import { useActionLifecycleContext, useActionState } from '../../../contexts/ActionLifecycleContext.jsx';
@@ -17,6 +16,7 @@ export function WorkbenchControls({
   onClearMessages,
   capabilityGraph,
   messageCount = 0,
+  variant = 'default',
 }) {
   const { executeActionWithFeedback } = useActionLifecycleContext();
 
@@ -71,22 +71,65 @@ export function WorkbenchControls({
     color: 'var(--primary-color)',
   };
 
+  const isCompact = variant === 'sidebar';
+  const divider = (
+    <span
+      style={{
+        width: '1px',
+        height: '18px',
+        margin: '0 2px',
+        backgroundColor: 'var(--border-subtle)',
+        flexShrink: 0,
+      }}
+    />
+  );
+
   return (
-    <div className="mastery-top-controls" style={styles.workspaceControls}>
-      <Button
-        actionId="workbench.preview"
-        variant="ghost"
-        size="sm"
-        style={textButton}
-        onClick={handleOpenPreview}
-        disabled={previewAction.status === 'blocked' || previewState.status === UI_ACTION_STATUS.RUNNING}
-        title={previewAction.reason || i18nT('chat.preview')}
-        ariaLabel={i18nT('chat.preview')}
-        aria-busy={previewState.status === UI_ACTION_STATUS.RUNNING || undefined}
-      >
-        <Icon name="preview" size={14} />
-        <span>{previewState.status === UI_ACTION_STATUS.RUNNING ? '...' : '打开预览'}</span>
-      </Button>
+    <div
+      className="mastery-top-controls"
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '4px',
+        minHeight: '28px',
+        padding: 0,
+        border: 'none',
+        backgroundColor: 'transparent',
+        boxShadow: 'none',
+        WebkitAppRegion: 'no-drag',
+        flexShrink: 0,
+      }}
+    >
+      {isCompact ? (
+        <Button
+          actionId="workbench.preview"
+          variant="ghost"
+          size="sm"
+          style={iconButton}
+          onClick={handleOpenPreview}
+          disabled={previewAction.status === 'blocked' || previewState.status === UI_ACTION_STATUS.RUNNING}
+          title={previewAction.reason || i18nT('chat.preview')}
+          ariaLabel={i18nT('chat.preview')}
+          aria-busy={previewState.status === UI_ACTION_STATUS.RUNNING || undefined}
+        >
+          <Icon name="preview" size={14} />
+        </Button>
+      ) : (
+        <Button
+          actionId="workbench.preview"
+          variant="ghost"
+          size="sm"
+          style={textButton}
+          onClick={handleOpenPreview}
+          disabled={previewAction.status === 'blocked' || previewState.status === UI_ACTION_STATUS.RUNNING}
+          title={previewAction.reason || i18nT('chat.preview')}
+          ariaLabel={i18nT('chat.preview')}
+          aria-busy={previewState.status === UI_ACTION_STATUS.RUNNING || undefined}
+        >
+          <Icon name="preview" size={14} />
+          <span>{previewState.status === UI_ACTION_STATUS.RUNNING ? '...' : '打开预览'}</span>
+        </Button>
+      )}
       <Button
         actionId="workbench.export"
         variant="ghost"
@@ -100,7 +143,7 @@ export function WorkbenchControls({
       >
         <Icon name="download" size={14} />
       </Button>
-      <span style={styles.chatHeaderActionDivider} />
+      {divider}
       <Button
         variant="icon"
         actionId="workbench.toggle-sidebar"

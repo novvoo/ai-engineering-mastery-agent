@@ -10,7 +10,7 @@ export const TERMINAL_HEIGHT = Object.freeze({
   keyboardLargeStep: 80,
 });
 export const TERMINAL_TABS = Object.freeze(['terminal', 'problems', 'output']);
-export const INSPECTOR_TABS = Object.freeze(['activity', 'history', 'preview']);
+export const INSPECTOR_TABS = Object.freeze(['activity', 'plan', 'history', 'preview']);
 export const INSPECTOR_WIDTH = Object.freeze({
   keyboardStep: 24,
   keyboardLargeStep: 80,

@@ -11,7 +11,7 @@ export const styles = {
     fontFamily: 'var(--font-family)',
     overflow: 'hidden',
     position: 'relative',
-    border: '1px solid var(--window-border-color)',
+    border: 'none',
   },
   
   menuItem: {
@@ -32,12 +32,12 @@ export const styles = {
   },
   
   menuItemHover: {
-    backgroundColor: 'var(--glass-bg-light)',
+    backgroundColor: 'var(--bg-overlay-l1)',
     color: 'var(--text-color)'
   },
   
   menuItemActive: {
-    backgroundColor: 'var(--primary-soft)',
+    backgroundColor: 'var(--bg-overlay-l2)',
     color: 'var(--primary-color)'
   },
   
@@ -46,10 +46,10 @@ export const styles = {
     top: '100%',
     left: 0,
     minWidth: '200px',
-    backgroundColor: 'var(--surface-color)',
-    border: '1px solid var(--glass-border)',
+    backgroundColor: 'var(--surface-base)',
+    border: '1px solid var(--border-subtle)',
     borderRadius: '10px',
-    boxShadow: 'var(--glass-shadow-lg)',
+    boxShadow: 'var(--shadow-lg)',
     padding: '6px 0',
     zIndex: 1000
   },
@@ -77,7 +77,7 @@ export const styles = {
   
   menuDivider: {
     height: '1px',
-    backgroundColor: 'var(--glass-border)',
+    backgroundColor: 'var(--border-subtle)',
     margin: '6px 0'
   },
   
@@ -126,15 +126,15 @@ export const styles = {
   activityRail: {
     width: `${LAYOUT.activityRailWidth}px`,
     flexShrink: 0,
-    backgroundColor: 'var(--surface-card)',
-    border: '1px solid var(--border-card)',
-    borderRadius: 'var(--radius-lg)',
+    backgroundColor: 'var(--surface-base)',
+    border: 'none',
+    borderRadius: '0',
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
     padding: '7px 5px',
     gap: '6px',
-    boxShadow: 'var(--shadow-sm), var(--glass-inner-hl)',
+    boxShadow: 'none',
     position: 'relative',
     zIndex: 1,
   },
@@ -143,7 +143,7 @@ export const styles = {
     width: '34px',
     height: '34px',
     borderRadius: 'var(--radius-md)',
-    border: '1px solid transparent',
+    border: 'none',
     backgroundColor: 'transparent',
     color: 'var(--text-dark)',
     cursor: 'pointer',
@@ -158,7 +158,7 @@ export const styles = {
 
   activityButtonActive: {
     backgroundColor: 'var(--primary-soft)',
-    border: '1px solid var(--primary-border)',
+    border: 'none',
     color: 'var(--primary-color)',
     boxShadow: 'none'
   },
@@ -166,13 +166,13 @@ export const styles = {
   // ================== 左侧工具面板 ==================
   leftSidebar: {
     width: `${LAYOUT.sidebarWidth}px`,
-    backgroundColor: 'var(--surface-card)',
+    backgroundColor: 'var(--sidebar-bg)',
     borderRight: '1px solid var(--border-divider)',
     display: 'flex',
     flexDirection: 'column',
     overflow: 'hidden',
     transition: 'width var(--transition-normal)',
-    boxShadow: 'var(--shadow-sm)',
+    boxShadow: 'none',
     position: 'relative',
     zIndex: 1,
   },
@@ -186,8 +186,8 @@ export const styles = {
     justifyContent: 'space-between',
     gap: 'var(--spacing-sm)',
     backgroundColor: 'transparent',
-    backdropFilter: 'blur(8px) saturate(140%)',
-    WebkitBackdropFilter: 'blur(8px) saturate(140%)',
+    backdropFilter: 'none',
+    WebkitBackdropFilter: 'none',
     boxShadow: 'none'
   },
 
@@ -209,13 +209,13 @@ export const styles = {
   
   // ================== 右侧 Inspector 面板 ==================
   summaryPanel: {
-    backgroundColor: 'var(--surface-card)',
+    backgroundColor: 'var(--surface-base)',
     borderLeft: '1px solid var(--border-divider)',
     display: 'flex',
     flexDirection: 'column',
     overflow: 'hidden',
     position: 'relative',
-    boxShadow: 'var(--shadow-sm)',
+    boxShadow: 'none',
     zIndex: 1,
   },
 
@@ -235,10 +235,10 @@ export const styles = {
     alignItems: 'center',
     gap: '8px',
     padding: '8px',
-    borderBottom: '1px solid var(--border-divider)',
-    backgroundColor: 'var(--surface-card)',
-    backdropFilter: 'blur(8px) saturate(140%)',
-    WebkitBackdropFilter: 'blur(8px) saturate(140%)',
+    borderBottom: 'none',
+    backgroundColor: 'transparent',
+    backdropFilter: 'none',
+    WebkitBackdropFilter: 'none',
     boxShadow: 'none'
   },
 
@@ -260,15 +260,15 @@ export const styles = {
     minWidth: 0,
     padding: '2px',
     borderRadius: 'var(--radius-md)',
-    border: '1px solid var(--border-subtle)',
-    backgroundColor: 'var(--surface-base)',
+    border: 'none',
+    backgroundColor: 'var(--bg-overlay-l1)',
     boxShadow: 'none'
   },
 
   inspectorTab: {
     height: '30px',
     borderRadius: 'var(--radius-sm)',
-    border: '1px solid transparent',
+    border: 'none',
     backgroundColor: 'transparent',
     color: 'var(--text-muted)',
     cursor: 'pointer',
@@ -278,10 +278,10 @@ export const styles = {
   },
 
   inspectorTabActive: {
-    backgroundColor: 'var(--surface-raised)',
-    border: '1px solid var(--border-subtle)',
+    backgroundColor: 'var(--surface-base)',
+    border: 'none',
     color: 'var(--text-color)',
-    boxShadow: 'var(--shadow-sm)'
+    boxShadow: 'none'
   },
 
   inspectorTabContent: {
@@ -290,16 +290,16 @@ export const styles = {
     display: 'flex',
     flexDirection: 'column',
     overflow: 'hidden',
-    backgroundColor: 'var(--surface-hover)',
-    borderTop: '1px solid var(--border-divider)',
+    backgroundColor: 'var(--surface-base)',
+    borderTop: 'none',
   },
 
   iconButton: {
     width: '30px',
     height: '30px',
     borderRadius: 'var(--radius-md)',
-    border: '1px solid var(--border-subtle)',
-    backgroundColor: 'var(--surface-raised)',
+    border: 'none',
+    backgroundColor: 'transparent',
     color: 'var(--text-muted)',
     cursor: 'pointer',
     fontSize: '13px',
@@ -317,7 +317,7 @@ export const styles = {
     minHeight: 0,
     width: '100%',
     border: 'none',
-    backgroundColor: 'var(--background-color)'
+    backgroundColor: 'var(--surface-base)'
   },
   
   summarySection: {
@@ -341,8 +341,8 @@ export const styles = {
     gap: '8px',
     padding: '8px 10px',
     borderRadius: '8px',
-    backgroundColor: 'var(--glass-bg-light)',
-    border: '1px solid var(--glass-border)',
+    backgroundColor: 'var(--bg-overlay-l1)',
+    border: 'none',
     marginBottom: '6px',
     fontSize: '12px'
   },
@@ -377,10 +377,10 @@ export const styles = {
     gap: '8px',
     padding: '9px 10px',
     borderRadius: '8px',
-    backgroundColor: 'var(--glass-bg-light)',
+    backgroundColor: 'var(--bg-overlay-l1)',
     marginBottom: '6px',
     fontSize: '12px',
-    border: '1px solid var(--glass-border)'
+    border: 'none'
   },
 
   inspectorDocumentName: {
@@ -424,7 +424,7 @@ export const styles = {
     display: 'flex',
     gap: '8px',
     padding: '8px 10px',
-    borderBottom: '1px solid var(--glass-border)'
+    borderBottom: 'none'
   },
 
   previewUrlInput: {
@@ -432,19 +432,19 @@ export const styles = {
     minWidth: 0,
     height: '32px',
     borderRadius: '8px',
-    border: '1px solid var(--glass-border)',
-    backgroundColor: 'var(--glass-bg-light)',
-    backdropFilter: 'blur(8px) saturate(140%)',
-    WebkitBackdropFilter: 'blur(8px) saturate(140%)',
+    border: 'none',
+    backgroundColor: 'var(--bg-overlay-l1)',
+    backdropFilter: 'none',
+    WebkitBackdropFilter: 'none',
     color: 'var(--text-color)',
     padding: '0 10px',
     fontSize: '12px',
-    boxShadow: 'var(--glass-inner-hl)'
+    boxShadow: 'none'
   },
 
   previewPipeline: {
     padding: '8px 10px',
-    borderBottom: '1px solid var(--glass-border)',
+    borderBottom: 'none',
     display: 'flex',
     gap: '6px',
     overflowX: 'auto'
@@ -455,11 +455,11 @@ export const styles = {
     maxWidth: '180px',
     padding: '5px 10px',
     borderRadius: '8px',
-    border: '1px solid var(--glass-border)',
-    backgroundColor: 'var(--glass-bg-light)',
-    backdropFilter: 'blur(6px) saturate(130%)',
-    WebkitBackdropFilter: 'blur(6px) saturate(130%)',
-    boxShadow: 'var(--glass-inner-hl)',
+    border: 'none',
+    backgroundColor: 'var(--bg-overlay-l1)',
+    backdropFilter: 'none',
+    WebkitBackdropFilter: 'none',
+    boxShadow: 'none',
     fontSize: '11px',
     whiteSpace: 'nowrap',
     overflow: 'hidden',
@@ -470,15 +470,15 @@ export const styles = {
     height: '32px',
     padding: '0 10px',
     borderRadius: '8px',
-    border: '1px solid var(--glass-border)',
-    backgroundColor: 'var(--glass-bg-light)',
-    backdropFilter: 'blur(8px) saturate(140%)',
-    WebkitBackdropFilter: 'blur(8px) saturate(140%)',
+    border: 'none',
+    backgroundColor: 'var(--bg-overlay-l1)',
+    backdropFilter: 'none',
+    WebkitBackdropFilter: 'none',
     color: 'var(--text-color)',
     cursor: 'pointer',
     fontSize: '13px',
     transition: 'all var(--transition-fast)',
-    boxShadow: 'var(--glass-inner-hl)'
+    boxShadow: 'none'
   },
   
   // ================== 聊天区域 ==================
@@ -489,9 +489,9 @@ export const styles = {
     display: 'flex',
     flexDirection: 'column',
     backgroundColor: 'var(--surface-base)',
-    border: '1px solid var(--border-card)',
-    borderRadius: 'var(--radius-xl)',
-    boxShadow: 'var(--shadow-panel)',
+    border: 'none',
+    borderRadius: '0',
+    boxShadow: 'none',
     overflow: 'hidden',
   },
 
@@ -510,13 +510,14 @@ export const styles = {
     justifyContent: 'space-between',
     gap: '12px',
     padding: '10px 14px',
-    borderBottom: '1px solid var(--border-divider)',
-    backgroundColor: 'var(--surface-card)',
+    borderBottom: 'none',
+    backgroundColor: 'transparent',
     boxShadow: 'none'
   },
   
   chatTitle: {
     minHeight: '28px',
+    minWidth: 0,
     padding: '2px 2px',
     borderRadius: 'var(--radius-sm)',
     border: '1px solid transparent',
@@ -529,7 +530,8 @@ export const styles = {
     alignItems: 'center',
     gap: '9px',
     textTransform: 'uppercase',
-    letterSpacing: '0.035em'
+    letterSpacing: '0.035em',
+    flex: 1,
   },
 
   chatTitleMark: {
@@ -611,8 +613,8 @@ export const styles = {
     padding: '0 12px',
     minHeight: '34px',
     borderRadius: '12px',
-    border: '1px solid var(--border-subtle)',
-    backgroundColor: 'var(--surface-raised)',
+    border: 'none',
+    backgroundColor: 'var(--bg-overlay-l1)',
     boxShadow: 'none'
   },
 
@@ -702,7 +704,7 @@ export const styles = {
     padding: '0 7px',
     borderRadius: '6px',
     border: '0',
-    backgroundColor: 'var(--surface-hover)',
+    backgroundColor: 'var(--bg-overlay-l1)',
     color: 'var(--text-muted)',
     fontSize: '11px',
     fontWeight: 550
@@ -715,27 +717,27 @@ export const styles = {
     alignItems: 'center',
     padding: '0 8px',
     borderRadius: 'var(--radius-sm)',
-    border: '1px solid var(--glass-border)',
-    backgroundColor: 'var(--neutral-faint)',
+    border: 'none',
+    backgroundColor: 'var(--bg-overlay-l1)',
     color: 'var(--text-muted)',
     fontSize: '11px',
     fontWeight: 800
   },
 
   interactionRiskLow: {
-    border: '1px solid var(--primary-border)',
+    border: 'none',
     backgroundColor: 'var(--success-faint)',
     color: 'var(--success-color)'
   },
 
   interactionRiskMedium: {
-    border: '1px solid var(--warning-strong)',
+    border: 'none',
     backgroundColor: 'var(--warning-faint)',
     color: 'var(--warning-color)'
   },
 
   interactionRiskHigh: {
-    border: '1px solid var(--error-soft)',
+    border: 'none',
     backgroundColor: 'var(--error-faint)',
     color: 'var(--error-color)'
   },
@@ -765,8 +767,8 @@ export const styles = {
     alignItems: 'center',
     padding: '0 5px',
     borderRadius: 'var(--radius-sm)',
-    border: '1px solid var(--glass-border)',
-    backgroundColor: 'var(--glass-bg)',
+    border: 'none',
+    backgroundColor: 'var(--bg-overlay-l1)',
     color: 'var(--text-muted)',
     fontFamily: 'var(--font-mono)',
     fontSize: '10px',
@@ -794,18 +796,18 @@ export const styles = {
     position: 'relative',
     zIndex: 50,
     padding: '12px 14px',
-    backgroundColor: 'var(--surface-card)',
-    border: '1px solid var(--glass-border-strong)',
+    backgroundColor: 'var(--bg-base-default)',
+    border: 'none',
     borderRadius: 'var(--radius-lg)',
-    boxShadow: 'var(--shadow-sm), var(--glass-inner-hl)'
+    boxShadow: 'none'
   },
 
   userInputRequestPanel: {
     marginBottom: '10px',
     borderRadius: 'var(--radius-lg)',
-    border: '1px solid var(--glass-border)',
-    backgroundColor: 'var(--surface-raised)',
-    boxShadow: 'var(--glass-inner-hl)',
+    border: 'none',
+    backgroundColor: 'var(--bg-overlay-l1)',
+    boxShadow: 'none',
     overflow: 'hidden'
   },
 
@@ -839,9 +841,9 @@ export const styles = {
     minHeight: '54px',
     maxHeight: '120px',
     resize: 'vertical',
-    border: '1px solid var(--border-subtle)',
+    border: 'none',
     borderRadius: 'var(--radius-md)',
-    backgroundColor: 'var(--surface-input)',
+    backgroundColor: 'var(--bg-overlay-l2)',
     color: 'var(--text-color)',
     padding: '8px',
     fontSize: '13px',
@@ -854,7 +856,7 @@ export const styles = {
   userInputRequestButton: {
     width: '64px',
     minHeight: '54px',
-    border: '1px solid var(--glass-border)',
+    border: 'none',
     borderRadius: '8px',
     backgroundColor: 'var(--primary-color)',
     color: 'var(--text-on-primary)',
@@ -898,8 +900,8 @@ export const styles = {
     height: '32px',
     borderRadius: 'var(--radius-md)',
     border: 'none',
-    backgroundColor: 'var(--ds-brand)',
-    color: 'var(--text-on-primary)',
+    backgroundColor: 'var(--bg-brand)',
+    color: 'var(--text-onbrand)',
     cursor: 'pointer',
     fontSize: '14px',
     display: 'flex',
@@ -911,19 +913,20 @@ export const styles = {
   },
 
   sendButtonDisabled: {
-    backgroundColor: 'var(--ds-bg-raised)',
+    backgroundColor: 'var(--bg-overlay-l2)',
     border: 'none',
-    color: 'var(--ds-text-tertiary)',
+    color: 'var(--text-tertiary)',
     cursor: 'not-allowed',
     opacity: 0.5,
   },
 
   /* 运行时停止按钮 */
   sendButtonRunning: {
-    backgroundColor: 'var(--surface-hover)',
+    backgroundColor: 'var(--status-error-default)',
     border: 'none',
-    color: 'var(--text-color)',
+    color: 'var(--special-white)',
     cursor: 'pointer',
+    animation: 'stop-button-pulse 1.6s ease-in-out infinite',
   },
 
   /* 运行时发送按钮（次要） */
@@ -931,9 +934,9 @@ export const styles = {
     width: '32px',
     height: '32px',
     borderRadius: '999px',
-    border: '1px solid var(--border-card)',
-    backgroundColor: 'var(--surface-color)',
-    color: 'var(--ds-text-primary)',
+    border: '1px solid var(--border-neutral-l2)',
+    backgroundColor: 'var(--bg-base-secondary)',
+    color: 'var(--text-default)',
     cursor: 'pointer',
     fontSize: '14px',
     display: 'flex',
@@ -957,11 +960,11 @@ export const styles = {
     width: '38px',
     height: '38px',
     borderRadius: '50%',
-    border: '1px solid var(--glass-border)',
-    backgroundColor: 'rgba(20, 20, 24, 0.55)',
-    backdropFilter: 'blur(12px) saturate(180%)',
-    WebkitBackdropFilter: 'blur(12px) saturate(180%)',
-    boxShadow: '0 4px 16px rgba(0, 0, 0, 0.2)',
+    border: '1px solid var(--border-subtle)',
+    backgroundColor: 'var(--bg-overlay-l2)',
+    backdropFilter: 'none',
+    WebkitBackdropFilter: 'none',
+    boxShadow: 'var(--shadow-md)',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -979,11 +982,11 @@ export const styles = {
     minWidth: '360px',
     maxWidth: '520px',
     borderRadius: '18px',
-    border: '1px solid var(--border-card)',
-    backgroundColor: 'var(--surface-color)',
+    border: '1px solid var(--border-subtle)',
+    backgroundColor: 'var(--surface-base)',
     backdropFilter: 'none',
     WebkitBackdropFilter: 'none',
-    boxShadow: '0 14px 38px rgba(31,35,40,.12), 0 2px 8px rgba(31,35,40,.05)',
+    boxShadow: 'var(--shadow-lg)',
     padding: '16px',
     display: 'flex',
     alignItems: 'center',
@@ -1004,8 +1007,8 @@ export const styles = {
     width: '36px',
     height: '36px',
     borderRadius: '10px',
-    backgroundColor: 'var(--surface-hover)',
-    border: '1px solid var(--border-subtle)',
+    backgroundColor: 'var(--bg-overlay-l1)',
+    border: 'none',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1043,7 +1046,7 @@ export const styles = {
     marginTop: '10px',
     padding: '6px',
     borderRadius: '12px',
-    backgroundColor: 'var(--surface-input)',
+    backgroundColor: 'var(--bg-overlay-l1)',
     border: '1px solid var(--border-subtle)',
     transition: 'all var(--transition-fast)'
   },
@@ -1069,7 +1072,7 @@ export const styles = {
     width: '32px',
     height: '32px',
     borderRadius: '8px',
-    border: '1px solid var(--glass-border)',
+    border: 'none',
     backgroundColor: 'var(--primary-color)',
     color: 'var(--text-on-primary)',
     cursor: 'pointer',

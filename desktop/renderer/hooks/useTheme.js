@@ -7,7 +7,7 @@ export function useTheme() {
   const [theme, setTheme] = useState(() => {
     const stored =
       typeof localStorage !== 'undefined' ? localStorage.getItem(DESKTOP_THEME_STORAGE_KEY) : null;
-    return stored || 'light';
+    return stored || 'dark';
   });
 
   const [language, setLanguage] = useState(() => getI18n().getLanguage());

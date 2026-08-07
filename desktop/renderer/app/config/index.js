@@ -2,7 +2,7 @@ export const LAYOUT = {
   activityRailWidth: 48,
   sidebarWidth: 260,
   inspectorPanelWidth: 340,
-  inspectorMinWidth: 280,
+  inspectorMinWidth: 300,
   inspectorMaxWidth: 780,
   inspectorExpandedWidth: 580,
   headerHeight: 44,           // legacy: 旧 TopBar 高度，保留以防遗漏引用

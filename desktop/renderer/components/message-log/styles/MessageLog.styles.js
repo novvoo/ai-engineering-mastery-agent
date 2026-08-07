@@ -5,13 +5,98 @@ export const styles = {
     flexDirection: 'column',
     height: '100%',
     overflow: 'visible',
+    position: 'relative',
     backgroundColor: 'transparent',
     borderWidth: '0',
     borderStyle: 'none',
     borderColor: 'transparent',
     boxShadow: 'none'
   },
-  
+
+  // 浮动工具栏：absolute 定位在消息列表右上角，不占布局空间
+  floatingToolbar: {
+    position: 'absolute',
+    top: '6px',
+    right: '8px',
+    zIndex: 10,
+    display: 'flex',
+    alignItems: 'center',
+    gap: '3px',
+    padding: '3px 5px',
+    borderRadius: 'var(--radius-full)',
+    backgroundColor: 'var(--surface-card)',
+    border: '1px solid var(--border-subtle)',
+    boxShadow: 'var(--shadow-sm, 0 1px 3px rgba(0,0,0,0.06))',
+    backdropFilter: 'blur(8px)',
+    WebkitBackdropFilter: 'blur(8px)',
+  },
+
+  // 外部工具栏容器：用于 InspectorPanel header 渲染
+  toolbarExternal: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '4px 0',
+    flexWrap: 'wrap',
+  },
+
+  // 工具栏标题（外部渲染时使用）
+  toolbarTitle: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    fontSize: '11px',
+    fontWeight: 700,
+    color: 'var(--ds-text-tertiary)',
+    textTransform: 'uppercase',
+    letterSpacing: '0.04em',
+    flexShrink: 0,
+  },
+
+  // 任务标识 chip：下沉自原 ChatWorkspace 顶栏
+  taskChipRow: {
+    display: 'flex',
+    alignItems: 'center',
+    padding: '2px 4px 6px',
+    flexShrink: 0,
+  },
+  taskChip: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
+    padding: '3px 10px',
+    borderRadius: 'var(--radius-full)',
+    backgroundColor: 'var(--ds-brand-soft)',
+    border: '1px solid var(--ds-brand-border, transparent)',
+    maxWidth: '100%',
+  },
+  taskChipIcon: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: 'var(--ds-brand)',
+    flexShrink: 0,
+  },
+  taskChipTitle: {
+    fontSize: '12px',
+    fontWeight: 600,
+    color: 'var(--ds-text-primary)',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    maxWidth: '320px',
+  },
+  taskChipCount: {
+    fontSize: '10px',
+    fontWeight: 500,
+    color: 'var(--ds-text-tertiary)',
+    fontVariantNumeric: 'tabular-nums',
+    backgroundColor: 'var(--bg-overlay-l1)',
+    padding: '1px 6px',
+    borderRadius: 'var(--radius-full)',
+    flexShrink: 0,
+  },
+
   header: {
     display: 'flex',
     justifyContent: 'space-between',
@@ -75,8 +160,8 @@ export const styles = {
     borderRadius: 'var(--radius-sm)',
     borderWidth: '1px',
     borderStyle: 'solid',
-    borderColor: 'var(--ds-border-l2)',
-    backgroundColor: 'var(--surface-input)',
+    borderColor: 'var(--border-subtle)',
+    backgroundColor: 'var(--bg-overlay-l1)',
     color: 'var(--ds-text-primary)',
     fontSize: '11px',
     transition: 'width 0.2s ease'
@@ -90,10 +175,10 @@ export const styles = {
     height: '26px',
     padding: '0 7px',
     borderRadius: 'var(--radius-sm)',
-    borderWidth: '1px',
-    borderStyle: 'solid',
-    borderColor: 'var(--ds-border-l1)',
-    backgroundColor: 'transparent',
+    borderWidth: '0',
+    borderStyle: 'none',
+    borderColor: 'transparent',
+    backgroundColor: 'var(--bg-overlay-l1)',
     color: 'var(--ds-text-secondary)',
     cursor: 'pointer',
     fontSize: '11px',
@@ -106,9 +191,9 @@ export const styles = {
   buttonActive: {
     backgroundColor: 'var(--ds-brand-soft)',
     color: 'var(--ds-brand)',
-    borderWidth: '1px',
-    borderStyle: 'solid',
-    borderColor: 'var(--ds-brand-s2)'
+    borderWidth: '0',
+    borderStyle: 'none',
+    borderColor: 'transparent'
   },
   
   viewToggle: {
@@ -116,7 +201,7 @@ export const styles = {
     gap: '1px',
     padding: '2px',
     borderRadius: 'var(--radius-sm)',
-    backgroundColor: 'var(--ds-bg-overlay-l1)',
+    backgroundColor: 'var(--bg-overlay-l1)',
     borderWidth: '0',
     borderStyle: 'none',
     borderColor: 'transparent',
@@ -142,9 +227,9 @@ export const styles = {
   },
   
   viewButtonActive: {
-    backgroundColor: 'var(--ds-bg-raised)',
+    backgroundColor: 'var(--surface-base)',
     color: 'var(--ds-text-primary)',
-    boxShadow: 'var(--shadow-sm)'
+    boxShadow: 'none'
   },
   
   messageList: {
@@ -159,8 +244,8 @@ export const styles = {
   runtimeDetailsPanel: {
     margin: '8px 6px 12px',
     borderRadius: '14px',
-    border: '1px solid var(--border-subtle)',
-    backgroundColor: 'var(--surface-color)',
+    border: 'none',
+    backgroundColor: 'var(--bg-overlay-l1)',
     overflow: 'visible',
     position: 'relative',
     zIndex: 2
@@ -172,7 +257,7 @@ export const styles = {
     justifyContent: 'space-between',
     minHeight: '36px',
     padding: '0 10px',
-    borderBottom: '1px solid var(--ds-border-l2)',
+    borderBottom: 'none',
     borderRadius: '14px 14px 0 0',
     color: 'var(--ds-text-secondary)',
     fontSize: '11px',
@@ -207,10 +292,10 @@ export const styles = {
   },
 
   runtimeDetailsToggle: {
-    borderWidth: '1px',
-    borderStyle: 'solid',
-    borderColor: 'var(--ds-border-l2)',
-    backgroundColor: 'var(--ds-bg-raised)',
+    borderWidth: '0',
+    borderStyle: 'none',
+    borderColor: 'transparent',
+    backgroundColor: 'transparent',
     color: 'var(--ds-text-secondary)',
     borderRadius: 'var(--radius-sm)',
     width: '22px',
@@ -225,7 +310,7 @@ export const styles = {
 
   runtimeProgress: {
     padding: '6px 10px 8px',
-    borderBottom: '1px solid var(--ds-border-l2)'
+    borderBottom: 'none'
   },
 
   runtimeProgressText: {
@@ -266,8 +351,8 @@ export const styles = {
 
   runtimeDetailItem: {
     borderRadius: '6px',
-    border: '1px solid var(--ds-border-l1)',
-    backgroundColor: 'var(--ds-bg-secondary)',
+    border: 'none',
+    backgroundColor: 'var(--bg-overlay-l2)',
     padding: '6px 8px',
     color: 'var(--ds-text-secondary)',
     fontSize: '11px',
@@ -280,7 +365,7 @@ export const styles = {
 
   runtimeDetailItemDebug: {
     border: 'none',
-    backgroundColor: 'var(--ds-bg-overlay-l1)',
+    backgroundColor: 'var(--bg-overlay-l2)',
   },
 
   runtimeDetailItemStatus: {
@@ -328,16 +413,16 @@ export const styles = {
     color: 'var(--ds-brand)',
     fontSize: 'var(--font-size-xs)',
     fontWeight: 600,
-    border: '1px solid var(--ds-brand-s2)',
+    border: 'none',
     maxWidth: 'fit-content',
   },
 
   planCard: {
     borderRadius: 'var(--radius-lg)',
-    borderWidth: '1px',
-    borderStyle: 'solid',
-    borderColor: 'var(--ds-border-l1)',
-    backgroundColor: 'var(--ds-bg-default)',
+    borderWidth: '0',
+    borderStyle: 'none',
+    borderColor: 'transparent',
+    backgroundColor: 'transparent',
     padding: 'var(--spacing-lg)',
     color: 'var(--ds-text-primary)',
     animation: 'planSectionFadeIn 0.25s ease-out',
@@ -357,8 +442,8 @@ export const styles = {
     minWidth: '28px',
     height: '22px',
     borderRadius: 'var(--radius-sm)',
-    border: '1px solid var(--ds-border-l1)',
-    background: 'var(--ds-bg-secondary)',
+    border: 'none',
+    background: 'var(--bg-overlay-l1)',
     color: 'var(--ds-text-tertiary)',
     fontSize: '10px',
     fontWeight: 600,
@@ -413,8 +498,8 @@ export const styles = {
     minWidth: 0,
     padding: 'var(--spacing-sm) var(--spacing-xs)',
     borderRadius: 'var(--radius-md)',
-    border: '1px solid var(--ds-border-l1)',
-    background: 'var(--ds-bg-secondary)',
+    border: 'none',
+    background: 'var(--bg-overlay-l1)',
     display: 'flex',
     flexDirection: 'column',
     gap: '2px',
@@ -450,30 +535,30 @@ export const styles = {
     fontSize: 'var(--font-size-xs)',
     fontWeight: 600,
     lineHeight: 1.5,
-    background: 'var(--ds-bg-secondary)',
+    background: 'var(--bg-overlay-l1)',
     color: 'var(--ds-text-secondary)',
-    border: '1px solid var(--ds-border-l1)',
+    border: 'none',
     transition: 'background 0.12s ease, color 0.12s ease',
   },
   planTagBrand: {
     background: 'var(--ds-brand-soft)',
     color: 'var(--ds-brand)',
-    borderColor: 'var(--ds-brand-s2)',
+    borderColor: 'transparent',
   },
   planTagSuccess: {
     background: 'var(--ds-status-success-s1)',
     color: 'var(--ds-status-success)',
-    borderColor: 'var(--ds-status-success-s2)',
+    borderColor: 'transparent',
   },
   planTagDanger: {
     background: 'var(--ds-status-error-s1)',
     color: 'var(--ds-status-error)',
-    borderColor: 'var(--ds-status-error-s2)',
+    borderColor: 'transparent',
   },
   planTagWarning: {
     background: 'var(--ds-status-warning-s1)',
     color: 'var(--ds-status-warning)',
-    borderColor: 'var(--ds-status-warning-s2)',
+    borderColor: 'transparent',
   },
 
   /* 快照时间线 */
@@ -484,8 +569,8 @@ export const styles = {
     padding: 'var(--spacing-xs) var(--spacing-sm)',
     marginBottom: 'var(--spacing-sm)',
     borderRadius: 'var(--radius-md)',
-    border: '1px solid var(--ds-border-l1)',
-    background: 'var(--ds-bg-secondary)',
+    border: 'none',
+    background: 'var(--bg-overlay-l1)',
   },
 
   planTimelineMeta: {
@@ -518,8 +603,8 @@ export const styles = {
     height: '22px',
     padding: '0 6px',
     borderRadius: 'var(--radius-sm)',
-    border: '1px solid var(--ds-border-l2)',
-    background: 'var(--ds-bg-raised)',
+    border: 'none',
+    background: 'var(--bg-overlay-l2)',
     color: 'var(--ds-text-secondary)',
     fontSize: 'var(--font-size-xs)',
     fontWeight: 700,
@@ -544,8 +629,8 @@ export const styles = {
     minWidth: 0,
     padding: 'var(--spacing-xs) var(--spacing-sm)',
     borderRadius: 'var(--radius-md)',
-    border: '1px solid var(--ds-border-l1)',
-    background: 'var(--ds-bg-secondary)',
+    border: 'none',
+    background: 'var(--bg-overlay-l1)',
     display: 'flex',
     flexDirection: 'column',
     gap: '2px',
@@ -555,8 +640,8 @@ export const styles = {
     gridColumn: 'span 2',
     padding: 'var(--spacing-xs) var(--spacing-sm)',
     borderRadius: 'var(--radius-md)',
-    border: '1px solid var(--ds-border-l1)',
-    background: 'var(--ds-bg-raised)',
+    border: 'none',
+    background: 'var(--bg-overlay-l2)',
     display: 'flex',
     flexDirection: 'column',
     gap: '2px',
@@ -584,7 +669,7 @@ export const styles = {
   planProgressTrack: {
     height: '6px',
     borderRadius: 'var(--radius-full)',
-    background: 'var(--ds-bg-overlay-l1)',
+    background: 'var(--bg-overlay-l1)',
     overflow: 'hidden',
     marginBottom: 'var(--spacing-md)',
   },
@@ -608,7 +693,7 @@ export const styles = {
     flexDirection: 'column',
     gap: 'var(--spacing-xs)',
     paddingTop: 'var(--spacing-xs)',
-    borderTop: '1px solid var(--ds-border-l1)',
+    borderTop: '1px solid var(--border-subtle)',
   },
   planPhaseGroupFirst: {
     borderTop: 'none',
@@ -705,8 +790,8 @@ export const styles = {
 
   activityPanel: {
     padding: '8px 10px',
-    borderBottom: '1px solid var(--ds-border-l1)',
-    backgroundColor: 'var(--ds-bg-overlay-l1)',
+    borderBottom: 'none',
+    backgroundColor: 'var(--bg-overlay-l1)',
     borderRadius: 'var(--radius-md)'
   },
 
@@ -735,7 +820,7 @@ export const styles = {
     gap: '6px',
     padding: '0 8px',
     borderRadius: '6px',
-    backgroundColor: 'var(--ds-bg-secondary)',
+    backgroundColor: 'var(--bg-overlay-l1)',
     color: 'var(--ds-text-secondary)',
     fontSize: '11px',
     fontWeight: 700
@@ -794,10 +879,10 @@ export const styles = {
     minHeight: '28px',
     padding: '0 8px',
     borderRadius: '6px',
-    backgroundColor: 'var(--ds-bg-secondary)',
-    borderWidth: '1px',
-    borderStyle: 'solid',
-    borderColor: 'var(--ds-border-l2)'
+    backgroundColor: 'var(--bg-overlay-l1)',
+    borderWidth: '0',
+    borderStyle: 'none',
+    borderColor: 'transparent'
   },
 
   fileStatusPath: {
@@ -831,15 +916,15 @@ export const styles = {
     gap: '8px',
     padding: '7px 4px',
     borderRadius: '0',
-    backgroundColor: 'var(--surface-color)',
+    backgroundColor: 'transparent',
     borderWidth: '0 0 1px',
     borderStyle: 'solid',
-    borderColor: 'var(--border-divider)',
+    borderColor: 'var(--border-subtle)',
   },
 
   activityItemCompleted: {
-    backgroundColor: 'var(--surface-color)',
-    borderColor: 'var(--border-divider)',
+    backgroundColor: 'transparent',
+    borderColor: 'var(--border-subtle)',
   },
 
   activityItemFailed: {
@@ -889,10 +974,10 @@ export const styles = {
     height: '24px',
     padding: '0 8px',
     borderRadius: '5px',
-    borderWidth: '1px',
-    borderStyle: 'solid',
-    borderColor: 'var(--ds-border-l1)',
-    backgroundColor: 'var(--ds-border-l1)',
+    borderWidth: '0',
+    borderStyle: 'none',
+    borderColor: 'transparent',
+    backgroundColor: 'var(--bg-overlay-l2)',
     color: 'var(--ds-text-primary)',
     cursor: 'pointer',
     fontSize: '11px',
@@ -921,9 +1006,9 @@ export const styles = {
     height: '10px',
     borderRadius: '50%',
     backgroundColor: 'var(--ds-brand)',
-    borderWidth: '2px',
-    borderStyle: 'solid',
-    borderColor: 'var(--ds-bg-raised)',
+    borderWidth: '0',
+    borderStyle: 'none',
+    borderColor: 'transparent',
     transition: 'all 0.2s'
   },
   
@@ -941,7 +1026,7 @@ export const styles = {
   },
   
   messageItemHover: {
-    backgroundColor: 'var(--ds-bg-overlay-l1)',
+    backgroundColor: 'var(--bg-overlay-l1)',
     borderRadius: 'var(--radius-lg)'
   },
   
@@ -1072,9 +1157,9 @@ export const styles = {
   thinkingPanel: {
     margin: '0 0 6px 0',
     borderRadius: 'var(--radius-md)',
-    borderWidth: '1px',
-    borderStyle: 'solid',
-    borderColor: 'var(--ds-brand-s2)',
+    borderWidth: '0',
+    borderStyle: 'none',
+    borderColor: 'transparent',
     backgroundColor: 'var(--ds-brand-soft)',
     overflow: 'visible'
   },
@@ -1157,10 +1242,10 @@ export const styles = {
   thinkingStep: {
     padding: '6px 8px',
     borderRadius: '6px',
-    backgroundColor: 'var(--ds-bg-secondary)',
-    borderWidth: '1px',
-    borderStyle: 'solid',
-    borderColor: 'var(--border-divider)'
+    backgroundColor: 'var(--bg-overlay-l1)',
+    borderWidth: '0',
+    borderStyle: 'none',
+    borderColor: 'transparent'
   },
 
   thinkingStepHeader: {
@@ -1249,7 +1334,7 @@ export const styles = {
 
   emptyChip: {
     padding: '4px 10px',
-    backgroundColor: 'var(--ds-bg-overlay-l1)',
+    backgroundColor: 'var(--bg-overlay-l1)',
     borderRadius: 'var(--radius-full)',
     fontSize: '11px',
     color: 'var(--ds-text-secondary)',
@@ -1260,11 +1345,11 @@ export const styles = {
   detailPanel: {
     marginTop: '4px',
     padding: '8px 10px',
-    backgroundColor: 'var(--ds-bg-raised)',
+    backgroundColor: 'var(--bg-overlay-l1)',
     borderRadius: 'var(--radius-md)',
-    borderWidth: '1px',
-    borderStyle: 'solid',
-    borderColor: 'var(--ds-border-l1)',
+    borderWidth: '0',
+    borderStyle: 'none',
+    borderColor: 'transparent',
     fontSize: '11px',
     maxHeight: '220px',
     overflowY: 'auto'
@@ -1369,7 +1454,7 @@ export const styles = {
     alignItems: 'center',
     gap: '5px',
     padding: '3px 6px',
-    backgroundColor: 'var(--ds-bg-overlay-l1)',
+    backgroundColor: 'var(--bg-overlay-l1)',
     borderRadius: 'var(--radius-sm)',
     marginBottom: '1px',
     marginTop: '4px',
@@ -1485,10 +1570,10 @@ export const styles = {
   actionDurationBadge: {
     fontSize: '10px',
     color: 'var(--ds-text-secondary)',
-    backgroundColor: 'var(--ds-bg-raised)',
-    borderWidth: '1px',
-    borderStyle: 'solid',
-    borderColor: 'var(--ds-border-l1)',
+    backgroundColor: 'var(--bg-overlay-l1)',
+    borderWidth: '0',
+    borderStyle: 'none',
+    borderColor: 'transparent',
     padding: '2px 6px',
     borderRadius: 'var(--radius-sm)',
     fontWeight: 500,
@@ -1501,8 +1586,8 @@ export const styles = {
     fontFamily: 'var(--font-mono)',
     padding: '1px 6px',
     borderRadius: 'var(--radius-sm)',
-    backgroundColor: 'var(--ds-bg-raised)',
-    border: '1px solid var(--ds-border-l1)',
+    backgroundColor: 'var(--bg-overlay-l1)',
+    border: 'none',
     flexShrink: 0,
     lineHeight: 1.4,
   },
@@ -1723,14 +1808,14 @@ export const styles = {
     display: 'block',
     height: '9px',
     borderRadius: 'var(--radius-sm)',
-    backgroundColor: 'var(--ds-bg-overlay-l1)',
+    backgroundColor: 'var(--bg-overlay-l1)',
     animation: 'streamingSkeleton 1.2s ease-in-out infinite'
   },
 
   // 分隔线
   subtleDivider: {
     height: '1px',
-    backgroundColor: 'var(--ds-border-l1)',
+    backgroundColor: 'var(--border-subtle)',
     margin: '4px 0'
   },
 

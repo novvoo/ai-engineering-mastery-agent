@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   buildMessageDisplayGraph,
+  buildExecutionOverviewProjection,
   buildMessageViewProjection,
   computeNextCollapsedGroups,
   messageMatchesViewQuery,
@@ -68,6 +69,68 @@ describe('message display graph', () => {
     expect(graph[0].primaryMessages.map((message) => message.id)).toEqual(['user-1', 'answer-1']);
     expect(graph[0].toolCollections).toHaveLength(1);
     expect(graph[0].status).toBe('completed');
+  });
+
+  test('projects execution overview content from the same conversation turn', () => {
+    const overview = buildExecutionOverviewProjection([
+      { id: 'user-1', type: 'user', turnId: 'run-1', content: '检查并修复登录流程' },
+      {
+        id: 'tool-1',
+        type: 'tool',
+        turnId: 'run-1',
+        toolCallId: 'call-1',
+        toolName: 'read_file',
+        args: { path: 'src/login.js' },
+      },
+      {
+        id: 'tool-result-1',
+        type: 'tool_result',
+        turnId: 'run-1',
+        toolCallId: 'call-1',
+        toolName: 'read_file',
+        result: 'contents',
+      },
+      { id: 'answer-1', type: 'result', turnId: 'run-1', content: '登录流程已经修复' },
+    ]);
+
+    expect(overview.turns).toHaveLength(1);
+    expect(overview.activeTurnId).toBe('turn:run-1');
+    expect(overview.turns[0]).toMatchObject({
+      id: 'turn:run-1',
+      status: 'completed',
+      requestPreview: '检查并修复登录流程',
+      responsePreview: '登录流程已经修复',
+      toolProgress: {
+        total: 1,
+        completed: 1,
+        running: 0,
+        failed: 0,
+      },
+    });
+    expect(overview.turns[0].toolCollections[0].messages.map((message) => message.id)).toEqual([
+      'tool-1',
+      'tool-result-1',
+    ]);
+    expect(overview.totals).toEqual({ running: 0, completed: 1, failed: 0 });
+  });
+
+  test('keeps the current execution step attached to a running request', () => {
+    const overview = buildExecutionOverviewProjection([
+      { id: 'user-1', type: 'user', turnId: 'run-1', content: '运行测试' },
+      {
+        id: 'tool-1',
+        type: 'tool',
+        turnId: 'run-1',
+        toolCallId: 'call-1',
+        toolName: 'shell',
+        statusText: '正在执行单元测试',
+      },
+    ]);
+
+    expect(overview.turns[0].status).toBe('running');
+    expect(overview.turns[0].currentStep).toBe('正在执行单元测试');
+    expect(overview.turns[0].toolProgress.running).toBe(1);
+    expect(overview.totals.running).toBe(1);
   });
 
   test('routes a late correlated tool result back to its original turn', () => {

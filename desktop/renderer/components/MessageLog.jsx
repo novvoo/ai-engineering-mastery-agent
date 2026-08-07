@@ -16,6 +16,7 @@ import { MarkdownMessageContent } from './MarkdownMessageContent.jsx';
 import { styles } from './message-log/styles/MessageLog.styles.js';
 import { useIPC } from '../hooks/useIPC.js';
 import { RuntimeDetailsPanel } from './message-log/RuntimeDetailsPanel.jsx';
+import SubagentStatusPanel from './message-log/SubagentStatusPanel.jsx';
 import { Icon } from './ui/index.js';
 import { t } from '../i18n.js';
 
@@ -101,7 +102,7 @@ import { buildMessageTree, flattenTree } from '../hooks/useRuntime.js';
  * @param {Function} props.onClear - 清空消息回调
  * @param {Function} props.onAskAgent - 将错误消息交给 Agent 处理
  */
-function MessageLog({ messages, status, workingDirectory, fileServerUrl, onClear, onAskAgent, onStarterPrompt, starterPromptsEnabled = true }) {
+function MessageLog({ messages, subagents, status, workingDirectory, fileServerUrl, onClear, onAskAgent, onStarterPrompt, starterPromptsEnabled = true, toolbarSlot, taskInfo }) {
   const ipc = useIPC();
 
   // Tree utilities available but rendering integration deferred
@@ -1712,6 +1713,10 @@ function MessageLog({ messages, status, workingDirectory, fileServerUrl, onClear
             {!requestMessage && responseMessages.length === 0 && group.primaryMessage && (
               renderMessage(group.primaryMessage, `${group.id}_primary`)
             )}
+            {/* 活跃 turn 末尾：subagent 批次进度面板 */}
+            {isActiveGroup && isPinnedOpenTurn && subagents && Object.keys(subagents).length > 0 && (
+              <SubagentStatusPanel subagents={subagents} />
+            )}
           </div>
         )}
       </div>
@@ -1772,129 +1777,164 @@ function MessageLog({ messages, status, workingDirectory, fileServerUrl, onClear
     );
   }
   
+  // 工具栏 JSX：标题 + 5 按钮（搜索/视图切换/过滤/自动滚动/清空）
+  // 由 toolbarSlot 决定渲染位置：floating（消息列表右上角浮窗）或 external（父组件决定）
+  const toolbarElement = (
+    <div style={styles.headerButtons}>
+      {/* 搜索 */}
+      <div style={styles.searchContainer}>
+        {searchExpanded && (
+          <input
+            ref={searchRef}
+            style={{
+              ...styles.searchInput,
+              ...styles.searchInputExpanded
+            }}
+            value={searchQuery}
+            onChange={handleSearch}
+            placeholder={t('msg.search_messages')}
+            onBlur={() => {
+              if (!searchQuery) {setSearchExpanded(false);}
+            }}
+          />
+        )}
+        <button
+          style={styles.button}
+          onClick={handleSearchToggle}
+          title={t('msg.search_hint')}
+          aria-label={t('msg.search_hint')}
+        >
+          <Icon name="search" size={14} />
+        </button>
+      </div>
+
+      {/* 视图切换 */}
+      <div style={styles.viewToggle}>
+        <button
+          style={{
+            ...styles.viewButton,
+            ...(viewMode === 'list' ? styles.viewButtonActive : {})
+          }}
+          onClick={() => handleViewChange('list')}
+          title={t('msg.list_view')}
+          aria-label={t('msg.list_view')}
+        >
+          <Icon name="list" size={14} />
+        </button>
+        <button
+          style={{
+            ...styles.viewButton,
+            ...(viewMode === 'timeline' ? styles.viewButtonActive : {})
+          }}
+          onClick={() => handleViewChange('timeline')}
+          title={t('msg.timeline_view')}
+          aria-label={t('msg.timeline_view')}
+        >
+          <Icon name="timeline" size={14} />
+        </button>
+      </div>
+
+      {/* 过滤按钮 */}
+      <select
+        style={{
+          ...styles.button,
+          padding: '4px 8px',
+          cursor: 'pointer'
+        }}
+        value={filter}
+        onChange={(e) => handleFilterChange(e.target.value)}
+      >
+        <option value="all">{t('ui.root')}</option>
+        <option value="user">{t('msg.user')}</option>
+        <option value="info">{t('msg.info')}</option>
+        <option value="success">{t('msg.success')}</option>
+        <option value="error">{t('msg.error')}</option>
+        <option value="tool">{t('msg.tool')}</option>
+        <option value="result">{t('msg.result')}</option>
+      </select>
+
+      {/* 自动滚动按钮 — 跟随模式/锁定模式 */}
+      <button
+        style={{
+          ...styles.button,
+          ...(autoScroll ? styles.buttonActive : {}),
+          ...(!autoScroll ? {
+            color: 'var(--ds-status-warning)',
+            borderWidth: '1px',
+            borderStyle: 'solid',
+            borderColor: 'var(--ds-status-warning)',
+            fontWeight: '500',
+          } : {})
+        }}
+        onClick={handleAutoScrollChange}
+        title={autoScroll ? t('status.follow_new') : t('status.locked')}
+      >
+        <Icon name={autoScroll ? 'pin' : 'lock'} size={14} />
+        {autoScroll ? t('status.follow') : t('status.locked_position')}
+      </button>
+
+      {/* 清空按钮 */}
+      <button
+        style={styles.button}
+        onClick={handleClear}
+        title={t('msg.clear_hint')}
+        aria-label={t('msg.clear_hint')}
+      >
+        <Icon name="trash" size={14} />
+      </button>
+    </div>
+  );
+
+  // 消息计数标签
+  const countLabel = (
+    <span style={{
+      fontSize: '10px',
+      color: 'var(--ds-text-tertiary)',
+      fontVariantNumeric: 'tabular-nums'
+    }}>
+      {messageView.matchingMessageCount}
+      {messageView.matchingMessageCount !== messageView.totalMessageCount
+        ? `/${messageView.totalMessageCount}`
+        : ''}
+    </span>
+  );
+
+  // 完整工具栏（标题+按钮），用于外部渲染（InspectorPanel header）
+  const externalToolbar = (
+    <div style={styles.toolbarExternal}>
+      <div style={styles.toolbarTitle}>
+        <span>{t('msg.message_details')}</span>
+        {countLabel}
+      </div>
+      {toolbarElement}
+    </div>
+  );
+
+  // 通过 effect 把 toolbar 元素传给父组件，避免 render 期间 setState 警告
+  useEffect(() => {
+    if (toolbarSlot) toolbarSlot(externalToolbar);
+  });
+
   return (
     <div style={styles.container}>
-      {/* 头部 */}
-      <div style={styles.header}>
-        <div style={styles.title}>
-          <span>{t('msg.message_details')}</span>
-          <span style={{
-            fontSize: '10px',
-            color: 'var(--ds-text-tertiary)',
-            fontVariantNumeric: 'tabular-nums'
-          }}>
-            {messageView.matchingMessageCount}
-            {messageView.matchingMessageCount !== messageView.totalMessageCount
-              ? `/${messageView.totalMessageCount}`
-              : ''}
-          </span>
+      {/* 工具栏：默认浮在消息列表右上角；toolbarSlot 提供时不在主栏渲染 */}
+      {!toolbarSlot && (
+        <div style={styles.floatingToolbar}>
+          {toolbarElement}
         </div>
-        
-        <div style={styles.headerButtons}>
-          {/* 搜索 */}
-          <div style={styles.searchContainer}>
-            {searchExpanded && (
-              <input
-                ref={searchRef}
-                style={{
-                  ...styles.searchInput,
-                  ...styles.searchInputExpanded
-                }}
-                value={searchQuery}
-                onChange={handleSearch}
-                placeholder={t('msg.search_messages')}
-                onBlur={() => {
-                  if (!searchQuery) {setSearchExpanded(false);}
-                }}
-              />
+      )}
+      {/* 任务标识 chip：下沉自原 ChatWorkspace 顶栏，轻量 inline 标签 */}
+      {taskInfo && (
+        <div style={styles.taskChipRow}>
+          <div style={styles.taskChip}>
+            <span style={styles.taskChipIcon}><Icon name="folder" size={13} /></span>
+            <span style={styles.taskChipTitle} title={taskInfo.fullPath}>{taskInfo.title}</span>
+            {typeof taskInfo.messageCount === 'number' && (
+              <span style={styles.taskChipCount}>{taskInfo.messageCount}</span>
             )}
-            <button
-              style={styles.button}
-              onClick={handleSearchToggle}
-              title={t('msg.search_hint')}
-              aria-label={t('msg.search_hint')}
-            >
-              <Icon name="search" size={14} />
-            </button>
           </div>
-          
-          {/* 视图切换 */}
-          <div style={styles.viewToggle}>
-            <button
-              style={{
-                ...styles.viewButton,
-                ...(viewMode === 'list' ? styles.viewButtonActive : {})
-              }}
-              onClick={() => handleViewChange('list')}
-              title={t('msg.list_view')}
-              aria-label={t('msg.list_view')}
-            >
-              <Icon name="list" size={14} />
-            </button>
-            <button
-              style={{
-                ...styles.viewButton,
-                ...(viewMode === 'timeline' ? styles.viewButtonActive : {})
-              }}
-              onClick={() => handleViewChange('timeline')}
-              title={t('msg.timeline_view')}
-              aria-label={t('msg.timeline_view')}
-            >
-              <Icon name="timeline" size={14} />
-            </button>
-          </div>
-          
-          {/* 过滤按钮 */}
-          <select
-            style={{
-              ...styles.button,
-              padding: '4px 8px',
-              cursor: 'pointer'
-            }}
-            value={filter}
-            onChange={(e) => handleFilterChange(e.target.value)}
-          >
-            <option value="all">{t('ui.root')}</option>
-            <option value="user">{t('msg.user')}</option>
-            <option value="info">{t('msg.info')}</option>
-            <option value="success">{t('msg.success')}</option>
-            <option value="error">{t('msg.error')}</option>
-            <option value="tool">{t('msg.tool')}</option>
-            <option value="result">{t('msg.result')}</option>
-          </select>
-          
-          {/* 自动滚动按钮 — 跟随模式/锁定模式 */}
-          <button
-            style={{
-              ...styles.button,
-              ...(autoScroll ? styles.buttonActive : {}),
-              ...(!autoScroll ? {
-                color: 'var(--ds-status-warning)',
-                borderWidth: '1px',
-                borderStyle: 'solid',
-                borderColor: 'var(--ds-status-warning)',
-                fontWeight: '500',
-              } : {})
-            }}
-            onClick={handleAutoScrollChange}
-            title={autoScroll ? t('status.follow_new') : t('status.locked')}
-          >
-            <Icon name={autoScroll ? 'pin' : 'lock'} size={14} />
-            {autoScroll ? t('status.follow') : t('status.locked_position')}
-          </button>
-          
-          {/* 清空按钮 */}
-          <button
-            style={styles.button}
-            onClick={handleClear}
-            title={t('msg.clear_hint')}
-            aria-label={t('msg.clear_hint')}
-          >
-            <Icon name="trash" size={14} />
-          </button>
         </div>
-      </div>
-      
+      )}
       {/* 消息列表 */}
       <div
         ref={listRef}

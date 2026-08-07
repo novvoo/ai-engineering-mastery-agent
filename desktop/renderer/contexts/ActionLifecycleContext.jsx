@@ -18,13 +18,12 @@ export function ActionLifecycleProvider({
   const executeActionWithFeedback = useCallback(
     async (actionId, asyncFn, feedbackConfig = {}) => {
       const result = await actionRegistry.executeAction(actionId, asyncFn);
-      const state = actionRegistry.getState(actionId);
 
-      if (state.status === UI_ACTION_STATUS.SUCCEEDED) {
+      if (result.success) {
         const message = feedbackConfig.successMessage || '操作成功';
         onFeedback?.({ tone: 'success', message });
-      } else if (state.status === UI_ACTION_STATUS.FAILED) {
-        const message = feedbackConfig.failureMessage || state.reason || '操作失败';
+      } else {
+        const message = feedbackConfig.failureMessage || result.error?.message || '操作失败';
         onFeedback?.({ tone: 'error', message });
       }
 

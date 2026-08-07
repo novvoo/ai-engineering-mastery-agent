@@ -39,7 +39,7 @@ const historyStyles = {
     alignItems: 'center',
     gap: 'var(--spacing-sm)',
     padding: 'var(--spacing-sm) var(--spacing-md)',
-    borderBottom: '1px solid var(--ds-border-l1)',
+    borderBottom: 'none',
     flexShrink: 0,
   },
   searchInput: {
@@ -47,7 +47,7 @@ const historyStyles = {
     height: '32px',
     padding: '0 var(--spacing-md)',
     borderRadius: 'var(--radius-md)',
-    border: '1px solid var(--ds-border-l1)',
+    border: 'none',
     backgroundColor: 'var(--ds-bg-secondary)',
     color: 'var(--ds-text-primary)',
     fontSize: 'var(--font-size-sm)',
@@ -55,14 +55,14 @@ const historyStyles = {
     transition: 'all var(--transition-fast)',
   },
   searchInputFocused: {
-    border: '1px solid var(--ds-brand)',
+    border: 'none',
     boxShadow: 'var(--focus-ring-soft)',
   },
   actionButton: {
     height: '32px',
     padding: '0 var(--spacing-sm)',
     borderRadius: 'var(--radius-md)',
-    border: '1px solid var(--ds-border-l1)',
+    border: 'none',
     backgroundColor: 'var(--ds-bg-secondary)',
     color: 'var(--ds-text-secondary)',
     cursor: 'pointer',
@@ -90,7 +90,7 @@ const historyStyles = {
     backgroundColor: 'var(--ds-bg-secondary)',
     cursor: 'pointer',
     transition: 'all var(--transition-fast)',
-    border: '1px solid transparent',
+    border: 'none',
     position: 'relative',
   },
   sessionItemHover: {
@@ -98,7 +98,7 @@ const historyStyles = {
   },
   sessionItemActive: {
     backgroundColor: 'var(--ds-brand-soft)',
-    border: '1px solid var(--ds-brand-border)',
+    border: 'none',
   },
   sessionItemHeader: {
     display: 'flex',
@@ -118,7 +118,7 @@ const historyStyles = {
     alignItems: 'center',
     gap: 'var(--spacing-sm)',
     padding: 'var(--spacing-sm) var(--spacing-md)',
-    borderBottom: '1px solid var(--ds-border-l1)',
+    borderBottom: 'none',
     backgroundColor: 'var(--ds-bg-secondary)',
     flexShrink: 0,
     fontSize: 'var(--font-size-sm)',
@@ -225,7 +225,7 @@ const historyStyles = {
     padding: '8px',
     marginTop: '8px',
     borderRadius: 'var(--radius-md)',
-    border: '1px solid var(--ds-border-l1)',
+    border: 'none',
     backgroundColor: 'var(--ds-bg-secondary)',
     color: 'var(--ds-text-tertiary)',
     cursor: 'pointer',
@@ -683,7 +683,7 @@ function PlanTab({ messages }) {
 
       {/* 帧计数 */}
       {allSnapshots.length > 1 && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)', padding: '3px var(--spacing-xs)', marginBottom: 'var(--spacing-sm)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--ds-border-l1)', background: 'var(--ds-bg-secondary)', fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--ds-text-secondary)', fontVariantNumeric: 'tabular-nums' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)', padding: '3px var(--spacing-xs)', marginBottom: 'var(--spacing-sm)', borderRadius: 'var(--radius-sm)', border: 'none', background: 'var(--ds-bg-secondary)', fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--ds-text-secondary)', fontVariantNumeric: 'tabular-nums' }}>
           <span>进度帧 {allSnapshots.length}</span>
           <span style={{ marginLeft: 'auto' }}>{latestFrame.timestamp ? new Date(latestFrame.timestamp).toLocaleTimeString() : ''}</span>
         </div>
@@ -759,7 +759,7 @@ const executionStyles = {
   summaryCard: {
     padding: '9px',
     borderRadius: 'var(--radius-md)',
-    border: '1px solid var(--border-subtle)',
+    border: 'none',
     background: 'var(--surface-raised)',
   },
   summaryLabel: {
@@ -785,7 +785,7 @@ const executionStyles = {
   activeCard: {
     padding: '12px',
     marginBottom: '14px',
-    border: '1px solid var(--primary-border)',
+    border: 'none',
     borderRadius: 'var(--radius-lg)',
     background: 'var(--primary-soft)',
   },
@@ -832,7 +832,7 @@ const executionStyles = {
   response: {
     marginTop: '9px',
     paddingTop: '9px',
-    borderTop: '1px solid var(--border-divider)',
+    borderTop: 'none',
     color: 'var(--text-muted)',
     fontSize: '11px',
     lineHeight: 1.5,
@@ -843,7 +843,7 @@ const executionStyles = {
   },
   turnCard: {
     padding: '10px',
-    border: '1px solid var(--border-subtle)',
+    border: 'none',
     borderRadius: 'var(--radius-md)',
     background: 'var(--surface-card)',
   },
@@ -1373,7 +1373,7 @@ const previewEmptyStyle = {
   padding: '18px',
   color: 'var(--text-muted)',
   fontSize: '13px',
-  border: '1px solid var(--border-color)',
+  border: 'none',
   borderRadius: '6px',
   backgroundColor: 'var(--surface-color)',
 };
@@ -1638,6 +1638,9 @@ export function InspectorPanel({
   onSwitchSession,
   onClose,
   onTabChange,
+  summaryPanelVisible,
+  renderControls,
+  messageToolbar,
 }) {
   return (
     <Panel
@@ -1663,39 +1666,78 @@ export function InspectorPanel({
         aria-valuenow={inspectorPanelWidth}
         tabIndex={0}
       />
-        <div style={styles.inspectorHeader}>
-          <div className="codex-inspector-heading">
-            {activeInspectorTab === 'activity' ? '执行概览' : '工作区信息'}
+        <div
+          style={{
+            ...styles.inspectorHeader,
+            flexDirection: 'column',
+            alignItems: 'stretch',
+            gap: '8px',
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '8px',
+              minHeight: '28px',
+            }}
+          >
+            {summaryPanelVisible && renderControls?.('sidebar')}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '2px',
+                marginLeft: 'auto',
+                flexShrink: 0,
+              }}
+            >
+              <Button
+                variant="icon"
+                size="sm"
+                onClick={onExpandToggle}
+                title={inspectorExpanded ? t('inspector.restore') : t('inspector.expand')}
+                ariaLabel={inspectorExpanded ? t('inspector.restore') : t('inspector.expand')}
+              >
+                <Icon name={inspectorExpanded ? 'restore' : 'expand'} size={15} />
+              </Button>
+              <Button
+                variant="icon"
+                size="sm"
+                onClick={onClose}
+                title={t('inspector.close_panel')}
+                ariaLabel={t('inspector.close_panel')}
+                style={{ marginLeft: '2px' }}
+              >
+                <Icon name="close" size={14} />
+              </Button>
+            </div>
           </div>
           <TabGroup activeTab={activeInspectorTab} onChange={onTabChange}>
             <TabItem id="activity">执行</TabItem>
+            <TabItem id="plan">计划</TabItem>
             <TabItem id="history">会话</TabItem>
             <TabItem id="preview">预览</TabItem>
           </TabGroup>
-          <Button
-            variant="icon"
-            size="sm"
-            onClick={onExpandToggle}
-            title={inspectorExpanded ? t('inspector.restore') : t('inspector.expand')}
-            ariaLabel={inspectorExpanded ? t('inspector.restore') : t('inspector.expand')}
-          >
-            <Icon name={inspectorExpanded ? 'restore' : 'expand'} size={15} />
-          </Button>
-          <Button
-            variant="icon"
-            size="sm"
-            onClick={onClose}
-            title={t('inspector.close_panel')}
-            ariaLabel={t('inspector.close_panel')}
-            style={{ marginLeft: '2px' }}
-          >
-            <Icon name="close" size={14} />
-          </Button>
+          {/* 第 3 行：来自 MessageLog 的工具栏（搜索/视图/过滤/滚动/清空） */}
+          {messageToolbar && (
+            <div style={{
+              paddingTop: '4px',
+              borderTop: 'none',
+            }}>
+              {messageToolbar}
+            </div>
+          )}
         </div>
 
       <div style={styles.inspectorTabContent}>
       {activeInspectorTab === 'activity' && (
         <ExecutionTab messages={messages} />
+      )}
+
+      {activeInspectorTab === 'plan' && (
+        <PlanTab messages={messages} />
       )}
 
       {activeInspectorTab === 'history' && (

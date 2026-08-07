@@ -38,8 +38,8 @@ export function SidebarPanel({
   const { executeActionWithFeedback } = useActionLifecycleContext();
 
   const newTaskState = useActionState('session.new');
-  const clearSessionsState = useActionState('session.clear');
-  const selectSessionState = useActionState('session.select');
+  const clearSessionsState = useActionState('session.clear-history');
+  const selectSessionState = useActionState('session.switch');
   const deleteSessionState = useActionState('session.delete');
 
   const handleNewTask = useCallback(() => {
@@ -52,7 +52,7 @@ export function SidebarPanel({
 
   const handleClearSessions = useCallback(() => {
     executeActionWithFeedback(
-      'session.clear',
+      'session.clear-history',
       async () => { onClearSessions?.(); },
       { successMessage: '已清空所有任务', failureMessage: '清空任务失败' },
     );
@@ -60,7 +60,7 @@ export function SidebarPanel({
 
   const handleSelectSession = useCallback((id) => {
     executeActionWithFeedback(
-      'session.select',
+      'session.switch',
       async () => { onSelectSession?.(id); },
       { successMessage: '', failureMessage: '切换任务失败' },
     );
@@ -193,7 +193,7 @@ export function SidebarPanel({
                 onClick={handleClearSessions}
                 title="清空所有任务"
                 disabled={clearSessionsState.status === UI_ACTION_STATUS.RUNNING}
-                data-action-id="session.clear"
+                data-action-id="session.clear-history"
                 aria-busy={clearSessionsState.status === UI_ACTION_STATUS.RUNNING || undefined}
               >
                 {clearSessionsState.status === UI_ACTION_STATUS.RUNNING ? '...' : '清空'}
@@ -215,7 +215,7 @@ export function SidebarPanel({
                     onClick={() => handleSelectSession(id)}
                     title={sessionTitle(session)}
                     disabled={selectSessionState.status === UI_ACTION_STATUS.RUNNING}
-                    data-action-id="session.select"
+                    data-action-id="session.switch"
                     aria-busy={selectSessionState.status === UI_ACTION_STATUS.RUNNING && selectSessionState.id === id || undefined}
                   >
                     {sessionTitle(session)}

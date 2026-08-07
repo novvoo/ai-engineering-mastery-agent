@@ -348,12 +348,20 @@ export class OmpAdapter {
           this.#lastAssistantText += update.delta;
           eventBus.emit(RuntimeEvent.AGENT_TEXT_DELTA, {
             text: update.delta,
+            frameMode: 'delta',
+            contentIndex: update.contentIndex,
+            deltaId: update.deltaId || update.id,
+            sequence: update.sequence ?? msg.sequence,
             timestamp,
           });
         }
         if (update?.type === 'thinking_delta' && update.delta) {
           eventBus.emit(RuntimeEvent.AGENT_REASONING_DELTA, {
             text: update.delta,
+            frameMode: 'delta',
+            contentIndex: update.contentIndex,
+            deltaId: update.deltaId || update.id,
+            sequence: update.sequence ?? msg.sequence,
             timestamp,
           });
         }
