@@ -538,7 +538,8 @@
 }
 
 .mastery-workbench {
-  padding: 0 !important;
+  /* 顶部留出 DragRegion（40px 拖拽带）避让空间，防止按钮被吞掉点击 */
+  padding: 40px 0 0 !important;
   gap: 0 !important;
   border-radius: 0 !important;
   background: var(--bg-base-default);
