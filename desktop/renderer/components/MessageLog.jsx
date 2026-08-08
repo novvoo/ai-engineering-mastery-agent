@@ -1663,16 +1663,36 @@ function MessageLog({ messages, subagents, status, workingDirectory, fileServerU
           }}>
             {MsgIcons.folder}
           </span>
-          <span style={{
-            fontWeight: 600,
-            fontSize: '11px',
-            color: 'var(--text-muted)',
-            textTransform: 'uppercase',
-            letterSpacing: '0.03em',
-            flexShrink: 0,
-          }}>
-            {summaryLabel}
-          </span>
+          {(() => {
+            const isActive = group.status === 'running' || group.status === 'waiting';
+            const pillBg = isActive
+              ? 'var(--primary-faint)'
+              : group.status === 'failed' || group.status === 'stopped'
+                ? 'rgba(var(--error-color-rgb, 235, 87, 87), 0.12)'
+                : 'var(--surface-hover)';
+            const pillColor = isActive
+              ? 'var(--primary-color)'
+              : group.status === 'failed' || group.status === 'stopped'
+                ? 'var(--error-color)'
+                : 'var(--text-muted)';
+            const pillText = detailCount > 0
+              ? `${summaryLabel} · ${detailLabel}`
+              : summaryLabel;
+            return (
+              <span style={{
+                flexShrink: 0,
+                padding: '1px 8px',
+                borderRadius: '999px',
+                backgroundColor: pillBg,
+                color: pillColor,
+                fontSize: '10px',
+                fontWeight: 600,
+                letterSpacing: '0.01em',
+              }}>
+                {pillText}
+              </span>
+            );
+          })()}
           {isCollapsed && (
             <span style={{
               flex: 1,
@@ -1684,19 +1704,6 @@ function MessageLog({ messages, subagents, status, workingDirectory, fileServerU
               opacity: 0.8,
             }}>
               {preview}
-            </span>
-          )}
-          {detailCount > 0 && (
-            <span style={{
-              flexShrink: 0,
-              padding: '1px 6px',
-              borderRadius: '999px',
-              backgroundColor: 'var(--primary-faint)',
-              color: 'var(--primary-color)',
-              fontSize: '10px',
-              fontWeight: 600,
-            }}>
-              {detailLabel}
             </span>
           )}
         </button>

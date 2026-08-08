@@ -78,6 +78,12 @@ export class MainProcessIPCAdapter extends IPCAdapterBase {
     this.startHeartbeat();
 
     if (this.#eventBus) {
+      // 幂等守卫：重复调用 initialize() 时先取消旧订阅，避免通配符订阅泄漏
+      // 导致每个事件被 broadcast N 次（流式 delta 重复显示的根因）
+      if (this.#eventBusUnsub) {
+        this.#eventBusUnsub();
+        this.#eventBusUnsub = null;
+      }
       this.#eventBusUnsub = this.#eventBus.subscribe('*', (eventData) => {
         const eventName = eventData?.type;
         if (!eventName) {
