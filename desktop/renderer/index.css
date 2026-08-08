@@ -545,6 +545,21 @@
   background: var(--bg-base-default);
 }
 
+/* WorkbenchControls 不在主栏（侧边栏展开时），消息区域占据顶部 */
+.mastery-workbench[data-controls-location="sidebar"] {
+  padding-top: 0 !important;
+}
+
+/* 全屏时无 DragRegion，所有区域占据顶部 */
+.mastery-shell[data-fullscreen="true"] .mastery-workbench,
+.mastery-shell[data-fullscreen="true"] .codex-task-sidebar {
+  padding-top: 0 !important;
+}
+
+.mastery-shell[data-fullscreen="true"] .mastery-inspector-overlay {
+  top: 36px;
+}
+
 .mastery-activity-rail {
   display: none !important;
   width: 0 !important;

@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { useIPC } from '../../hooks/useIPC.js';
 import { TERMINAL_HEIGHT, clampTerminalHeight } from '../../app/layout/layout-state.js';
 
 const promptForDirectory = (workingDirectory) => {
@@ -186,8 +185,8 @@ export function BottomTerminalPanel({
   onHeightChange,
   onOpenChange,
   capability,
+  ipc,
 }) {
-  const ipc = useIPC();
   const [lines, setLines] = useState(INITIAL_LINES);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
@@ -498,7 +497,7 @@ export function BottomTerminalPanel({
               aria-label="Terminal command"
               autoComplete="off"
               spellCheck={false}
-              placeholder={!capabilityAvailable ? '策略或能力状态禁止终端执行' : ipc.isConnected ? '' : '终端连接不可用'}
+              placeholder={!ipc.isConnected ? '终端连接不可用' : !capabilityAvailable ? '策略或能力状态禁止终端执行' : ''}
             />
             {completionOptions.length > 0 && (
               <div style={styles.completionPopup}>

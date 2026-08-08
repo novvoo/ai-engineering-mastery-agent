@@ -3,7 +3,8 @@ import { Button } from '../ui/index.js';
 import { t } from '../../i18n.js';
 import { DRAG_REGION, CAPSULE_SECONDARY, CAPSULE_CHROMELESS, CAPSULE_POSITIONS } from './styles/capsule-styles.js';
 
-function DragRegion() {
+function DragRegion({ isFullScreen }) {
+  if (isFullScreen) return null;
   return <div style={DRAG_REGION} />;
 }
 
@@ -76,7 +77,7 @@ export function ChromeCapsules({
   const isMac = platformInfo?.isMac === true;
   return (
     <>
-      <DragRegion />
+      <DragRegion isFullScreen={windowState?.isFullScreen} />
       <StatsCapsule toolCount={toolCount} stats={stats} appVersion={appVersion} />
       {platformKnown && (
         <WindowControls

@@ -57,7 +57,7 @@ export const styles = {
   taskChipRow: {
     display: 'flex',
     alignItems: 'center',
-    padding: '2px 4px 6px',
+    padding: '12px 4px 8px',
     flexShrink: 0,
   },
   taskChip: {

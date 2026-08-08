@@ -191,6 +191,7 @@ function MessageLog({ messages, subagents, status, workingDirectory, fileServerU
   // autoScroll = true 时跟随新内容滚动到底部；false 时锁定当前位置
   const [autoScroll, setAutoScroll] = useState(true);
   const autoScrollRef = useRef(true);  // 用 ref 避免在滚动事件处理器中读到旧状态
+  const externalToolbarRef = useRef(null);  // 最新 externalToolbar，供条件 return 前的 effect 读取
 
   // 同步 ref 和 state
   useEffect(() => {
@@ -1732,6 +1733,12 @@ function MessageLog({ messages, subagents, status, workingDirectory, fileServerU
     </div>
   );
   
+  // 此 effect 必须在任何条件 return 之前调用，保证每次渲染 hooks 数量一致
+  useEffect(() => {
+    if (!toolbarSlot) return;
+    toolbarSlot(messages.length === 0 ? null : externalToolbarRef.current);
+  });
+
   // 渲染空状态
   if (messages.length === 0) {
     return (
@@ -1910,10 +1917,8 @@ function MessageLog({ messages, subagents, status, workingDirectory, fileServerU
     </div>
   );
 
-  // 通过 effect 把 toolbar 元素传给父组件，避免 render 期间 setState 警告
-  useEffect(() => {
-    if (toolbarSlot) toolbarSlot(externalToolbar);
-  });
+  // 把最新 toolbar 元素写入 ref，供上方 effect 读取
+  externalToolbarRef.current = externalToolbar;
 
   return (
     <div style={styles.container}>

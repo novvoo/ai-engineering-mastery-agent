@@ -506,7 +506,7 @@ function App() {
       contentCount={runtime.messages.length}
       onFeedback={setActionFeedback}
     >
-      <div className="mastery-shell" style={styles.container}>
+      <div className="mastery-shell" data-fullscreen={windowState?.isFullScreen ? 'true' : 'false'} style={styles.container}>
       <ChromeCapsules
         platformInfo={platformInfo}
         windowState={windowState}
@@ -524,6 +524,7 @@ function App() {
       <div
         className="mastery-workbench"
         data-layout-mode={workbenchLayoutMode}
+        data-controls-location={summaryPanelVisible ? 'sidebar' : 'default'}
         style={{
           ...styles.mainContentWrapper,
           '--mastery-inspector-width': `${inspectorPanelWidth}px`,
@@ -635,6 +636,7 @@ function App() {
               onHeightChange={setTerminalPanelHeight}
               onOpenChange={handleTerminalOpenChange}
               capability={capabilities.graph.ui.terminal}
+              ipc={ipc}
             />
           )}
         </div>

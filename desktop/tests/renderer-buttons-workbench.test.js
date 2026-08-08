@@ -11,10 +11,10 @@
  * asserted (spy invoked with expected args / DOM state changed / disabled
  * buttons leave handlers untouched).
  *
- * No window.electronAPI stub is needed: BottomTerminalPanel's useIPC() never
- * connects on mount (it only exposes invoke/etc.), FileWorkbench's LSP effect
- * degrades to "no LSP" when window.electronAPI is undefined, and the other
- * three components never touch it.
+ * No window.electronAPI stub is needed: BottomTerminalPanel receives ipc as a
+ * prop (mock with isConnected:true), FileWorkbench's LSP effect degrades to
+ * "no LSP" when window.electronAPI is undefined, and the other components
+ * never touch it.
  */
 import { describe, test, expect } from 'bun:test';
 import React from 'react';
@@ -304,6 +304,10 @@ describe('FileWorkbench', () => {
  * ══════════════════════════════════════════════════════════════════════════ */
 
 describe('BottomTerminalPanel', () => {
+  const mockIpc = {
+    isConnected: true,
+    invoke: async () => ({ stdout: '', stderr: '' }),
+  };
   const renderPanel = (opts = {}) => {
     const callbacks = {
       onActiveTabChange: createSpy('onActiveTabChange'),
@@ -319,6 +323,7 @@ describe('BottomTerminalPanel', () => {
         height={200}
         workingDirectory="/Users/me/mastery"
         capability={undefined}
+        ipc={opts.ipc ?? mockIpc}
         {...callbacks}
       />
     );
