@@ -291,6 +291,7 @@ describe('Desktop IPC Initialization Order', () => {
       const core = createTestCore(createDesktopCore, { workingDirectory: '/tmp', debug: false });
       await core.initialize();
       const adapter = core.attachIPCAdapter(mockIpcMain);
+      await adapter.initialize();
       let broadcastCount = 0;
       adapter.broadcast = (name, data) => {
         broadcastCount++;
@@ -301,9 +302,9 @@ describe('Desktop IPC Initialization Order', () => {
       if (broadcastCount === 0) {
         throw new Error('Expected at least 1 broadcast, got 0 (event forwarding broken)');
       }
-      if (broadcastCount > 4) {
+      if (broadcastCount > 1) {
         throw new Error(
-          'Expected exactly 1 broadcast, got ' + broadcastCount + ' (possible state cascade)',
+          'Expected exactly 1 broadcast, got ' + broadcastCount + ' (event duplicated)',
         );
       }
 

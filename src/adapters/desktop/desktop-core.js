@@ -167,9 +167,8 @@ export class DesktopCore {
         if (this.#eventBuffer.length > DESKTOP_ARCHITECTURE_LIMITS.eventBufferSize) {
           this.#eventBuffer.shift();
         }
-        if (this.#ipcAdapter) {
-          this.#ipcAdapter.broadcast(event, data);
-        }
+        // IPC 广播由 main-process-adapter 的通配符订阅统一负责，
+        // 此处不再重复调用 broadcast，否则每个事件会被发送两次。
       });
       this.#subscriptions.push(unsub);
     }
